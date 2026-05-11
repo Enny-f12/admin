@@ -1,0 +1,309 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+/* ============================================================
+   ADMIN DESIGN SYSTEM
+   ============================================================ */
+:root {
+  /* ── Brand (inherited from marketing) ── */
+  --color-primary:         #E10B1C;
+  --color-primary-hover:   #c40917;
+  --color-secondary:       #FCD063;
+  --color-secondary-hover: #e8b94a;
+
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error:   #ef4444;
+  --color-info:    #3b82f6;
+
+  /* ── Typography — Figtree for everything in admin ── */
+  --font-sans: 'Figtree', sans-serif;
+
+  /* ── Spacing ── */
+  --sidebar-width:  240px;
+  --navbar-height:  64px;
+
+  --transition-theme: background-color 0.3s ease, color 0.3s ease,
+                      border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* ============================================================
+   LIGHT THEME
+   ============================================================ */
+:root,
+[data-theme="light"] {
+  --color-bg:             #F7F5F0;
+  --color-bg-soft:        #EFECE4;
+  --color-bg-card:        #FFFFFF;
+  --color-bg-input:       #FFFFFF;
+  --color-bg-hover:       #FFF5D6;
+  --color-bg-sidebar:     #1C1C1E;
+
+  --color-text:           #1A1A1A;
+  --color-text-secondary: #6B6B6B;
+  --color-text-muted:     #A0A0A0;
+  --color-heading:        #111111;
+
+  --color-border:         #E4E0D8;
+  --color-border-focus:   var(--color-primary);
+  --color-shadow:         rgba(0,0,0,0.06);
+
+  /* Sidebar stays dark in both themes */
+  --color-sidebar-bg:          #181818;
+  --color-sidebar-border:      rgba(255,255,255,0.06);
+  --color-sidebar-text:        rgba(255,255,255,0.55);
+  --color-sidebar-text-hover:  rgba(255,255,255,0.9);
+  --color-sidebar-hover-bg:    rgba(255,255,255,0.06);
+  --color-sidebar-active-bg:   rgba(225, 11, 28, 0.15);
+  --color-sidebar-active-text: #E10B1C;
+}
+
+/* ============================================================
+   DARK THEME
+   ============================================================ */
+[data-theme="dark"] {
+  --color-bg:             #141210;
+  --color-bg-soft:        #1a1714;
+  --color-bg-card:        #1f1c18;
+  --color-bg-input:       #2a2620;
+  --color-bg-hover:       #2a2620;
+
+  --color-text:           #E8E4DC;
+  --color-text-secondary: #9A9690;
+  --color-text-muted:     #605C58;
+  --color-heading:        #F5F0E8;
+
+  --color-border:         #2e2a24;
+  --color-border-focus:   var(--color-primary);
+  --color-shadow:         rgba(0,0,0,0.40);
+
+  --color-sidebar-bg:          #0e0c0a;
+  --color-sidebar-border:      rgba(255,255,255,0.05);
+  --color-sidebar-text:        rgba(255,255,255,0.45);
+  --color-sidebar-text-hover:  rgba(255,255,255,0.85);
+  --color-sidebar-hover-bg:    rgba(255,255,255,0.05);
+  --color-sidebar-active-bg:   rgba(225, 11, 28, 0.18);
+  --color-sidebar-active-text: #f4404e;
+}
+
+/* ============================================================
+   TAILWIND BRIDGE
+   ============================================================ */
+@theme inline {
+  --font-sans:     'Figtree', sans-serif;
+  --color-primary: var(--color-primary);
+  --color-border:  var(--color-border);
+}
+
+/* ============================================================
+   BASE
+   ============================================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+body {
+  background:  var(--color-bg);
+  color:       var(--color-text);
+  font-family: var(--font-sans);
+  font-size:   0.9rem;
+  font-weight: 400;
+  line-height: 1.6;
+  transition:  var(--transition-theme);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-sans);
+  color:       var(--color-heading);
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+/* ============================================================
+   LAYOUT SHELL
+   ============================================================ */
+.main-wrapper {
+  margin-left: var(--sidebar-width);
+  min-height: 100vh;
+}
+
+.main-content {
+  padding: calc(var(--navbar-height) + 28px) 28px 40px;
+}
+
+/* ============================================================
+   SCROLLBAR
+   ============================================================ */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* ============================================================
+   REUSABLE COMPONENTS
+   ============================================================ */
+
+/* Card */
+.card {
+  background:    var(--color-bg-card);
+  border:        1px solid var(--color-border);
+  border-radius: 12px;
+  padding:       20px;
+  box-shadow:    0 1px 4px var(--color-shadow);
+}
+
+/* Stat card */
+.stat-card {
+  background:    var(--color-bg-card);
+  border:        1px solid var(--color-border);
+  border-radius: 12px;
+  padding:       20px;
+  display:       flex;
+  flex-direction: column;
+  gap:           6px;
+  box-shadow:    0 1px 4px var(--color-shadow);
+}
+
+.stat-label {
+  font-size:      0.7rem;
+  color:          var(--color-text-muted);
+  font-weight:    600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.stat-value {
+  font-size:      1.75rem;
+  font-weight:    800;
+  color:          var(--color-heading);
+  letter-spacing: -0.5px;
+}
+
+.stat-change       { font-size: 0.75rem; color: var(--color-success); }
+.stat-change.down  { color: var(--color-error); }
+
+/* Badge */
+.badge {
+  display:        inline-flex;
+  align-items:    center;
+  padding:        3px 8px;
+  border-radius:  20px;
+  font-size:      0.7rem;
+  font-weight:    600;
+}
+
+.badge-red    { background: rgba(225,11,28,0.1);   color: #E10B1C; }
+.badge-gold   { background: rgba(252,208,99,0.2);  color: #a07a00; }
+.badge-green  { background: rgba(34,197,94,0.12);  color: #16a34a; }
+.badge-yellow { background: rgba(245,158,11,0.12); color: #b45309; }
+.badge-blue   { background: rgba(59,130,246,0.12); color: #2563eb; }
+.badge-gray   { background: var(--color-bg-soft);  color: var(--color-text-muted); }
+
+/* Button */
+.btn {
+  display:     inline-flex;
+  align-items: center;
+  gap:         6px;
+  padding:     8px 16px;
+  border-radius: 8px;
+  font-family: var(--font-sans);
+  font-size:   0.825rem;
+  font-weight: 600;
+  cursor:      pointer;
+  transition:  all 0.15s ease;
+  border:      none;
+  text-decoration: none;
+}
+
+.btn-primary {
+  background: var(--color-primary);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--color-primary-hover); }
+
+.btn-secondary {
+  background: var(--color-secondary);
+  color: #1A1A1A;
+}
+.btn-secondary:hover { background: var(--color-secondary-hover); }
+
+.btn-ghost {
+  background: var(--color-bg-soft);
+  color:      var(--color-text-secondary);
+  border:     1px solid var(--color-border);
+}
+.btn-ghost:hover {
+  background: var(--color-bg-hover);
+  color:      var(--color-text);
+}
+
+/* Table */
+.table-wrapper { overflow-x: auto; }
+
+table { width: 100%; border-collapse: collapse; }
+
+thead th {
+  font-size:      0.7rem;
+  font-weight:    600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color:          var(--color-text-muted);
+  padding:        10px 16px;
+  border-bottom:  1px solid var(--color-border);
+  text-align:     left;
+}
+
+tbody td {
+  padding:       13px 16px;
+  font-size:     0.85rem;
+  color:         var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+tbody tr:last-child td { border-bottom: none; }
+
+tbody tr:hover td {
+  background: var(--color-bg-soft);
+  color:      var(--color-text);
+}
+
+/* Section label */
+.section-label {
+  color:          var(--color-secondary);
+  font-size:      0.7rem;
+  font-weight:    600;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+}
+
+/* Input */
+.input {
+  width:         100%;
+  background:    var(--color-bg-input);
+  border:        1px solid var(--color-border);
+  border-radius: 8px;
+  padding:       9px 12px;
+  font-family:   var(--font-sans);
+  font-size:     0.875rem;
+  color:         var(--color-text);
+  outline:       none;
+  transition:    border-color 0.15s;
+}
+.input:focus { border-color: var(--color-border-focus); }
+
+/* No scrollbar util */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
