@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Figtree } from 'next/font/google';
 
 import './globals.css';
+import { Providers } from './providers';
 
 const figtree = Figtree({
   subsets: ['latin'],
@@ -44,12 +45,11 @@ export default function RootLayout({
   return (
     <html lang="en" data-theme="light" className={`${figtree.variable} h-full antialiased`}>
       <body className="min-h-full">
-       
-          
+        <Providers>
           <main className="main-content">
             {children}
           </main>
-       
+        </Providers>
       </body>
     </html>
   );
