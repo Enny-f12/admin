@@ -31,7 +31,7 @@ const SLIDES = [
 const BRANCHES = [
   "Lekki Phase 1 — Lagos",
   "Lekki Phase 2 — Lagos",
-  "Maitama — Abuja", 
+  "Maitama — Abuja",
 ];
 
 type LoginFormValues = {
@@ -90,6 +90,7 @@ export default function LoginPage() {
                 src={slide.src}
                 alt={slide.label}
                 fill
+               
                 className="object-cover"
                 priority={i === 0}
               />
@@ -105,26 +106,27 @@ export default function LoginPage() {
 
           {/* Brand badge */}
           <div className="absolute left-6 top-6 z-20">
-             
+
             {/* Replace /logo.png with your actual logo once ready */}
             <Image
               src="/logo/Logo.png"
               alt="Foodies Hot & Spicy logo"
               width={80}
               height={22}
+              style={{ height: "auto" }}
               className="object-contain"
               priority
             />
-          
+
           </div>
 
-         
+
         </div>
       </div>
 
       {/* ── Right: login form ── */}
       <div
-        className="flex w-full flex-col items-center justify-center px-8 lg:w-1/2"
+        className="flex w-full flex-col items-center justify-center  px-8 lg:w-1/2"
         style={{ background: "#fff" }}
       >
         <div className="w-full max-w-sm flex flex-col gap-8">
