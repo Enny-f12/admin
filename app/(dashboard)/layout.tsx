@@ -24,7 +24,7 @@ import {
 const NAV_ITEMS = [
   { label: "Dashboard",        href: "/dashboard",               icon: LayoutDashboard },
   { label: "Orders",           href: "/dashboard/orders",        icon: ShoppingBag },
-  { label: "Menu",             href: "/dashboard/menu",          icon: UtensilsCrossed },
+  { label: "Menu",             href: "/menu",          icon: UtensilsCrossed },
   { label: "Reservations",     href: "/dashboard/reservations",  icon: CalendarDays },
   { label: "Delivery",         href: "/dashboard/delivery",      icon: Bike },
   { label: "Inventory",        href: "/dashboard/inventory",     icon: Package },
