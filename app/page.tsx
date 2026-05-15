@@ -1,5 +1,12 @@
-import { redirect } from "next/navigation";
+import React from 'react'
+import LoginPage from './(auth)/login/page'
 
-export default function RootPage() {
-  redirect("/login");
+const page = () => {
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center bg-bg p-6">
+      <LoginPage/>
+    </div>
+  )
 }
+
+export default page

@@ -6,12 +6,11 @@ import { Providers } from './providers';
 
 const figtree = localFont({
   src: [
-    { path: '../public/fonts/Figtree-Regular.ttf',    weight: '400', style: 'normal' },
-    { path: '../public/fonts/Figtree-Medium.ttf',     weight: '500', style: 'normal' },
-    { path: '../public/fonts/Figtree-SemiBold.ttf',   weight: '600', style: 'normal' },
-    { path: '../public/fonts/Figtree-Bold.ttf',       weight: '700', style: 'normal' },
-    { path: '../public/fonts/Figtree-ExtraBold.ttf',  weight: '800', style: 'normal' },
-    { path: '../public/fonts/Figtree-Black.ttf',      weight: '900', style: 'normal' },
+    { path: '../public/fonts/Figtree-Regular.ttf',   weight: '400', style: 'normal' },
+    { path: '../public/fonts/Figtree-Medium.ttf',    weight: '500', style: 'normal' },
+    { path: '../public/fonts/Figtree-SemiBold.ttf',  weight: '600', style: 'normal' },
+    { path: '../public/fonts/Figtree-Bold.ttf',      weight: '700', style: 'normal' },
+  
   ],
   variable: '--font-figtree',
   display: 'swap',
@@ -50,11 +49,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" data-theme="light" className={`${figtree.variable} h-full antialiased`}>
-      <body className="min-h-full">
+      <body className="h-full">
         <Providers>
-          <main className="main-content">
-            {children}
-          </main>
+          {children}
         </Providers>
       </body>
     </html>
