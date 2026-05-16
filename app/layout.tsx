@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import localFont from 'next/font/local';
-
+import { Toaster } from 'sonner';
 import './globals.css';
 import { Providers } from './providers';
 
@@ -51,6 +51,7 @@ export default function RootLayout({
     <html lang="en" data-theme="light" className={`${figtree.variable} h-full antialiased`}>
       <body className="h-full">
         <Providers>
+          <Toaster position="top-right" richColors />
           {children}
         </Providers>
       </body>
