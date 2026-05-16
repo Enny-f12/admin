@@ -48,7 +48,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" data-theme="light" className={`${figtree.variable} h-full antialiased`}>
+    <html lang="en" data-theme="light" data-scroll-behavior="smooth" className={`${figtree.variable} h-full antialiased`}>
       <body className="h-full">
         <Providers>
           
