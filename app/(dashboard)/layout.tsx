@@ -26,12 +26,12 @@ const NAV_ITEMS = [
   { label: "Orders",           href: "/orders",        icon: ShoppingBag },
   { label: "Menu",             href: "/menu",          icon: UtensilsCrossed },
   { label: "Reservations",     href: "/reservations",  icon: CalendarDays },
-  { label: "Delivery",         href: "/dashboard/delivery",      icon: Bike },
-  { label: "Inventory",        href: "/dashboard/inventory",     icon: Package },
-  { label: "Customers",        href: "/dashboard/customers",     icon: Users },
-  { label: "Staff Management", href: "/dashboard/staff",         icon: UserCog },
-  { label: "Analytics",        href: "/dashboard/analytics",     icon: BarChart2 },
-  { label: "Settings",         href: "/dashboard/settings",      icon: Settings },
+  { label: "Delivery",         href: "/delivery",      icon: Bike },
+  { label: "Inventory",        href: "/inventory",     icon: Package },
+  { label: "Customers",        href: "/customers",     icon: Users },
+  { label: "Staff Management", href: "/staff",         icon: UserCog },
+  { label: "Analytics",        href: "/analytics",     icon: BarChart2 },
+  { label: "Settings",         href: "/settings",      icon: Settings },
 ];
 
 /* ── Light sidebar tokens ── */

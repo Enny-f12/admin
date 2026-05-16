@@ -51,8 +51,9 @@ export default function RootLayout({
     <html lang="en" data-theme="light" className={`${figtree.variable} h-full antialiased`}>
       <body className="h-full">
         <Providers>
-          <Toaster position="top-right" richColors />
+          
           {children}
+          <Toaster position="top-right" richColors />
         </Providers>
       </body>
     </html>
