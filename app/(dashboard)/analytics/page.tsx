@@ -188,13 +188,19 @@ export default function AnalyticsPage() {
   const ordChange = useMemo(() => calcChange(data, "orders"), [data]);
 
   return (
-    <div style={{ padding: "24px", maxWidth: 960, margin: "0 auto" }}>
+    <div style={{ margin: "0 auto" }}>
 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: "#111827", margin: "0 0 4px" }}>Analytics</h1>
-          <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0 }}>6-month overview · {RANGE_OPTS.find((r) => r.key === range)?.label}</p>
+          <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
+                Foodies 1 LEKKI
+            </p>
+            <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
+                ANALYTICS
+            </h1>
+          
+          <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0 }}>Every change is logged in with user, timestamp and overview</p>
         </div>
         <button style={{ display: "flex", alignItems: "center", gap: 7, background: "#E05C2A", color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
           <IconDownload /> Export

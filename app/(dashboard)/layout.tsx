@@ -31,6 +31,8 @@ import {
   Store,
   ChevronDown,
   Check,
+  Calculator,
+  ClipboardList,
 } from "lucide-react";
 
 /* ── Nav structure ── */
@@ -72,7 +74,9 @@ const NAV_SECTIONS = [
   {
     title: "FINANCE & SYSTEM",
     items: [
+      { label: "Accounting", href: "/accounting", icon: Calculator },
       { label: "Analytics", href: "/analytics", icon: BarChart2 },
+      { label: "Audit Logs", href: "/audit-logs", icon: ClipboardList },
       { label: "Settings", href: "/settings", icon: Settings },
     ],
   },

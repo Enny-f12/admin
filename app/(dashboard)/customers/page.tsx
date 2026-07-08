@@ -225,12 +225,18 @@ export default function CustomersPage() {
     <>
       {selected && <CustomerModal customer={selected} onClose={() => setSelected(null)} />}
 
-      <div style={{ padding: "32px 32px", maxWidth: 1060, margin: "0 auto" }}>
+      <div style={{ margin: "0 auto" }}>
 
         {/* Page title */}
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#111827", margin: "0 0 24px" }}>
-          View and manage customers
+        <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
+          Foodies 1 LEKKI
+        </p>
+        <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
+          CUSTOMERS MANAGEMENT
         </h1>
+        <p style={{ fontSize: "0.875rem", fontWeight: 400, color: "var(--color-text-muted)", margin: "0 0 24px" }}>
+          View and manage customers
+        </p>
 
         {/* Outer card */}
         <div style={{

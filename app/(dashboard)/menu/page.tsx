@@ -199,9 +199,17 @@ export default function MenuPage() {
 
         {/* Page header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+          <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
+                Foodies 1 LEKKI
+            </p>
+            <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
+                MENU
+            </h1>
           <p style={{ fontSize: "0.875rem", fontWeight: 400, color: "var(--color-text-muted)", margin: 0 }}>
             Add, edit, and manage menu items
           </p>
+          </div>
           <button className="btn btn-primary" onClick={openAdd} style={{ gap: 6 }}>
             <Plus size={15} strokeWidth={2.2} />
             Add Dish

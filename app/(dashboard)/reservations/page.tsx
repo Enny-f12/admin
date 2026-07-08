@@ -41,8 +41,7 @@ type WaitlistEntry = {
 type ReminderRule = {
   id: number;
   label: string;
-  timing: string;
-  channel: string;
+  description: string;
   enabled: boolean;
 };
 
@@ -52,7 +51,7 @@ type ReminderRule = {
 const INIT_TABLE_TYPES: TableType[] = [
   { seats: 4, count: 3 },
   { seats: 2, count: 2 },
-  { seats: 8, count: 1 },
+  { seats: 2, count: 8 },
 ];
 
 const INIT_TABLES: TableSlot[] = [
@@ -83,10 +82,10 @@ const INIT_WAITLIST: WaitlistEntry[] = [
 ];
 
 const INIT_REMINDERS: ReminderRule[] = [
-  { id: 1, label: "Booking confirmation", timing: "Immediately",   channel: "SMS + Email", enabled: true  },
-  { id: 2, label: "24-hour reminder",     timing: "24 hrs before", channel: "SMS + Email", enabled: true  },
-  { id: 3, label: "2-hour reminder",      timing: "2 hrs before",  channel: "SMS",         enabled: true  },
-  { id: 4, label: "No-show follow-up",    timing: "30 min after",  channel: "Email",       enabled: false },
+  { id: 1, label: "Booking Confirmation", description: "Sent immediately after booking",        enabled: true  },
+  { id: 2, label: "24-Hour Reminder",     description: "Day before reservation",                 enabled: true  },
+  { id: 3, label: "2-Hour Reminder",      description: "Sent 2 hours before arrival",             enabled: true  },
+  { id: 4, label: "SMS Notifications",    description: "Also send via SMS (additional cost)",     enabled: false },
 ];
 
 const TIME_SLOTS          = ["15 min", "30 min", "45 min", "60 min"];
@@ -97,6 +96,17 @@ const TABLE_STATUS_COLORS: Record<TableStatus, { bg: string; border: string }> =
   Booked:   { bg: "#ca8a04", border: "#a16207" },
   Occupied: { bg: "#b91c1c", border: "#991b1b" },
 };
+
+/* Converts a stored "11:00 AM" style time to 24-hour "11:00" for display */
+function to24Hour(t: string): string {
+  const m = t.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return t;
+  const [, h, min, period] = m;
+  let hour = parseInt(h, 10);
+  if (period.toUpperCase() === "PM" && hour !== 12) hour += 12;
+  if (period.toUpperCase() === "AM" && hour === 12) hour = 0;
+  return `${String(hour).padStart(2, "0")}:${min}`;
+}
 
 /* ══════════════════════════════════════════
    SHARED UI HELPERS
@@ -173,7 +183,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
       style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div style={{ background: "var(--color-bg-card)", borderRadius: 16, width: "100%", maxWidth: 480, padding: 28, display: "flex", flexDirection: "column", gap: 18 }}>
+      <div style={{ background: "var(--color-bg-card)", borderRadius: 16, width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto", padding: 28, display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h3 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 600, color: "var(--color-heading)" }}>{title}</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4 }}>
@@ -327,7 +337,7 @@ function PoliciesTab() {
           <div>
             <p style={{ margin: 0, fontWeight: 600, fontSize: "0.875rem", color: "var(--color-heading)" }}>Operating Hours</p>
             <p style={{ margin: "2px 0 0", fontWeight: 400, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
-              {opHours.open} – {opHours.close} daily
+              {to24Hour(opHours.open)} – {to24Hour(opHours.close)} daily
             </p>
           </div>
           <button
@@ -458,32 +468,28 @@ function PoliciesTab() {
               <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>Note</label>
               <input className="input" placeholder="e.g. Public Holiday" value={newDate.note} onChange={(e) => setNewDate((f) => ({ ...f, note: e.target.value }))} />
             </div>
-            {newDate.type !== "Closed all day" && (
-              <>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  {[
-                    { label: "Opening Time", key: "openTime" as const },
-                    { label: "Closing Time", key: "closeTime" as const },
-                  ].map(({ label, key }) => (
-                    <div key={key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>{label}</label>
-                      <input className="input" value={newDate[key]} onChange={(e) => setNewDate((f) => ({ ...f, [key]: e.target.value }))} />
-                    </div>
-                  ))}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {[
+                { label: "Opening Time", key: "openTime" as const },
+                { label: "Closing Time", key: "closeTime" as const },
+              ].map(({ label, key }) => (
+                <div key={key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>{label}</label>
+                  <input className="input" value={newDate[key]} onChange={(e) => setNewDate((f) => ({ ...f, [key]: e.target.value }))} />
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  {[
-                    { label: "Fixed Seating Slots (1)", key: "slot1" as const },
-                    { label: "Fixed Seating Slots (2)", key: "slot2" as const },
-                  ].map(({ label, key }) => (
-                    <div key={key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>{label}</label>
-                      <input className="input" value={newDate[key]} onChange={(e) => setNewDate((f) => ({ ...f, [key]: e.target.value }))} />
-                    </div>
-                  ))}
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {[
+                { label: "Fixed Seating Slots (1)", key: "slot1" as const },
+                { label: "Fixed Seating Slots (2)", key: "slot2" as const },
+              ].map(({ label, key }) => (
+                <div key={key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>{label}</label>
+                  <input className="input" value={newDate[key]} onChange={(e) => setNewDate((f) => ({ ...f, [key]: e.target.value }))} />
                 </div>
-              </>
-            )}
+              ))}
+            </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             <button className="btn btn-primary" style={{ flex: 1, justifyContent: "center", padding: "11px" }}
@@ -661,33 +667,40 @@ function RemindersTab() {
     setReminders((p) => p.map((r) => r.id === id ? { ...r, enabled: !r.enabled } : r));
 
   return (
-    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 0, padding: 0, overflow: "hidden" }}>
-      <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--color-border)" }}>
-        <span style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--color-heading)" }}>Reminder Rules</span>
-        <p style={{ margin: "2px 0 0", fontWeight: 400, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
-          Automated notifications sent to customers for their reservations
-        </p>
+    <>
+      <div className="card" style={{ display: "flex", flexDirection: "column", gap: 0, padding: 0, overflow: "hidden" }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--color-border)" }}>
+          <span style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--color-heading)" }}>Automated Reminders</span>
+        </div>
+
+        {reminders.map((r, i) => (
+          <div
+            key={r.id}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "16px 20px",
+              borderBottom: i < reminders.length - 1 ? "1px solid var(--color-border)" : "none",
+            }}
+          >
+            <div>
+              <p style={{ margin: 0, fontWeight: 500, fontSize: "0.875rem", color: "var(--color-text)" }}>{r.label}</p>
+              <p style={{ margin: "2px 0 0", fontWeight: 400, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+                {r.description}
+              </p>
+            </div>
+            <Toggle on={r.enabled} onToggle={() => toggle(r.id)} />
+          </div>
+        ))}
       </div>
 
-      {reminders.map((r, i) => (
-        <div
-          key={r.id}
-          style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "16px 20px",
-            borderBottom: i < reminders.length - 1 ? "1px solid var(--color-border)" : "none",
-          }}
-        >
-          <div>
-            <p style={{ margin: 0, fontWeight: 500, fontSize: "0.875rem", color: "var(--color-text)" }}>{r.label}</p>
-            <p style={{ margin: "2px 0 0", fontWeight: 400, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-              {r.timing} · {r.channel}
-            </p>
-          </div>
-          <Toggle on={r.enabled} onToggle={() => toggle(r.id)} />
-        </div>
-      ))}
-    </div>
+      <button
+        className="btn btn-primary"
+        onClick={() => toast.success("Reminder settings saved")}
+        style={{ width: "100%", justifyContent: "center", padding: "13px", fontSize: "0.875rem", marginTop: 16 }}
+      >
+        Save
+      </button>
+    </>
   );
 }
 
@@ -706,29 +719,36 @@ export default function ReservationsPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <p style={{ fontSize: "0.875rem", fontWeight: 400, color: "var(--color-text-muted)", margin: 0 }}>
-        Configure table booking rules across all branches
-      </p>
+      <div>
+        <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
+          Foodies 1 LEKKI
+        </p>
+        <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
+          RESERVATION POLICIES
+        </h1>
+        <p style={{ margin: "4px 0 0", fontSize: "0.875rem", fontWeight: 400, color: "var(--color-text-muted)" }}>
+          Configure table booking rules across all branches.
+        </p>
+      </div>
 
       {/* Tab bar */}
-      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         {TABS.map(({ key, label, icon: Icon }) => {
           const active = tab === key;
           return (
             <button
               key={key}
               onClick={() => setTab(key)}
+              className={active ? "btn btn-primary" : undefined}
               style={{
-                display: "flex", alignItems: "center", gap: 7,
-                padding: "9px 18px", borderRadius: 8, border: "none",
-                background: active ? "var(--color-primary)" : "transparent",
-                color: active ? "#fff" : "var(--color-text-secondary)",
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "10px 18px", borderRadius: 8,
+                border: active ? "none" : "1px solid var(--color-border)",
+                background: active ? undefined : "#fff",
+                color: active ? undefined : "var(--color-text)",
                 fontFamily: "var(--font-sans)", fontSize: "0.855rem",
-                fontWeight: active ? 500 : 400, cursor: "pointer",
-                transition: "background 0.15s, color 0.15s",
+                fontWeight: 500, cursor: "pointer",
               }}
-              onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)"; }}
-              onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
               <Icon size={15} strokeWidth={1.8} />
               {label}

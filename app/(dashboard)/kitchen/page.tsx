@@ -1,0 +1,357 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  Smartphone,
+  CreditCard,
+  User,
+  Phone,
+  Clock,
+  Truck,
+  UtensilsCrossed,
+  Package,
+  Settings as SettingsIcon,
+  Monitor,
+  Copy,
+  Check,
+  Square,
+  Minus,
+  Plus,
+} from "lucide-react";
+
+type Source = "Mobile App" | "Walk-In" | "Phone" | "Delivery" | "Dine-In" | "Takeaway" | "POS";
+
+type KitchenOrder = {
+  id: string;
+  source: Source;
+  icon: React.ElementType;
+  createdAt: string;
+  dueAt: string;
+  items: { name: string; qty: number }[];
+  special?: string;
+};
+
+const ORDERS: KitchenOrder[] = [
+  { id: "#FD-2847", source: "Mobile App", icon: Smartphone, createdAt: "12:30 PM", dueAt: "12:45 PM", items: [{ name: "Jollof Rice", qty: 2 }, { name: "Grilled Chicken", qty: 1 }], special: "Extra Spicy" },
+  { id: "#FD-2848", source: "Walk-In",    icon: User,       createdAt: "12:32 PM", dueAt: "12:48 PM", items: [{ name: "Egusi Soup", qty: 1 }, { name: "Pounded Yam", qty: 2 }, { name: "Zobo", qty: 1 }], special: "No Onions" },
+  { id: "#FD-2849", source: "Phone",      icon: Phone,      createdAt: "12:35 PM", dueAt: "12:50 PM", items: [{ name: "Fried Rice", qty: 2 }, { name: "Asun", qty: 1 }], special: "Extra Suya" },
+  { id: "#FD-2850", source: "Delivery",   icon: Truck,      createdAt: "12:40 PM", dueAt: "12:50 PM", items: [{ name: "Oha Soup", qty: 1 }, { name: "Smoked Chicken", qty: 1 }] },
+  { id: "#FD-2851", source: "Dine-In",    icon: UtensilsCrossed, createdAt: "12:45 PM", dueAt: "12:55 PM", items: [{ name: "Asun", qty: 2 }, { name: "Goat Meat", qty: 2 }], special: "Extra Spicy" },
+  { id: "#FD-2852", source: "Takeaway",   icon: Package,    createdAt: "12:50 PM", dueAt: "01:00 PM", items: [{ name: "Jollof Rice", qty: 1 }, { name: "5Alive", qty: 1 }, { name: "Peppered Chicken", qty: 1 }], special: "Extra Spicy" },
+];
+
+const COMPLETED = [
+  { id: "#FD-2846", time: "12:15 PM", source: "Mobile App" },
+  { id: "#FD-2847", time: "12:30 PM", source: "Walk-In"    },
+  { id: "#FD-2848", time: "12:45 PM", source: "POS"        },
+];
+
+export default function KitchenDisplayPage() {
+  const [view, setView] = useState<"live" | "settings">("live");
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+
+  const counts = {
+    "Mobile App": ORDERS.filter((o) => o.source === "Mobile App").length,
+    "POS": 0,
+    "Walk-In": ORDERS.filter((o) => o.source === "Walk-In").length,
+    "Phone": ORDERS.filter((o) => o.source === "Phone").length,
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>Foodies 1 LEKKI</p>
+          <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>KITCHEN DISPLAY</h1>
+          <p style={{ margin: "4px 0 0", fontSize: "0.875rem", color: "var(--color-text-muted)" }}>
+            {view === "live" ? "Real-time queue • All order sources" : "Settings"}
+          </p>
+        </div>
+
+        {view === "live" ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ padding: "9px 16px", borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", fontWeight: 700, fontSize: "0.9rem", color: "var(--color-heading)" }}>
+              {timeStr}
+            </div>
+            <button
+              onClick={() => setView("settings")}
+              aria-label="Kitchen display settings"
+              style={{ width: 38, height: 38, borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+            >
+              <SettingsIcon size={17} strokeWidth={1.8} color="var(--color-text-muted)" />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setView("live")}
+            className="btn btn-primary"
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 18px", fontSize: "0.85rem" }}
+          >
+            <Monitor size={16} strokeWidth={1.8} />
+            View TV Display
+          </button>
+        )}
+      </div>
+
+      {view === "live" ? <LiveQueueView counts={counts} /> : <SettingsView />}
+    </div>
+  );
+}
+
+/* ══════════════════════════ Live Queue ══════════════════════════ */
+function LiveQueueView({ counts }: { counts: Record<string, number> }) {
+  const statCards = [
+    { label: "Mobile App", value: counts["Mobile App"], icon: Smartphone, color: "gold" },
+    { label: "POS",        value: counts["POS"],        icon: CreditCard, color: "red"  },
+    { label: "Walk-In",    value: counts["Walk-In"],    icon: User,       color: "gold" },
+    { label: "Phone",      value: counts["Phone"],      icon: Phone,      color: "red"  },
+  ];
+
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
+        {statCards.map((s) => (
+          <div key={s.label} className="card" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div
+              style={{
+                width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+                background: s.color === "gold" ? "var(--color-secondary)" : "var(--color-primary)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              <s.icon size={18} strokeWidth={1.8} color={s.color === "gold" ? "#7a5500" : "#fff"} />
+            </div>
+            <div>
+              <p style={{ margin: 0, fontSize: "1.3rem", fontWeight: 700, color: "var(--color-heading)" }}>{s.value}</p>
+              <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{s.label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
+        {ORDERS.map((order, i) => {
+          const gold = i % 2 === 0;
+          const headerBg = gold ? "var(--color-secondary)" : "var(--color-primary)";
+          const headerText = gold ? "#5c4200" : "#fff";
+          return (
+            <div key={order.id} style={{ borderRadius: 12, overflow: "hidden", border: "1px solid var(--color-border)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", background: headerBg, color: headerText }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: "0.9rem" }}>
+                  <order.icon size={15} strokeWidth={1.8} />
+                  {order.source}
+                </span>
+                <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>{order.id}</span>
+              </div>
+
+              <div style={{ padding: 16, background: "#fff" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+                    <Clock size={13} strokeWidth={1.8} />
+                    {order.createdAt}
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+                    <Clock size={13} strokeWidth={1.8} />
+                    Due: {order.dueAt}
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: order.special ? 14 : 0 }}>
+                  {order.items.map((item) => (
+                    <div key={item.name} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.88rem", color: "var(--color-text)" }}>
+                      <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--color-text-muted)", flexShrink: 0 }} />
+                      {item.name}&nbsp;&nbsp;x{item.qty}
+                    </div>
+                  ))}
+                </div>
+
+                {order.special && (
+                  <div
+                    style={{
+                      padding: "8px 12px", borderRadius: 8, fontSize: "0.82rem", fontWeight: 500,
+                      background: gold ? "rgba(252,208,99,0.15)" : "rgba(225,11,28,0.08)",
+                      border: `1px solid ${gold ? "rgba(160,122,0,0.25)" : "rgba(225,11,28,0.25)"}`,
+                      color: gold ? "#7a5500" : "var(--color-primary)",
+                    }}
+                  >
+                    Special: {order.special}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="card">
+        <p style={{ margin: "0 0 14px", fontSize: "0.9rem", fontWeight: 700, color: "var(--color-heading)" }}>Completed Last 30 Minutes</p>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {COMPLETED.map((c, i) => (
+            <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderTop: i > 0 ? "1px solid var(--color-border)" : "none" }}>
+              <span style={{ fontSize: "0.88rem", color: "var(--color-text)" }}>{c.id} • {c.time} • {c.source}</span>
+              <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#16A34A" }}>Completed</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ══════════════════════════ Settings ══════════════════════════ */
+function SettingsView() {
+  const [showSource, setShowSource] = useState(true);
+  const [showPrepTime, setShowPrepTime] = useState(true);
+  const [urgentThreshold, setUrgentThreshold] = useState("15 minutes");
+  const [completedFor, setCompletedFor] = useState("30 minutes");
+  const [refreshInterval, setRefreshInterval] = useState("2 seconds");
+  const [volume, setVolume] = useState("70%");
+
+  const [grillTV, setGrillTV] = useState("http://192.168.1.101:8080");
+  const [pastryTV, setPastryTV] = useState("http://192.168.1.102:8080");
+  const [expoTV, setExpoTV] = useState("http://192.168.1.103:8080");
+  const [grillAssign, setGrillAssign] = useState("All grilled proteins, rice dishes");
+  const [pastryAssign, setPastryAssign] = useState("Pastries, Snacks");
+
+  const [printerBackup, setPrinterBackup] = useState(true);
+  const [printerIP, setPrinterIP] = useState("192.168.1.50");
+  const [fallbackMinutes, setFallbackMinutes] = useState(2);
+  const [copied, setCopied] = useState(false);
+
+  const url = "https://kds.foodieshotandspicy.com/branch/1";
+
+  const copyUrl = () => {
+    navigator.clipboard?.writeText(url).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <>
+      <div className="card">
+        <p style={{ margin: "0 0 8px", fontSize: "0.85rem", fontWeight: 700, letterSpacing: "0.03em", color: "var(--color-heading)" }}>TV DISPLAY URL</p>
+        <div style={{ display: "flex", gap: 10 }}>
+          <input className="input" value={url} readOnly style={{ flex: 1 }} />
+          <button
+            onClick={copyUrl}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px", borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)", fontFamily: "var(--font-sans)", whiteSpace: "nowrap" }}
+          >
+            {copied ? <Check size={15} strokeWidth={2} color="#16A34A" /> : <Copy size={15} strokeWidth={1.8} />}
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <p style={{ margin: "0 0 16px", fontSize: "0.85rem", fontWeight: 700, letterSpacing: "0.03em", color: "var(--color-heading)" }}>DISPLAY SETTINGS</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+          <div>
+            <CheckPair label="Show order source:" hint="(for kitchen awareness)" value={showSource} onChange={setShowSource} />
+            <Field label="Urgent threshold:"><input className="input" value={urgentThreshold} onChange={(e) => setUrgentThreshold(e.target.value)} /></Field>
+            <Field label="Auto-refresh interval:"><input className="input" value={refreshInterval} onChange={(e) => setRefreshInterval(e.target.value)} /></Field>
+          </div>
+          <div>
+            <CheckPair label="Show estimated prep time:" value={showPrepTime} onChange={setShowPrepTime} />
+            <Field label="Show completed orders for:"><input className="input" value={completedFor} onChange={(e) => setCompletedFor(e.target.value)} /></Field>
+            <Field label="Audio alert volume:"><input className="input" value={volume} onChange={(e) => setVolume(e.target.value)} /></Field>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <p style={{ margin: "0 0 16px", fontSize: "0.85rem", fontWeight: 700, letterSpacing: "0.03em", color: "var(--color-heading)" }}>
+          STATION ROUTING (multiple TVs per branch)
+        </p>
+        <Field label="Grill station TV:"><input className="input" value={grillTV} onChange={(e) => setGrillTV(e.target.value)} /></Field>
+        <Field label="Pastry station TV:"><input className="input" value={pastryTV} onChange={(e) => setPastryTV(e.target.value)} /></Field>
+        <Field label="Expo station TV:"><input className="input" value={expoTV} onChange={(e) => setExpoTV(e.target.value)} /></Field>
+
+        <p style={{ margin: "12px 0 12px", fontSize: "0.85rem", fontWeight: 700, color: "var(--color-heading)" }}>Station Assignment:</p>
+        <Field label="Grill:"><input className="input" value={grillAssign} onChange={(e) => setGrillAssign(e.target.value)} /></Field>
+        <Field label="Pastry:"><input className="input" value={pastryAssign} onChange={(e) => setPastryAssign(e.target.value)} /></Field>
+        <Field label="Expo TV:"><input className="input" value={expoTV} onChange={(e) => setExpoTV(e.target.value)} /></Field>
+      </div>
+
+      <div className="card">
+        <button
+          onClick={() => setPrinterBackup((v) => !v)}
+          style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-sans)", marginBottom: 16 }}
+        >
+          <CheckBox checked={printerBackup} />
+          <span style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--color-heading)" }}>Enable thermal printer backup</span>
+        </button>
+
+        <Field label="Printer IP"><input className="input" value={printerIP} onChange={(e) => setPrinterIP(e.target.value)} style={{ maxWidth: 260 }} /></Field>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <label style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)" }}>Fallback after</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={() => setFallbackMinutes((m) => Math.max(0, m - 1))} style={stepperBtn}><Minus size={13} /></button>
+            <input className="input" type="number" value={fallbackMinutes} onChange={(e) => setFallbackMinutes(Number(e.target.value) || 0)} style={{ width: 60, textAlign: "center" }} />
+            <button onClick={() => setFallbackMinutes((m) => m + 1)} style={stepperBtn}><Plus size={13} /></button>
+          </div>
+          <span style={{ fontSize: "0.85rem", color: "var(--color-text)" }}>minutes of TV disconnection</span>
+        </div>
+      </div>
+
+      <div>
+        <button className="btn btn-primary" style={{ padding: "10px 20px", fontSize: "0.85rem" }}>
+          Save Changes
+        </button>
+      </div>
+    </>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
+      <label style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)" }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function CheckBox({ checked }: { checked: boolean }) {
+  return (
+    <span
+      style={{
+        width: 18, height: 18, borderRadius: 5, border: `1.5px solid ${checked ? "var(--color-primary)" : "var(--color-border)"}`,
+        background: checked ? "var(--color-primary)" : "#fff",
+        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+      }}
+    >
+      {checked && <Check size={12} strokeWidth={3} color="#fff" />}
+    </span>
+  );
+}
+
+function CheckPair({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 14, flexWrap: "wrap" }}>
+      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)" }}>
+        {label} {hint && <span style={{ fontWeight: 400, color: "var(--color-text-muted)" }}>{hint}</span>}
+      </span>
+      <button onClick={() => onChange(true)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-sans)", fontSize: "0.85rem", color: "var(--color-text)" }}>
+        <CheckBox checked={value} />
+        Yes
+      </button>
+      <button onClick={() => onChange(false)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-sans)", fontSize: "0.85rem", color: "var(--color-text)" }}>
+        {!value ? <CheckBox checked={true} /> : <Square size={18} strokeWidth={1.5} color="var(--color-border)" />}
+        No
+      </button>
+    </div>
+  );
+}
+
+const stepperBtn: React.CSSProperties = {
+  width: 30, height: 30, borderRadius: 6, border: "1px solid var(--color-border)", background: "#fff",
+  display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+};
