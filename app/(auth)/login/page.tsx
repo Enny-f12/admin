@@ -73,13 +73,17 @@ export default function LoginPage() {
 
   return (
     <div
-      className="flex h-screen w-full overflow-hidden "
+      className="min-h-screen w-full flex items-center justify-center px-4 py-8 sm:p-6"
       style={{ fontFamily: "var(--font-sans)", background: "var(--color-bg)" }}
     >
+      <div
+        className="flex w-full max-w-6xl rounded-2xl overflow-hidden sm:shadow-ambient sm:border"
+        style={{ minHeight: "min(600px, 90vh)", borderColor: "var(--color-border, #e5e7eb)" }}
+      >
       {/* ── Left: image carousel ── */}
-      <div className="relative hidden lg:flex lg:w-1/2 h-full">
+      <div className="relative hidden lg:flex lg:w-1/2">
         {/* Rounded right edge so the image panel feels inset */}
-        <div className="absolute inset-0 overflow-hidden rounded-l-[10px] z-0">
+        <div className="absolute inset-0 overflow-hidden z-0">
           {SLIDES.map((slide, i) => (
             <div
               key={i}
@@ -126,23 +130,13 @@ export default function LoginPage() {
 
       {/* ── Right: login form ── */}
       <div
-        className="flex w-full flex-col items-center justify-center  px-8 lg:w-1/2"
+        className="flex w-full flex-col items-center justify-center px-8 py-10 lg:w-1/2 overflow-y-auto max-h-[90vh]"
         style={{ background: "#fff" }}
       >
         <div className="w-full max-w-sm flex flex-col gap-8">
 
           {/* Logo */}
-          <div className="flex justify-center">
-            {/* Replace /logo.png with your actual logo once ready */}
-            <Image
-              src="/logo/Logo.png"
-              alt="Foodies Hot & Spicy logo"
-              width={130}
-              height={52}
-              className="object-contain"
-              priority
-            />
-          </div>
+          
 
           {/* Form card */}
           <div className="card flex flex-col gap-6">
@@ -342,6 +336,7 @@ export default function LoginPage() {
           </p>
 
         </div>
+      </div>
       </div>
     </div>
   );
