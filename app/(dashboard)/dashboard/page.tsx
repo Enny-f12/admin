@@ -1,3 +1,4 @@
+// app/(admin)/dashboard/page.tsx
 "use client";
 
 import {
@@ -20,6 +21,12 @@ import {
   FileSearch,
 } from "lucide-react";
 import { useBranch } from "../layout";
+import {
+  useDashboardSummary,
+  useLowStockAlerts,
+  useRecentAuditLogs,
+  useAdminOrders,
+} from "@/hooks/useDashboard";
 
 /* ── Types ── */
 type StatCard = {
@@ -30,30 +37,6 @@ type StatCard = {
   icon: React.ElementType;
 };
 
-type Order = {
-  id: string;
-  customer: string;
-  items: string;
-  amount: string;
-  type: "Delivery" | "Pick Up";
-  status: "Preparing" | "Ready" | "Delivered";
-  time: string;
-};
-
-type LowStockItem = {
-  name: string;
-  min: string;
-  count: string;
-};
-
-type ActivityItem = {
-  initial: string;
-  text: string;
-  time: string;
-  category: string;
-};
-
-/* ── Data ── */
 const CYCLE_STEPS = [
   { label: "Inventory", icon: Box },
   { label: "Orders", icon: ClipboardList },
@@ -63,50 +46,82 @@ const CYCLE_STEPS = [
   { label: "Audit", icon: FileText },
 ];
 
-const STATS: StatCard[] = [
-  { label: "Revenue Today",    value: "₦2.84M",  change: "+12%", up: true, icon: DollarSign   },
-  { label: "Orders Today",     value: "127",     change: "+8%",  up: true, icon: ClipboardList },
-  { label: "Active Customers", value: "3,456",   change: "+5%",  up: true, icon: Users        },
-  { label: "System Health",    value: "99.8%",    change: "0",   up: true, icon: Activity      },
-];
-
-const LOW_STOCK: LowStockItem[] = [
-  { name: "Coca-Cola 50cl (fridge)", min: "min 24", count: "4"   },
-  { name: "Chicken Thighs",          min: "min 8",  count: "2.1" },
-  { name: "Plantain",                min: "min 5",  count: "1"   },
-  { name: "Tigernut (fridge)",       min: "min 24", count: "6"   },
-];
-
 const QUICK_ACTIONS = [
-  { label: "Accounting", icon: Calculator,  bg: "rgba(225,11,28,0.08)",  color: "#E10B1C" },
-  { label: "Audit Logs", icon: FileSearch,  bg: "rgba(37,99,235,0.08)",  color: "#2563EB" },
+  { label: "Accounting", icon: Calculator, bg: "rgba(225,11,28,0.08)", color: "#E10B1C" },
+  { label: "Audit Logs", icon: FileSearch, bg: "rgba(37,99,235,0.08)", color: "#2563EB" },
   { label: "User & Roles", icon: ShieldCheck, bg: "rgba(22,163,74,0.08)", color: "#16A34A" },
-  { label: "Settings",   icon: Settings,    bg: "rgba(252,208,99,0.15)", color: "#a07a00" },
+  { label: "Settings", icon: Settings, bg: "rgba(252,208,99,0.15)", color: "#a07a00" },
 ];
 
-const RECENT_ACTIVITY: ActivityItem[] = [
-  { initial: "K", text: "Kemi (Inventory) submitted morning count",              time: "8 minutes ago",  category: "Inventory" },
-  { initial: "B", text: "Bola (Order Taker) sent order #FD-2847 to kitchen",     time: "12 minutes ago", category: "Orders"    },
-  { initial: "P", text: "POS Terminal #2 synced ₦14,300 sale via Moniepoint",    time: "14 minutes ago", category: "Payments"  },
-  { initial: "T", text: "Tunde (Cashier) closed transaction #TX-9921",          time: "30 minutes ago", category: "Payments"  },
-  { initial: "M", text: "Manager received delivery from Farm Fresh Ltd",         time: "2 hours ago",    category: "Inventory" },
-];
-
-const ORDERS: Order[] = [
-  { id: "#FD-2847", customer: "Sarah M.", items: "2 Items", amount: "₦20,000", type: "Delivery", status: "Preparing", time: "02:30 PM" },
-  { id: "#FD-2846", customer: "Mike O.",  items: "1 Item",  amount: "₦15,000", type: "Pick Up",  status: "Ready",     time: "03:00 PM" },
-  { id: "#FD-2845", customer: "Ada K.",   items: "3 Items", amount: "₦15,000", type: "Delivery", status: "Delivered", time: "10:00 AM" },
-  { id: "#FD-2844", customer: "John C.",  items: "4 Items", amount: "₦20,000", type: "Pick Up",  status: "Delivered", time: "08:00 AM" },
-];
-
-const STATUS_CLASS: Record<Order["status"], string> = {
-  Preparing: "badge badge-red",
-  Ready:     "badge badge-yellow",
-  Delivered: "badge badge-green",
+const STATUS_CLASS: Record<string, string> = {
+  RECEIVED: "badge badge-yellow",
+  PREPARING: "badge badge-red",
+  READY_FOR_PICKUP: "badge badge-yellow",
+  OUT_FOR_DELIVERY: "badge badge-yellow",
+  DELIVERED: "badge badge-green",
+  COMPLETED: "badge badge-green",
+  CANCELLED: "badge badge-red",
 };
+
+function formatOrderType(type?: string) {
+  if (!type) return "–";
+  return type === "DINE_IN" ? "Dine In" : type === "TAKEAWAY" ? "Takeaway" : "Delivery";
+}
+
+function timeAgo(iso?: string) {
+  if (!iso) return "–";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+  return new Date(iso).toLocaleDateString();
+}
 
 export default function DashboardPage() {
   const branch = useBranch();
+
+  // ── Live queries ──
+  const { data: summary, isLoading: summaryLoading, isError: summaryError } = useDashboardSummary();
+  const { data: lowStock, isLoading: lowStockLoading, isError: lowStockError } = useLowStockAlerts();
+  const { data: activity, isLoading: activityLoading, isError: activityError } = useRecentAuditLogs(5);
+  const { data: orders, isLoading: ordersLoading, isError: ordersError } = useAdminOrders({ limit: 4 });
+
+  const STATS: StatCard[] = [
+    {
+      label: "Revenue Today",
+      value: summaryLoading ? "…" : `₦${(summary?.revenueToday ?? 0).toLocaleString()}`,
+      change: summary?.revenueChangePercent != null ? `${summary.revenueChangePercent}%` : "–",
+      up: (summary?.revenueChangePercent ?? 0) >= 0,
+      icon: DollarSign,
+    },
+    {
+      label: "Orders Today",
+      value: summaryLoading ? "…" : `${summary?.ordersToday ?? 0}`,
+      change: summary?.ordersChangePercent != null ? `${summary.ordersChangePercent}%` : "–",
+      up: (summary?.ordersChangePercent ?? 0) >= 0,
+      icon: ClipboardList,
+    },
+    {
+      label: "Active Customers",
+      // TODO(BACKEND): no total customer count endpoint yet — see request doc #4
+      value: "–",
+      change: "–",
+      up: true,
+      icon: Users,
+    },
+    {
+      label: "System Health",
+      // Not a backend concern — static/infra
+      value: "99.8%",
+      change: "0",
+      up: true,
+      icon: Activity,
+    },
+  ];
+
+  const criticalCount = lowStock?.length ?? 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
@@ -171,11 +186,11 @@ export default function DashboardPage() {
                 width: 7,
                 height: 7,
                 borderRadius: "50%",
-                background: "#16A34A",
+                background: summaryError ? "#E10B1C" : "#16A34A",
                 flexShrink: 0,
               }}
             />
-            All systems operational
+            {summaryError ? "Connection issue" : "All systems operational"}
           </span>
           <span>·</span>
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -188,7 +203,8 @@ export default function DashboardPage() {
                 flexShrink: 0,
               }}
             />
-            POS synced 12s ago
+            {/* TODO(BACKEND): no POS sync status endpoint — see request doc #7 */}
+            POS sync –
           </span>
         </div>
       </div>
@@ -207,14 +223,7 @@ export default function DashboardPage() {
         >
           Operational Cycle
         </p>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {CYCLE_STEPS.map(({ label, icon: Icon }, i) => (
             <div key={label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div
@@ -253,7 +262,6 @@ export default function DashboardPage() {
       >
         {STATS.map(({ label, value, change, up, icon: Icon }) => (
           <div key={label} className="stat-card">
-            {/* Icon + change */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div
                 style={{
@@ -269,27 +277,21 @@ export default function DashboardPage() {
               >
                 <Icon size={17} color="#a07a00" strokeWidth={1.8} />
               </div>
-              <span
-                className={up ? "stat-change" : "stat-change down"}
-                style={{ display: "flex", alignItems: "center", gap: 2, fontWeight: 500 }}
-              >
-                {change}
-                {up
-                  ? <ArrowUpRight size={13} strokeWidth={2} />
-                  : <ArrowDownRight size={13} strokeWidth={2} />
-                }
-              </span>
+              {change !== "–" && (
+                <span
+                  className={up ? "stat-change" : "stat-change down"}
+                  style={{ display: "flex", alignItems: "center", gap: 2, fontWeight: 500 }}
+                >
+                  {change}
+                  {up ? <ArrowUpRight size={13} strokeWidth={2} /> : <ArrowDownRight size={13} strokeWidth={2} />}
+                </span>
+              )}
             </div>
 
-            {/* Value */}
-            <p
-              className="stat-value"
-              style={{ margin: "10px 0 0", fontWeight: 600, fontSize: "1.6rem" }}
-            >
+            <p className="stat-value" style={{ margin: "10px 0 0", fontWeight: 600, fontSize: "1.6rem" }}>
               {value}
             </p>
 
-            {/* Label */}
             <p className="stat-label" style={{ margin: 0, fontWeight: 500 }}>
               {label}
             </p>
@@ -298,14 +300,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Low stock + Quick actions */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "2fr 1fr",
-          gap: 16,
-          alignItems: "start",
-        }}
-      >
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, alignItems: "start" }}>
         {/* Low stock */}
         <div className="card">
           <div
@@ -316,64 +311,66 @@ export default function DashboardPage() {
               marginBottom: 14,
             }}
           >
-            <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>
-              Low Stock
-            </h3>
-            <span
-              style={{
-                fontSize: "0.75rem",
-                fontWeight: 600,
-                color: "#E10B1C",
-                background: "rgba(225,11,28,0.08)",
-                padding: "4px 10px",
-                borderRadius: 999,
-              }}
-            >
-              5 critical
-            </span>
+            <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>Low Stock</h3>
+            {criticalCount > 0 && (
+              <span
+                style={{
+                  fontSize: "0.75rem",
+                  fontWeight: 600,
+                  color: "#E10B1C",
+                  background: "rgba(225,11,28,0.08)",
+                  padding: "4px 10px",
+                  borderRadius: 999,
+                }}
+              >
+                {criticalCount} critical
+              </span>
+            )}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {LOW_STOCK.map((item) => (
-              <div
-                key={item.name}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "12px 14px",
-                  borderRadius: 10,
-                  background: "var(--color-bg-soft)",
-                }}
-              >
-                <div>
-                  <p style={{ margin: 0, fontSize: "0.88rem", fontWeight: 600, color: "var(--color-text)" }}>
-                    {item.name}
-                  </p>
-                  <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                    {item.min}
-                  </p>
+            {lowStockLoading && (
+              <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p>
+            )}
+            {!lowStockLoading && (lowStockError || !lowStock?.length) && (
+              <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+                {/* TODO(BACKEND): GET /admin/inventory/alerts not implemented — see request doc #1 */}
+                No stock data available
+              </p>
+            )}
+            {!lowStockLoading &&
+              lowStock?.map((item) => (
+                <div
+                  key={item.itemName}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "12px 14px",
+                    borderRadius: 10,
+                    background: "var(--color-bg-soft)",
+                  }}
+                >
+                  <div>
+                    <p style={{ margin: 0, fontSize: "0.88rem", fontWeight: 600, color: "var(--color-text)" }}>
+                      {item.itemName}
+                    </p>
+                    <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+                      min {item.reorderThreshold} {item.unit}
+                    </p>
+                  </div>
+                  <span style={{ fontSize: "1rem", fontWeight: 700, color: "#E10B1C" }}>
+                    {item.currentQuantity}
+                  </span>
                 </div>
-                <span style={{ fontSize: "1rem", fontWeight: 700, color: "#E10B1C" }}>
-                  {item.count}
-                </span>
-              </div>
-            ))}
+              ))}
           </div>
         </div>
 
         {/* Quick actions */}
         <div className="card">
-          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 14px" }}>
-            Quick Actions
-          </h3>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 10,
-            }}
-          >
+          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 14px" }}>Quick Actions</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             {QUICK_ACTIONS.map(({ label, icon: Icon, bg, color }) => (
               <button
                 key={label}
@@ -390,12 +387,8 @@ export default function DashboardPage() {
                   fontFamily: "var(--font-sans)",
                   transition: "background 0.15s",
                 }}
-                onMouseEnter={(e) =>
-                  ((e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)")
-                }
-                onMouseLeave={(e) =>
-                  ((e.currentTarget as HTMLButtonElement).style.background = "#fff")
-                }
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#fff")}
               >
                 <div
                   style={{
@@ -410,9 +403,7 @@ export default function DashboardPage() {
                 >
                   <Icon size={15} strokeWidth={1.8} color={color} />
                 </div>
-                <span style={{ fontSize: "0.8rem", fontWeight: 500, color: "var(--color-text)" }}>
-                  {label}
-                </span>
+                <span style={{ fontSize: "0.8rem", fontWeight: 500, color: "var(--color-text)" }}>{label}</span>
               </button>
             ))}
           </div>
@@ -430,9 +421,7 @@ export default function DashboardPage() {
             borderBottom: "1px solid var(--color-border)",
           }}
         >
-          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>
-            Recent Activity
-          </h3>
+          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>Recent Activity</h3>
           <button
             style={{
               background: "none",
@@ -450,51 +439,61 @@ export default function DashboardPage() {
         </div>
 
         <div>
-          {RECENT_ACTIVITY.map((item, i) => (
-            <div
-              key={item.text}
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 12,
-                padding: "14px 20px",
-                borderBottom:
-                  i < RECENT_ACTIVITY.length - 1 ? "1px solid var(--color-border)" : "none",
-              }}
-            >
+          {activityLoading && (
+            <p style={{ padding: "14px 20px", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+              Loading…
+            </p>
+          )}
+          {!activityLoading && (activityError || !activity?.length) && (
+            <p style={{ padding: "14px 20px", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+              {/* TODO(BACKEND): GET /admin/audit-logs not implemented — see request doc #2 */}
+              No recent activity available
+            </p>
+          )}
+          {!activityLoading &&
+            activity?.map((item, i) => (
               <div
+                key={item.id}
                 style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: "50%",
-                  background: "var(--color-secondary)",
                   display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontWeight: 600,
-                  fontSize: "0.72rem",
-                  color: "#7a5500",
-                  flexShrink: 0,
+                  alignItems: "flex-start",
+                  gap: 12,
+                  padding: "14px 20px",
+                  borderBottom: i < activity.length - 1 ? "1px solid var(--color-border)" : "none",
                 }}
               >
-                {item.initial}
+                <div
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: "50%",
+                    background: "var(--color-secondary)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: 600,
+                    fontSize: "0.72rem",
+                    color: "#7a5500",
+                    flexShrink: 0,
+                  }}
+                >
+                  {item.actorInitial}
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontSize: "0.85rem", fontWeight: 500, color: "var(--color-text)" }}>
+                    {item.actorName} {item.action}
+                  </p>
+                  <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+                    {timeAgo(item.createdAt)} · {item.entityType}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p style={{ margin: 0, fontSize: "0.85rem", fontWeight: 500, color: "var(--color-text)" }}>
-                  {item.text}
-                </p>
-                <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                  {item.time} · {item.category}
-                </p>
-              </div>
-            </div>
-          ))}
+            ))}
         </div>
       </div>
 
       {/* Recent orders */}
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        {/* Header */}
         <div
           style={{
             display: "flex",
@@ -504,9 +503,7 @@ export default function DashboardPage() {
             borderBottom: "1px solid var(--color-border)",
           }}
         >
-          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>
-            Recent Orders
-          </h3>
+          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>Recent Orders</h3>
           <button
             style={{
               background: "none",
@@ -523,78 +520,84 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        {/* Table */}
         <div className="table-wrapper">
           <table>
             <thead>
               <tr>
-                {["Order ID", "Customer", "Items", "Total Amount", "Type", "Status", "Time", "Action"].map(
-                  (col) => <th key={col}>{col}</th>
-                )}
+                {["Order ID", "Customer", "Items", "Total Amount", "Type", "Status", "Time", "Action"].map((col) => (
+                  <th key={col}>{col}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {ORDERS.map((order) => (
-                <tr key={order.id}>
-                  <td style={{ fontWeight: 600, color: "var(--color-text)" }}>
-                    {order.id}
-                  </td>
-                  <td style={{ fontWeight: 400 }}>{order.customer}</td>
-                  <td style={{ fontWeight: 400 }}>{order.items}</td>
-                  <td style={{ fontWeight: 500, color: "var(--color-text)" }}>
-                    {order.amount}
-                  </td>
-                  <td style={{ fontWeight: 400 }}>{order.type}</td>
-                  <td>
-                    <span className={STATUS_CLASS[order.status]}>
-                      {order.status}
-                    </span>
-                  </td>
-                  <td>
-                    <span
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 5,
-                        color: "var(--color-text-secondary)",
-                        fontSize: "0.83rem",
-                        fontWeight: 400,
-                      }}
-                    >
-                      <Clock size={13} strokeWidth={1.8} style={{ flexShrink: 0 }} />
-                      {order.time}
-                    </span>
-                  </td>
-                  <td>
-                    <button
-                      aria-label={`View order ${order.id}`}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        color: "var(--color-text-muted)",
-                        display: "flex",
-                        padding: 4,
-                        borderRadius: 6,
-                        transition: "color 0.15s",
-                      }}
-                      onMouseEnter={(e) =>
-                        ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text)")
-                      }
-                      onMouseLeave={(e) =>
-                        ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-muted)")
-                      }
-                    >
-                      <Eye size={15} strokeWidth={1.8} />
-                    </button>
+              {ordersLoading && (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: "center", padding: 20, color: "var(--color-text-muted)" }}>
+                    Loading…
                   </td>
                 </tr>
-              ))}
+              )}
+              {!ordersLoading && (ordersError || !orders?.length) && (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: "center", padding: 20, color: "var(--color-text-muted)" }}>
+                    {/* TODO(BACKEND): GET /admin/orders response shape unconfirmed — see request doc #5 */}
+                    No order data available
+                  </td>
+                </tr>
+              )}
+              {!ordersLoading &&
+                orders?.map((order) => (
+                  <tr key={order.id}>
+                    <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{order.id}</td>
+                    <td style={{ fontWeight: 400 }}>{order.customerName ?? "–"}</td>
+                    <td style={{ fontWeight: 400 }}>{order.itemCount ?? "–"}</td>
+                    <td style={{ fontWeight: 500, color: "var(--color-text)" }}>
+                      {order.totalAmount != null ? `₦${order.totalAmount.toLocaleString()}` : "–"}
+                    </td>
+                    <td style={{ fontWeight: 400 }}>{formatOrderType(order.orderType)}</td>
+                    <td>
+                      <span className={STATUS_CLASS[order.status] ?? "badge"}>{order.status ?? "–"}</span>
+                    </td>
+                    <td>
+                      <span
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 5,
+                          color: "var(--color-text-secondary)",
+                          fontSize: "0.83rem",
+                          fontWeight: 400,
+                        }}
+                      >
+                        <Clock size={13} strokeWidth={1.8} style={{ flexShrink: 0 }} />
+                        {timeAgo(order.createdAt)}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        aria-label={`View order ${order.id}`}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          color: "var(--color-text-muted)",
+                          display: "flex",
+                          padding: 4,
+                          borderRadius: 6,
+                          transition: "color 0.15s",
+                        }}
+                        onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text)")}
+                        onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-muted)")}
+                      >
+                        <Eye size={15} strokeWidth={1.8} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>
       </div>
-
     </div>
   );
 }

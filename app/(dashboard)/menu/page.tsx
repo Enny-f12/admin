@@ -1,7 +1,9 @@
+// app/(admin)/menu/page.tsx
 "use client";
 
 import { useState, useRef } from "react";
 import Image from "next/image";
+import { toast } from "sonner";
 import {
   Plus,
   Search,
@@ -12,186 +14,135 @@ import {
   Trash2,
   UploadCloud,
 } from "lucide-react";
+import { useMenuCategories, useMenuItems, useCreateMenuItem, useUpdateMenuItem, useDeleteMenuItem } from "@/hooks/useMenu";
+import { MenuItem } from "@/types/menu";
 
-/* ── Types ── */
-type Dish = {
-  id: number;
-  name: string;
-  description: string;
-  image: string;
-  category: string;
-  price: number;
-  dietary: string;
-  orders: number;
-};
+// TODO(BACKEND): vendorId isn't returned anywhere on login or available via
+// any endpoint the frontend can currently call. CreateMenuItemDto/
+// CreateCategoryDto both require it. Hardcoding a placeholder so the UI
+// doesn't crash — MUST be replaced once backend confirms where this comes
+// from (e.g. on the User record, or a GET /vendors/me endpoint).
+const PLACEHOLDER_VENDOR_ID = "REPLACE_ME_VENDOR_ID";
 
-/* ── Categories ── */
-const CATEGORIES = [
-  "All Categories",
-  "Pastry",
-  "Soup",
-  "Swallow",
-  "Protein",
-  "Intercontinental",
-  "Drinks",
-  "Juice",
-  "Catering",
-];
+function slugify(name: string) {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
 
-/* ── Seed data ── */
-const INITIAL_DISHES: Dish[] = [
-  {
-    id: 1,
-    name: "Jam Doughnut",
-    description: "Soft, fluffy doughnut filled with sweet fruit jam and dusted with sugar.",
-    image: "https://images.unsplash.com/photo-1551024601-bec78aea704b?w=120&q=70",
-    category: "Pastry",
-    price: 1200,
-    dietary: "Vegetarian",
-    orders: 146,
-  },
-  {
-    id: 2,
-    name: "Fried Rice",
-    description: "Nigerian-style fried rice with mixed vegetables, liver, and spices. Rich and flavourful.",
-    image: "https://images.unsplash.com/photo-1603133872878-684f208fb84b?w=120&q=70",
-    category: "Intercontinental",
-    price: 3200,
-    dietary: "Contains egg",
-    orders: 100,
-  },
-  {
-    id: 3,
-    name: "Egusi",
-    description: "Rich, thick melon seed soup made with ground egusi, leafy vegetables, palm oil, and assorted meat or fish. A Nigerian classic.",
-    image: "https://images.unsplash.com/photo-1574894709920-11b28e7367e3?w=120&q=70",
-    category: "Soup",
-    price: 3500,
-    dietary: "Gluten-free",
-    orders: 100,
-  },
-  {
-    id: 4,
-    name: "Pizza Roll",
-    description: "Rolled pastry filled with pizza-style toppings – tomato sauce, cheese, and seasoned minced meat. Baked until crispy.",
-    image: "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=120&q=70",
-    category: "Pastry",
-    price: 3700,
-    dietary: "Contains Gluten",
-    orders: 100,
-  },
-  {
-    id: 5,
-    name: "Pounded Yam",
-    description: "Smooth, elastic swallow made from boiled and pounded yam. Similar to mashed potatoes but completely smooth with no chunks left. Premium option.",
-    image: "https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?w=120&q=70",
-    category: "Swallow",
-    price: 1200,
-    dietary: "Gluten-free",
-    orders: 100,
-  },
-  {
-    id: 6,
-    name: "Afang Soup",
-    description: "Rich vegetable soup originating from the Efik, Ibibio, and Annang people. Made with afang leaves, waterleaf, periwinkles, and assorted meat/fish.",
-    image: "https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=120&q=70",
-    category: "Soup",
-    price: 3000,
-    dietary: "Gluten-free",
-    orders: 100,
-  },
-  {
-    id: 7,
-    name: "Starch",
-    description: "Traditional swallow made from cassava starch, popular in the Niger Delta region. Slightly translucent and elastic.",
-    image: "https://images.unsplash.com/photo-1569050467447-ce54b3bbc37d?w=120&q=70",
-    category: "Swallow",
-    price: 600,
-    dietary: "Gluten-free",
-    orders: 100,
-  },
-];
-
-/* ── Modal default ── */
-const EMPTY_FORM = { name: "", description: "", price: "", category: "", dietary: "", image: "" };
+const EMPTY_FORM = { name: "", description: "", price: "", categoryId: "", dietary: "" };
 
 export default function MenuPage() {
-  const [dishes, setDishes]           = useState<Dish[]>(INITIAL_DISHES);
-  const [search, setSearch]           = useState("");
-  const [category, setCategory]       = useState("All Categories");
-  const [catOpen, setCatOpen]         = useState(false);
-  const [modalOpen, setModalOpen]     = useState(false);
-  const [editDish, setEditDish]       = useState<Dish | null>(null);
-  const [form, setForm]               = useState(EMPTY_FORM);
-  const [dragOver, setDragOver]       = useState(false);
-  const fileRef                       = useRef<HTMLInputElement>(null);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [catOpen, setCatOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editItem, setEditItem] = useState<MenuItem | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [dragOver, setDragOver] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string>("");
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  /* ── Filter ── */
-  const filtered = dishes.filter((d) => {
-    const matchSearch = d.name.toLowerCase().includes(search.toLowerCase());
-    const matchCat    = category === "All Categories" || d.category === category;
-    return matchSearch && matchCat;
-  });
+  // ── Live data ──
+  const { data: categories, isLoading: categoriesLoading } = useMenuCategories();
+  const { data: items, isLoading: itemsLoading, isError: itemsError } = useMenuItems(
+    categoryFilter !== "all" ? { categoryId: categoryFilter } : {}
+  );
+  const createItem = useCreateMenuItem();
+  const updateItem = useUpdateMenuItem();
+  const deleteItem = useDeleteMenuItem();
 
-  /* ── Open add modal ── */
+  const categoryList = categories ?? [];
+  const categoryName = (id: string) => categoryList.find((c) => c.id === id)?.name ?? "—";
+
+  const filtered = (items ?? []).filter((d) =>
+    d.name.toLowerCase().includes(search.toLowerCase())
+  );
+
   const openAdd = () => {
-    setEditDish(null);
+    setEditItem(null);
     setForm(EMPTY_FORM);
+    setImageFile(null);
+    setImagePreview("");
     setModalOpen(true);
   };
 
-  /* ── Open edit modal ── */
-  const openEdit = (dish: Dish) => {
-    setEditDish(dish);
+  const openEdit = (item: MenuItem) => {
+    setEditItem(item);
     setForm({
-      name:        dish.name,
-      description: dish.description,
-      price:       String(dish.price),
-      category:    dish.category,
-      dietary:     dish.dietary,
-      image:       dish.image,
+      name: item.name,
+      description: item.description ?? "",
+      price: String(item.basePrice),
+      categoryId: item.categoryId,
+      dietary: item.dietaryTags?.join(", ") ?? "",
     });
+    setImageFile(null);
+    setImagePreview(item.images?.[0]?.url ?? "");
     setModalOpen(true);
   };
 
-  /* ── Delete ── */
-  const deleteDish = (id: number) =>
-    setDishes((prev) => prev.filter((d) => d.id !== id));
+  const handleDelete = (item: MenuItem) => {
+    deleteItem.mutate(item.id);
+  };
 
-  /* ── Submit ── */
   const handleSubmit = () => {
-    if (!form.name || !form.price || !form.category) return;
-    if (editDish) {
-      setDishes((prev) =>
-        prev.map((d) =>
-          d.id === editDish.id
-            ? { ...d, ...form, price: Number(form.price) }
-            : d
-        )
+    if (!form.name || !form.price || !form.categoryId) {
+      toast.error("Name, price and category are required");
+      return;
+    }
+
+    const dietaryTags = form.dietary
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (editItem) {
+      updateItem.mutate(
+        {
+          id: editItem.id,
+          payload: {
+            name: form.name,
+            description: form.description || undefined,
+            basePrice: Number(form.price),
+            categoryId: form.categoryId,
+            dietaryTags,
+          },
+        },
+        { onSuccess: () => setModalOpen(false) }
       );
     } else {
-      setDishes((prev) => [
-        ...prev,
+      if (PLACEHOLDER_VENDOR_ID === "REPLACE_ME_VENDOR_ID") {
+        toast.error("Cannot create dish yet — vendorId not wired (see backend request)");
+        return;
+      }
+      createItem.mutate(
         {
-          id:          Date.now(),
-          name:        form.name,
-          description: form.description,
-          image:       form.image || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=120&q=70",
-          category:    form.category,
-          price:       Number(form.price),
-          dietary:     form.dietary,
-          orders:      0,
+          payload: {
+            vendorId: PLACEHOLDER_VENDOR_ID,
+            categoryId: form.categoryId,
+            name: form.name,
+            slug: slugify(form.name),
+            description: form.description || undefined,
+            basePrice: Number(form.price),
+            dietaryTags,
+            isAvailable: true,
+          },
+          files: imageFile ? [imageFile] : [],
         },
-      ]);
+        { onSuccess: () => setModalOpen(false) }
+      );
     }
-    setModalOpen(false);
   };
 
-  /* ── Image upload preview ── */
   const handleFile = (file: File) => {
-    const url = URL.createObjectURL(file);
-    setForm((f) => ({ ...f, image: url }));
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
   };
+
+  const isSaving = createItem.isPending || updateItem.isPending;
 
   return (
     <>
@@ -200,15 +151,15 @@ export default function MenuPage() {
         {/* Page header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-          <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-                Foodies 1 LEKKI
+            <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
+              Foodies 1 LEKKI
             </p>
             <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
-                MENU
+              MENU
             </h1>
-          <p style={{ fontSize: "0.875rem", fontWeight: 400, color: "var(--color-text-muted)", margin: 0 }}>
-            Add, edit, and manage menu items
-          </p>
+            <p style={{ fontSize: "0.875rem", fontWeight: 400, color: "var(--color-text-muted)", margin: 0 }}>
+              Add, edit, and manage menu items
+            </p>
           </div>
           <button className="btn btn-primary" onClick={openAdd} style={{ gap: 6 }}>
             <Plus size={15} strokeWidth={2.2} />
@@ -223,15 +174,11 @@ export default function MenuPage() {
             <span style={{ fontSize: "0.85rem", fontWeight: 500, color: "var(--color-text)" }}>Filter</span>
           </div>
           <div style={{ display: "flex", gap: 12 }}>
-            {/* Search */}
             <div style={{ flex: 1, position: "relative" }}>
               <Search
                 size={14}
                 strokeWidth={1.8}
-                style={{
-                  position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
-                  color: "var(--color-text-muted)", pointerEvents: "none",
-                }}
+                style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--color-text-muted)", pointerEvents: "none" }}
               />
               <input
                 className="input"
@@ -242,69 +189,50 @@ export default function MenuPage() {
               />
             </div>
 
-            {/* Category dropdown */}
             <div style={{ position: "relative", minWidth: 180 }}>
               <button
                 onClick={() => setCatOpen((v) => !v)}
                 style={{
-                  width: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "9px 12px",
-                  border: "1px solid var(--color-border)",
-                  borderRadius: 8,
-                  background: "var(--color-bg-input)",
-                  fontSize: "0.875rem",
-                  color: "var(--color-text)",
-                  cursor: "pointer",
-                  fontFamily: "var(--font-sans)",
-                  gap: 8,
+                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "9px 12px", border: "1px solid var(--color-border)", borderRadius: 8,
+                  background: "var(--color-bg-input)", fontSize: "0.875rem", color: "var(--color-text)",
+                  cursor: "pointer", fontFamily: "var(--font-sans)", gap: 8,
                 }}
               >
-                <span>{category}</span>
+                <span>{categoryFilter === "all" ? "All Categories" : categoryName(categoryFilter)}</span>
                 <ChevronDown size={14} strokeWidth={1.8} color="var(--color-text-muted)" />
               </button>
               {catOpen && (
                 <div
                   style={{
-                    position: "absolute",
-                    top: "calc(100% + 4px)",
-                    left: 0,
-                    right: 0,
-                    background: "var(--color-bg-card)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: 8,
-                    boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-                    zIndex: 50,
-                    overflow: "hidden",
+                    position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+                    background: "var(--color-bg-card)", border: "1px solid var(--color-border)",
+                    borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 50, overflow: "hidden",
                   }}
                 >
-                  {CATEGORIES.map((c) => (
+                  <button
+                    onClick={() => { setCategoryFilter("all"); setCatOpen(false); }}
+                    style={{
+                      width: "100%", textAlign: "left", padding: "9px 14px", border: "none",
+                      background: categoryFilter === "all" ? "var(--color-bg-soft)" : "transparent",
+                      color: categoryFilter === "all" ? "var(--color-primary)" : "var(--color-text)",
+                      fontFamily: "var(--font-sans)", fontSize: "0.85rem", cursor: "pointer",
+                    }}
+                  >
+                    All Categories
+                  </button>
+                  {categoryList.map((c) => (
                     <button
-                      key={c}
-                      onClick={() => { setCategory(c); setCatOpen(false); }}
+                      key={c.id}
+                      onClick={() => { setCategoryFilter(c.id); setCatOpen(false); }}
                       style={{
-                        width: "100%",
-                        textAlign: "left",
-                        padding: "9px 14px",
-                        border: "none",
-                        background: c === category ? "var(--color-bg-soft)" : "transparent",
-                        color: c === category ? "var(--color-primary)" : "var(--color-text)",
-                        fontFamily: "var(--font-sans)",
-                        fontSize: "0.85rem",
-                        fontWeight: c === category ? 500 : 400,
-                        cursor: "pointer",
-                        transition: "background 0.12s",
+                        width: "100%", textAlign: "left", padding: "9px 14px", border: "none",
+                        background: c.id === categoryFilter ? "var(--color-bg-soft)" : "transparent",
+                        color: c.id === categoryFilter ? "var(--color-primary)" : "var(--color-text)",
+                        fontFamily: "var(--font-sans)", fontSize: "0.85rem", cursor: "pointer",
                       }}
-                      onMouseEnter={(e) =>
-                        c !== category && ((e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)")
-                      }
-                      onMouseLeave={(e) =>
-                        c !== category && ((e.currentTarget as HTMLButtonElement).style.background = "transparent")
-                      }
                     >
-                      {c}
+                      {c.name}
                     </button>
                   ))}
                 </div>
@@ -323,144 +251,126 @@ export default function MenuPage() {
                   <th>Category</th>
                   <th>Price</th>
                   <th>Dietary</th>
-                  <th>Orders</th>
+                  <th>Available</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.length === 0 ? (
+                {(itemsLoading || categoriesLoading) && (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
+                      Loading…
+                    </td>
+                  </tr>
+                )}
+                {!itemsLoading && itemsError && (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
+                      Could not load menu items
+                    </td>
+                  </tr>
+                )}
+                {!itemsLoading && !itemsError && filtered.length === 0 && (
                   <tr>
                     <td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
                       No dishes found
                     </td>
                   </tr>
-                ) : (
+                )}
+                {!itemsLoading &&
+                  !itemsError &&
                   filtered.map((dish) => (
                     <tr key={dish.id}>
-                      {/* Dish */}
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                          <div style={{ width: 56, height: 56, borderRadius: 10, overflow: "hidden", flexShrink: 0, border: "1px solid var(--color-border)" }}>
-                            <Image
-                              src={dish.image}
-                              alt={dish.name}
-                              width={56}
-                              height={56}
-                              style={{ objectFit: "cover", width: "100%", height: "100%" }}
-                            />
+                          <div style={{ width: 56, height: 56, borderRadius: 10, overflow: "hidden", flexShrink: 0, border: "1px solid var(--color-border)", background: "var(--color-bg-soft)" }}>
+                            {dish.images?.[0]?.url ? (
+                              <Image
+                                src={dish.images[0].url}
+                                alt={dish.name}
+                                width={56}
+                                height={56}
+                                style={{ objectFit: "cover", width: "100%", height: "100%" }}
+                              />
+                            ) : null}
                           </div>
                           <div>
                             <p style={{ margin: 0, fontWeight: 500, fontSize: "0.875rem", color: "var(--color-text)" }}>
                               {dish.name}
                             </p>
                             <p style={{ margin: "2px 0 0", fontWeight: 400, fontSize: "0.75rem", color: "var(--color-text-muted)", maxWidth: 340, lineHeight: 1.4 }}>
-                              {dish.description}
+                              {dish.description || "—"}
                             </p>
                           </div>
                         </div>
                       </td>
-
-                      {/* Category */}
-                      <td>{dish.category}</td>
-
-                      {/* Price */}
+                      <td>{dish.category?.name ?? categoryName(dish.categoryId)}</td>
                       <td style={{ fontWeight: 500, color: "var(--color-primary)" }}>
-                        ₦{dish.price.toLocaleString()}
+                        ₦{Number(dish.basePrice).toLocaleString()}
                       </td>
-
-                      {/* Dietary */}
                       <td>
-                        <span className="badge badge-gray">{dish.dietary}</span>
+                        {dish.dietaryTags?.length ? (
+                          <span className="badge badge-gray">{dish.dietaryTags.join(", ")}</span>
+                        ) : (
+                          <span style={{ color: "var(--color-text-muted)" }}>—</span>
+                        )}
                       </td>
-
-                      {/* Orders */}
-                      <td style={{ fontWeight: 400 }}>{dish.orders}</td>
-
-                      {/* Actions */}
+                      <td>
+                        <span className={dish.isAvailable ? "badge badge-green" : "badge badge-gray"}>
+                          {dish.isAvailable ? "Available" : "Unavailable"}
+                        </span>
+                      </td>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <button
                             aria-label={`Edit ${dish.name}`}
                             onClick={() => openEdit(dish)}
-                            style={{
-                              background: "none", border: "none", cursor: "pointer",
-                              color: "var(--color-text-muted)", display: "flex",
-                              padding: 4, borderRadius: 6, transition: "color 0.15s",
-                            }}
-                            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text)")}
-                            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-muted)")}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6 }}
                           >
                             <SquarePen size={15} strokeWidth={1.8} />
                           </button>
                           <button
                             aria-label={`Delete ${dish.name}`}
-                            onClick={() => deleteDish(dish.id)}
-                            style={{
-                              background: "none", border: "none", cursor: "pointer",
-                              color: "var(--color-text-muted)", display: "flex",
-                              padding: 4, borderRadius: 6, transition: "color 0.15s",
-                            }}
-                            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-primary)")}
-                            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-muted)")}
+                            onClick={() => handleDelete(dish)}
+                            disabled={deleteItem.isPending}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6 }}
                           >
                             <Trash2 size={15} strokeWidth={1.8} />
                           </button>
                         </div>
                       </td>
                     </tr>
-                  ))
-                )}
+                  ))}
               </tbody>
             </table>
           </div>
         </div>
       </div>
 
-      {/* ── Modal overlay ── */}
+      {/* ── Modal ── */}
       {modalOpen && (
         <div
-          style={{
-            position: "fixed", inset: 0, zIndex: 100,
-            background: "rgba(0,0,0,0.35)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: 20,
-          }}
+          style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
           onClick={(e) => e.target === e.currentTarget && setModalOpen(false)}
         >
           <div
-            style={{
-              background: "var(--color-bg-card)",
-              borderRadius: 16,
-              width: "100%",
-              maxWidth: 560,
-              maxHeight: "90vh",
-              overflowY: "auto",
-              padding: 28,
-              display: "flex",
-              flexDirection: "column",
-              gap: 20,
-            }}
+            style={{ background: "var(--color-bg-card)", borderRadius: 16, width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto", padding: 28, display: "flex", flexDirection: "column", gap: 20 }}
             className="no-scrollbar"
           >
-            {/* Modal header */}
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 600, color: "var(--color-heading)" }}>
-                  {editDish ? "Edit Dish" : "Add New Dish"}
+                  {editItem ? "Edit Dish" : "Add New Dish"}
                 </h3>
                 <p style={{ margin: "4px 0 0", fontSize: "0.82rem", fontWeight: 400, color: "var(--color-text-muted)" }}>
-                  {editDish ? "Update the dish details below." : "Fill in the details to add a new dish to the menu."}
+                  {editItem ? "Update the dish details below." : "Fill in the details to add a new dish to the menu."}
                 </p>
               </div>
-              <button
-                onClick={() => setModalOpen(false)}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6 }}
-              >
+              <button onClick={() => setModalOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6 }}>
                 <X size={18} strokeWidth={1.8} />
               </button>
             </div>
 
-            {/* Dish Name */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
                 Dish Name <span style={{ color: "var(--color-primary)" }}>*</span>
@@ -473,7 +383,6 @@ export default function MenuPage() {
               />
             </div>
 
-            {/* Description */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
                 Description
@@ -488,7 +397,6 @@ export default function MenuPage() {
               />
             </div>
 
-            {/* Price + Category */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
@@ -509,13 +417,13 @@ export default function MenuPage() {
                 <div style={{ position: "relative" }}>
                   <select
                     className="input appearance-none"
-                    value={form.category}
-                    onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+                    value={form.categoryId}
+                    onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
                     style={{ paddingRight: "2.5rem", color: "var(--color-text)" }}
                   >
                     <option value="" disabled>Select category</option>
-                    {CATEGORIES.slice(1).map((c) => (
-                      <option key={c} value={c}>{c}</option>
+                    {categoryList.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
                   <ChevronDown
@@ -527,10 +435,9 @@ export default function MenuPage() {
               </div>
             </div>
 
-            {/* Dietary */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
-                Dietary
+                Dietary <span style={{ fontWeight: 400, color: "var(--color-text-muted)" }}>(comma-separated, e.g. Gluten-free, Vegetarian)</span>
               </label>
               <input
                 className="input"
@@ -540,7 +447,6 @@ export default function MenuPage() {
               />
             </div>
 
-            {/* Dish image upload */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
                 Dish Image
@@ -557,27 +463,14 @@ export default function MenuPage() {
                 }}
                 style={{
                   border: `1.5px dashed ${dragOver ? "var(--color-primary)" : "var(--color-border)"}`,
-                  borderRadius: 10,
-                  padding: "28px 20px",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                  cursor: "pointer",
+                  borderRadius: 10, padding: "28px 20px", display: "flex", flexDirection: "column",
+                  alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer",
                   background: dragOver ? "rgba(225,11,28,0.03)" : "var(--color-bg-soft)",
-                  transition: "border-color 0.15s, background 0.15s",
-                  minHeight: 120,
+                  transition: "border-color 0.15s, background 0.15s", minHeight: 120,
                 }}
               >
-                {form.image ? (
-                  <Image
-                    src={form.image}
-                    alt="Preview"
-                    width={80}
-                    height={80}
-                    style={{ borderRadius: 8, objectFit: "cover" }}
-                  />
+                {imagePreview ? (
+                  <Image src={imagePreview} alt="Preview" width={80} height={80} style={{ borderRadius: 8, objectFit: "cover" }} />
                 ) : (
                   <>
                     <UploadCloud size={24} strokeWidth={1.6} color="var(--color-text-muted)" />
@@ -594,15 +487,23 @@ export default function MenuPage() {
                 style={{ display: "none" }}
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
               />
+              {editItem && (
+                <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+                  {/* TODO(BACKEND): AdminMenuController has no PATCH .../images route, only 
+                      POST /admin/menu/items/:id/images per TASKS.md — image editing not wired 
+                      here yet, see backend request doc */}
+                  Image editing on existing dishes not wired yet — see backend request
+                </p>
+              )}
             </div>
 
-            {/* Submit */}
             <button
               className="btn btn-primary"
               onClick={handleSubmit}
-              style={{ width: "100%", justifyContent: "center", padding: "12px", fontSize: "0.875rem" }}
+              disabled={isSaving}
+              style={{ width: "100%", justifyContent: "center", padding: "12px", fontSize: "0.875rem", opacity: isSaving ? 0.6 : 1 }}
             >
-              {editDish ? "Save Changes" : "Add Dish"}
+              {isSaving ? "Saving…" : editItem ? "Save Changes" : "Add Dish"}
             </button>
           </div>
         </div>
