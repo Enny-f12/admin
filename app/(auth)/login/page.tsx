@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, ChevronDown } from "lucide-react";
 import Image from "next/image";
-import { useLogin } from "@/hooks/useAuth";
+import { useAuthStore } from "@/store/useAuthStore";
 
 const SLIDES = [
   { src: "/home/login-1.jpg", label: "Signature dish", title: "Hot & Crispy\nFried Chicken" },
@@ -33,7 +33,7 @@ export default function LoginPage() {
   const [current, setCurrent] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
 
-  const login = useLogin();
+  const { login, isLoading, error, clearError } = useAuthStore();
 
   const {
     register,
@@ -48,23 +48,20 @@ export default function LoginPage() {
     return () => clearInterval(timer);
   }, []);
 
-  const onSubmit = (data: LoginFormValues) => {
+  useEffect(() => {
+    return () => clearError();
+  }, [clearError]);
+
+  const onSubmit = async (data: LoginFormValues) => {
     // NOTE: `branch` is intentionally NOT sent — the backend's LoginDto
     // only accepts { email, password } right now, and the ValidationPipe
     // has forbidNonWhitelisted: true, so sending an extra field would 400.
     // Once the backend request below is implemented, add branchId here.
-    login.mutate(
-      { email: data.email, password: data.password },
-      {
-        onSuccess: () => {
-          router.push("/dashboard");
-        },
-      },
-    );
+    const success = await login({ email: data.email, password: data.password });
+    if (success) {
+      router.push("/dashboard");
+    }
   };
-
-  const apiErrorMessage =
-    (login.error as any)?.response?.data?.message ?? "Something went wrong. Please try again.";
 
   return (
     <div
@@ -234,20 +231,20 @@ export default function LoginPage() {
                 </div>
 
                 {/* API error */}
-                {login.isError && (
+                {error && (
                   <p className="text-xs text-center" style={{ color: "var(--color-error)" }}>
-                    {apiErrorMessage}
+                    {error}
                   </p>
                 )}
 
                 {/* Submit */}
                 <button
                   type="submit"
-                  disabled={login.isPending}
+                  disabled={isLoading}
                   className="btn btn-primary w-full justify-center py-3 text-sm mt-1"
-                  style={{ opacity: login.isPending ? 0.65 : 1 }}
+                  style={{ opacity: isLoading ? 0.65 : 1 }}
                 >
-                  {login.isPending ? "Signing in…" : "Sign In to Dashboard"}
+                  {isLoading ? "Signing in…" : "Sign In to Dashboard"}
                 </button>
               </form>
             </div>

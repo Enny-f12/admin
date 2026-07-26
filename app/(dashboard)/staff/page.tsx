@@ -1,7 +1,7 @@
+// app/(admin)/staff/page.tsx
 "use client";
 
-import { useState } from "react";
-import { toast } from "sonner";
+import { useState, useEffect } from "react";
 import {
   Plus,
   Search,
@@ -11,22 +11,8 @@ import {
   ChevronDown,
   Check,
 } from "lucide-react";
-
-
-type StaffStatus = "Active" | "Offline";
-
-type StaffMember = {
-  id: number;
-  name: string;
-  email: string;
-  phone: string;
-  role: string;
-  status: StaffStatus;
-  lastSeen: string;
-  branches: string[];
-  invPermissions: string[];
-  permissions: string[];
-};
+import { useStaffStore } from "@/store/useStaffStore";
+import { StaffMember, CreateStaffPayload } from "@/types/staff";
 
 type StaffForm = {
   name: string;
@@ -38,7 +24,6 @@ type StaffForm = {
   permissions: string[];
   sendWelcome: boolean;
 };
-
 
 const ROLES = ["Manager", "Kitchen Staff", "Delivery Coord", "Admin", "Cashier", "Waiter"];
 const BRANCHES = ["Lekki", "Abuja", "Maitama", "Victoria Island"];
@@ -63,12 +48,16 @@ const EMPTY_FORM: StaffForm = {
   permissions: ["Orders - Update Status"], sendWelcome: true,
 };
 
-const SEED_STAFF: StaffMember[] = [
-  { id: 1, name: "John Isaac",  email: "johnisaac@gmail.com", phone: "07035467899", role: "Manager",        status: "Active",  lastSeen: "Today",     branches: ["Lekki"],         invPermissions: ["Adjust manual items only"], permissions: ["Orders - Update Status"] },
-  { id: 2, name: "Tunde Bello", email: "tunde@gmail.com",     phone: "08012345678", role: "Kitchen Staff",  status: "Active",  lastSeen: "Today",     branches: ["Lekki", "Abuja"], invPermissions: [],                           permissions: [] },
-  { id: 3, name: "John Caleb",  email: "johncaleb@gmail.com", phone: "09011223344", role: "Delivery Coord", status: "Active",  lastSeen: "Today",     branches: ["Abuja"],          invPermissions: [],                           permissions: ["Orders - View", "Orders - Update Status"] },
-  { id: 4, name: "Tolu Ajagbe", email: "tolu@gmail.com",      phone: "08099887766", role: "Admin",          status: "Offline", lastSeen: "Yesterday", branches: ["Lekki", "Abuja"], invPermissions: INV_PERMISSIONS,              permissions: PERMISSIONS },
-];
+function formatLastSeen(iso: string | null) {
+  if (!iso) return "Never";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 60) return "Today";
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return "Today";
+  if (hrs < 48) return "Yesterday";
+  return new Date(iso).toLocaleDateString();
+}
 
 /* ══════════════════════════════════════════
    HELPERS
@@ -156,10 +145,12 @@ function StaffModal({
   editStaff,
   onClose,
   onSave,
+  isSaving,
 }: {
   editStaff: StaffMember | null;
   onClose: () => void;
   onSave: (form: StaffForm) => void;
+  isSaving: boolean;
 }) {
   const [form, setForm] = useState<StaffForm>(
     editStaff
@@ -267,14 +258,16 @@ function StaffModal({
           </div>
         </div>
 
-        {/* Welcome email */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Checkbox
-            label="Send welcome email with login instructions"
-            checked={form.sendWelcome}
-            onChange={(v) => setForm((f) => ({ ...f, sendWelcome: v }))}
-          />
-        </div>
+        {/* Welcome email — only relevant when creating a new staff member */}
+        {!editStaff && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Checkbox
+              label="Send welcome email with login instructions"
+              checked={form.sendWelcome}
+              onChange={(v) => setForm((f) => ({ ...f, sendWelcome: v }))}
+            />
+          </div>
+        )}
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 10 }}>
@@ -292,9 +285,10 @@ function StaffModal({
           <button
             className="btn btn-primary"
             onClick={() => onSave(form)}
-            style={{ flex: 1, justifyContent: "center", padding: "11px" }}
+            disabled={isSaving}
+            style={{ flex: 1, justifyContent: "center", padding: "11px", opacity: isSaving ? 0.6 : 1 }}
           >
-            {editStaff ? "Done" : "Add Staff"}
+            {isSaving ? "Saving…" : editStaff ? "Done" : "Add Staff"}
           </button>
         </div>
       </div>
@@ -306,12 +300,19 @@ function StaffModal({
    MAIN PAGE
 ══════════════════════════════════════════ */
 export default function StaffManagementPage() {
-  const [staff, setStaff]       = useState<StaffMember[]>(SEED_STAFF);
-  const [search, setSearch]     = useState("");
-  const [modalOpen, setModal]   = useState(false);
-  const [editTarget, setEdit]   = useState<StaffMember | null>(null);
+  const [search, setSearch] = useState("");
+  const [modalOpen, setModal] = useState(false);
+  const [editTarget, setEdit] = useState<StaffMember | null>(null);
 
-  const filtered = staff.filter((s) =>
+  const { staff, isLoading, isError, isSaving, isDeleting, fetchStaff, createStaff, updateStaff, deleteStaff } =
+    useStaffStore();
+
+  useEffect(() => {
+    fetchStaff();
+  }, [fetchStaff]);
+
+  const list = staff ?? [];
+  const filtered = list.filter((s) =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
     s.role.toLowerCase().includes(search.toLowerCase())
   );
@@ -319,24 +320,38 @@ export default function StaffManagementPage() {
   const openAdd = () => { setEdit(null); setModal(true); };
   const openEdit = (s: StaffMember) => { setEdit(s); setModal(true); };
 
-  const handleSave = (form: StaffForm) => {
+  const handleSave = async (form: StaffForm) => {
     if (!form.name) return;
+
     if (editTarget) {
-      setStaff((p) => p.map((s) => s.id === editTarget.id ? { ...s, ...form } : s));
-      toast.success(`${form.name} updated`);
+      const success = await updateStaff(editTarget.id, {
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        role: form.role,
+        branches: form.branches,
+        invPermissions: form.invPermissions,
+        permissions: form.permissions,
+      });
+      if (success) setModal(false);
     } else {
-      setStaff((p) => [...p, {
-        id: Date.now(), ...form,
-        status: "Active", lastSeen: "Today",
-      }]);
-      toast.success(`${form.name} added`);
+      const payload: CreateStaffPayload = {
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        role: form.role,
+        branches: form.branches,
+        invPermissions: form.invPermissions,
+        permissions: form.permissions,
+        sendWelcomeEmail: form.sendWelcome,
+      };
+      const success = await createStaff(payload);
+      if (success) setModal(false);
     }
-    setModal(false);
   };
 
-  const handleDelete = (s: StaffMember) => {
-    setStaff((p) => p.filter((x) => x.id !== s.id));
-    toast.success(`${s.name} removed`);
+  const handleDelete = async (s: StaffMember) => {
+    await deleteStaff(s.id);
   };
 
   return (
@@ -346,15 +361,15 @@ export default function StaffManagementPage() {
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-          <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-                Foodies 1 LEKKI
+            <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
+              Foodies 1 LEKKI
             </p>
             <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
               STAFF MANAGEMENT
             </h1>
-          <p style={{ fontSize: "0.875rem", fontWeight: 400, color: "var(--color-text-muted)", margin: 0 }}>
-            View and manage staff
-          </p>
+            <p style={{ fontSize: "0.875rem", fontWeight: 400, color: "var(--color-text-muted)", margin: 0 }}>
+              View and manage staff
+            </p>
           </div>
           <button className="btn btn-primary" onClick={openAdd} style={{ gap: 6 }}>
             <Plus size={14} strokeWidth={2.2} /> Add Staff
@@ -369,7 +384,7 @@ export default function StaffManagementPage() {
               <Search size={14} strokeWidth={1.8} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--color-text-muted)", pointerEvents: "none" }} />
               <input
                 className="input"
-                placeholder="Search customers..."
+                placeholder="Search staff..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 style={{ paddingLeft: 36 }}
@@ -390,14 +405,28 @@ export default function StaffManagementPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.length === 0 ? (
+                {isLoading && (
+                  <tr>
+                    <td colSpan={5} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
+                      Loading…
+                    </td>
+                  </tr>
+                )}
+                {!isLoading && isError && (
+                  <tr>
+                    <td colSpan={5} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
+                      Could not load staff
+                    </td>
+                  </tr>
+                )}
+                {!isLoading && !isError && filtered.length === 0 && (
                   <tr>
                     <td colSpan={5} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
                       No staff found
                     </td>
                   </tr>
-                ) : (
-                  filtered.map((s) => (
+                )}
+                {!isLoading && !isError && filtered.map((s) => (
                     <tr key={s.id}>
                       <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{s.name}</td>
                       <td style={{ fontWeight: 400, color: "var(--color-text-secondary)" }}>{s.role}</td>
@@ -405,15 +434,15 @@ export default function StaffManagementPage() {
                         <span
                           className="badge"
                           style={{
-                            background: s.status === "Active" ? "rgba(34,197,94,0.12)" : "var(--color-bg-soft)",
-                            color: s.status === "Active" ? "#16a34a" : "var(--color-text-muted)",
+                            background: s.status === "ACTIVE" ? "rgba(34,197,94,0.12)" : "var(--color-bg-soft)",
+                            color: s.status === "ACTIVE" ? "#16a34a" : "var(--color-text-muted)",
                           }}
                         >
-                          {s.status}
+                          {s.status === "ACTIVE" ? "Active" : "Offline"}
                         </span>
                       </td>
                       <td style={{ fontWeight: 400, color: "var(--color-text-muted)", fontSize: "0.82rem" }}>
-                        {s.lastSeen}
+                        {formatLastSeen(s.lastSeenAt)}
                       </td>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -428,6 +457,7 @@ export default function StaffManagementPage() {
                           </button>
                           <button
                             onClick={() => handleDelete(s)}
+                            disabled={isDeleting}
                             aria-label={`Delete ${s.name}`}
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6, transition: "color 0.15s" }}
                             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-primary)")}
@@ -438,8 +468,7 @@ export default function StaffManagementPage() {
                         </div>
                       </td>
                     </tr>
-                  ))
-                )}
+                  ))}
               </tbody>
             </table>
           </div>
@@ -451,6 +480,7 @@ export default function StaffManagementPage() {
           editStaff={editTarget}
           onClose={() => setModal(false)}
           onSave={handleSave}
+          isSaving={isSaving}
         />
       )}
     </>

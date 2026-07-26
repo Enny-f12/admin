@@ -1,6 +1,7 @@
 // app/(admin)/dashboard/page.tsx
 "use client";
 
+import { useEffect } from "react";
 import {
   DollarSign,
   ClipboardList,
@@ -21,12 +22,7 @@ import {
   FileSearch,
 } from "lucide-react";
 import { useBranch } from "../layout";
-import {
-  useDashboardSummary,
-  useLowStockAlerts,
-  useRecentAuditLogs,
-  useAdminOrders,
-} from "@/hooks/useDashboard";
+import { useDashboardStore } from "@/store/useDashboardStore";
 
 /* ── Types ── */
 type StatCard = {
@@ -82,11 +78,25 @@ function timeAgo(iso?: string) {
 export default function DashboardPage() {
   const branch = useBranch();
 
-  // ── Live queries ──
-  const { data: summary, isLoading: summaryLoading, isError: summaryError } = useDashboardSummary();
-  const { data: lowStock, isLoading: lowStockLoading, isError: lowStockError } = useLowStockAlerts();
-  const { data: activity, isLoading: activityLoading, isError: activityError } = useRecentAuditLogs(5);
-  const { data: orders, isLoading: ordersLoading, isError: ordersError } = useAdminOrders({ limit: 4 });
+  const {
+    summary,
+    summaryLoading,
+    summaryError,
+    lowStock,
+    lowStockLoading,
+    lowStockError,
+    auditLogs: activity,
+    auditLogsLoading: activityLoading,
+    auditLogsError: activityError,
+    orders,
+    ordersLoading,
+    ordersError,
+    fetchAll,
+  } = useDashboardStore();
+
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
 
   const STATS: StatCard[] = [
     {

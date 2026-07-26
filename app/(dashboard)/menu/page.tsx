@@ -1,7 +1,7 @@
 // app/(admin)/menu/page.tsx
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import { toast } from "sonner";
 import {
@@ -14,7 +14,7 @@ import {
   Trash2,
   UploadCloud,
 } from "lucide-react";
-import { useMenuCategories, useMenuItems, useCreateMenuItem, useUpdateMenuItem, useDeleteMenuItem } from "@/hooks/useMenu";
+import { useMenuStore } from "@/store/useMenuStore";
 import { MenuItem } from "@/types/menu";
 
 // TODO(BACKEND): vendorId isn't returned anywhere on login or available via
@@ -47,13 +47,29 @@ export default function MenuPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ── Live data ──
-  const { data: categories, isLoading: categoriesLoading } = useMenuCategories();
-  const { data: items, isLoading: itemsLoading, isError: itemsError } = useMenuItems(
-    categoryFilter !== "all" ? { categoryId: categoryFilter } : {}
-  );
-  const createItem = useCreateMenuItem();
-  const updateItem = useUpdateMenuItem();
-  const deleteItem = useDeleteMenuItem();
+  const {
+    categories,
+    categoriesLoading,
+    items,
+    itemsLoading,
+    itemsError,
+    isCreating,
+    isUpdating,
+    isDeleting,
+    fetchCategories,
+    fetchItems,
+    createItem,
+    updateItem,
+    deleteItem,
+  } = useMenuStore();
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
+
+  useEffect(() => {
+    fetchItems(categoryFilter !== "all" ? { categoryId: categoryFilter } : {});
+  }, [categoryFilter, fetchItems]);
 
   const categoryList = categories ?? [];
   const categoryName = (id: string) => categoryList.find((c) => c.id === id)?.name ?? "—";
@@ -84,11 +100,15 @@ export default function MenuPage() {
     setModalOpen(true);
   };
 
-  const handleDelete = (item: MenuItem) => {
-    deleteItem.mutate(item.id);
+  const handleDelete = async (item: MenuItem) => {
+    // NOTE: isDeleting is a single shared flag across all rows — every
+    // delete button on the page disables while any delete is in flight.
+    // Fine at current table sizes; switch to a `deletingId` field on the
+    // store if you need per-row granularity later.
+    await deleteItem(item.id);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!form.name || !form.price || !form.categoryId) {
       toast.error("Name, price and category are required");
       return;
@@ -100,40 +120,33 @@ export default function MenuPage() {
       .filter(Boolean);
 
     if (editItem) {
-      updateItem.mutate(
-        {
-          id: editItem.id,
-          payload: {
-            name: form.name,
-            description: form.description || undefined,
-            basePrice: Number(form.price),
-            categoryId: form.categoryId,
-            dietaryTags,
-          },
-        },
-        { onSuccess: () => setModalOpen(false) }
-      );
+      const success = await updateItem(editItem.id, {
+        name: form.name,
+        description: form.description || undefined,
+        basePrice: Number(form.price),
+        categoryId: form.categoryId,
+        dietaryTags,
+      });
+      if (success) setModalOpen(false);
     } else {
       if (PLACEHOLDER_VENDOR_ID === "REPLACE_ME_VENDOR_ID") {
         toast.error("Cannot create dish yet — vendorId not wired (see backend request)");
         return;
       }
-      createItem.mutate(
+      const success = await createItem(
         {
-          payload: {
-            vendorId: PLACEHOLDER_VENDOR_ID,
-            categoryId: form.categoryId,
-            name: form.name,
-            slug: slugify(form.name),
-            description: form.description || undefined,
-            basePrice: Number(form.price),
-            dietaryTags,
-            isAvailable: true,
-          },
-          files: imageFile ? [imageFile] : [],
+          vendorId: PLACEHOLDER_VENDOR_ID,
+          categoryId: form.categoryId,
+          name: form.name,
+          slug: slugify(form.name),
+          description: form.description || undefined,
+          basePrice: Number(form.price),
+          dietaryTags,
+          isAvailable: true,
         },
-        { onSuccess: () => setModalOpen(false) }
+        imageFile ? [imageFile] : []
       );
+      if (success) setModalOpen(false);
     }
   };
 
@@ -142,7 +155,7 @@ export default function MenuPage() {
     setImagePreview(URL.createObjectURL(file));
   };
 
-  const isSaving = createItem.isPending || updateItem.isPending;
+  const isSaving = isCreating || isUpdating;
 
   return (
     <>
@@ -332,7 +345,7 @@ export default function MenuPage() {
                           <button
                             aria-label={`Delete ${dish.name}`}
                             onClick={() => handleDelete(dish)}
-                            disabled={deleteItem.isPending}
+                            disabled={isDeleting}
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6 }}
                           >
                             <Trash2 size={15} strokeWidth={1.8} />
@@ -489,9 +502,6 @@ export default function MenuPage() {
               />
               {editItem && (
                 <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                  {/* TODO(BACKEND): AdminMenuController has no PATCH .../images route, only 
-                      POST /admin/menu/items/:id/images per TASKS.md — image editing not wired 
-                      here yet, see backend request doc */}
                   Image editing on existing dishes not wired yet — see backend request
                 </p>
               )}

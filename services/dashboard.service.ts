@@ -5,7 +5,11 @@ import {
   SalesTrendPoint,
   PopularItem,
   OrderDistribution,
-  DashboardCustomer,
+  DashboardCustomersResponse,
+  LowStockAlert,
+  AuditLogEntry,
+  AdminOrder,
+  AdminOrdersFilters,
 } from '@/types/dashboard';
 
 export const dashboardService = {
@@ -31,6 +35,24 @@ export const dashboardService = {
 
   getCustomers: (vendorId?: string, page = 1, limit = 10) =>
     apiClient
-      .get<DashboardCustomer[]>('/admin/dashboard/customers', { params: { vendorId, page, limit } })
+      .get<DashboardCustomersResponse>('/admin/dashboard/customers', {
+        params: { vendorId, page, limit },
+      })
       .then((r) => r.data),
+
+  // NOT YET BUILT — backend request doc #1
+  getLowStockAlerts: (branchId?: string) =>
+    apiClient
+      .get<LowStockAlert[]>('/admin/inventory/alerts', { params: { branchId } })
+      .then((r) => r.data),
+
+  // NOT YET BUILT — backend request doc #2
+  getRecentAuditLogs: (limit = 10, branchId?: string) =>
+    apiClient
+      .get<AuditLogEntry[]>('/admin/audit-logs', { params: { limit, branchId } })
+      .then((r) => r.data),
+
+  // LIVE route exists, response shape unconfirmed — request doc #5
+  getAdminOrders: (filters: AdminOrdersFilters = {}) =>
+    apiClient.get<AdminOrder[]>('/admin/orders', { params: filters }).then((r) => r.data),
 };

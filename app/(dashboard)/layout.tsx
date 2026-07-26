@@ -1,3 +1,4 @@
+// app/(admin)/layout.tsx
 "use client";
 
 import { useState } from "react";
@@ -27,13 +28,13 @@ import {
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
-  Bell,
   Store,
   ChevronDown,
   Check,
   Calculator,
   ClipboardList,
 } from "lucide-react";
+import { NotificationBell } from "@/components/NotificationBell";
 
 /* ── Nav structure ── */
 const NAV_SECTIONS = [
@@ -82,6 +83,10 @@ const NAV_SECTIONS = [
   },
 ];
 
+// TODO(BACKEND): branch scoping doesn't exist anywhere in the backend yet
+// (no branchId on JWT, no branch filtering in any service). This selector
+// is currently cosmetic/local-state only — see backend request doc,
+// "ARCHITECTURE — Branch scoping" item.
 const BRANCHES = ["Lekki 1", "Lekki 2", "Maitama"];
 
 /* ── Shared branch context so page content can react to the selector ── */
@@ -504,42 +509,8 @@ export default function DashboardLayout({
               )}
             </div>
 
-            {/* Notifications */}
-            <button
-              aria-label="Notifications"
-              style={{
-                position: "relative",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                color: "var(--color-text-secondary)",
-                display: "flex",
-                padding: 6,
-                borderRadius: 8,
-                transition: "color 0.15s",
-              }}
-              onMouseEnter={(e) =>
-                ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text)")
-              }
-              onMouseLeave={(e) =>
-                ((e.currentTarget as HTMLButtonElement).style.color =
-                  "var(--color-text-secondary)")
-              }
-            >
-              <Bell size={20} strokeWidth={1.8} />
-              <span
-                style={{
-                  position: "absolute",
-                  top: 5,
-                  right: 5,
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: "var(--color-secondary)",
-                  border: "2px solid var(--color-bg-card)",
-                }}
-              />
-            </button>
+            {/* Notifications — live, wired to GET /notifications */}
+            <NotificationBell />
           </div>
         </header>
 
