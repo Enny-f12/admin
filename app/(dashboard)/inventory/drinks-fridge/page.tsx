@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Plus,
   ArrowLeftRight,
@@ -11,38 +11,25 @@ import {
   X,
   Search,
 } from "lucide-react";
+import { useDrinksStore } from "@/store/useDrinkStore";
+import { DrinksItem, SupplierType } from "@/types/drinks.types";
 
 type Tab = "receive" | "transfer" | "threshold";
 
-type ReceivedItem = {
+type DraftLineItem = {
   name: string;
   qty: number;
   costPerUnit: number;
 };
 
-type ThresholdRow = {
-  name: string;
-  threshold: number;
-  notify: boolean;
-};
-
-const INITIAL_RECEIVED: ReceivedItem[] = [
-  { name: "Can Coke",       qty: 50,  costPerUnit: 500 },
-  { name: "Can Fanta",      qty: 50,  costPerUnit: 500 },
-  { name: "Aquafina Water", qty: 100, costPerUnit: 200 },
-];
-
-const INITIAL_THRESHOLDS: ThresholdRow[] = [
-  { name: "Can Coke",       threshold: 10, notify: true },
-  { name: "Aquafina Water", threshold: 15, notify: true },
-  { name: "Can Sprite",     threshold: 5,  notify: true },
-  { name: "Can Fanta",      threshold: 10, notify: true },
-  { name: "Plastic Coke",   threshold: 15, notify: true },
-  { name: "Zobo",           threshold: 10, notify: true },
-];
-
 export default function DrinksFridgePage() {
   const [tab, setTab] = useState<Tab>("receive");
+  const { fetchItems, fetchSuppliers } = useDrinksStore();
+
+  useEffect(() => {
+    fetchItems();
+    fetchSuppliers();
+  }, [fetchItems, fetchSuppliers]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -61,7 +48,7 @@ export default function DrinksFridgePage() {
   );
 }
 
-/* ── Header (eyebrow / heading changes with tab) ── */
+/* ── Header ── */
 function Header({ tab }: { tab: Tab }) {
   const heading = tab === "receive" ? "RECEIVE DRINKS DELIVERY" : "TRANSFER TO FRIDGE";
   return (
@@ -109,23 +96,42 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 /* ── Receive Delivery ── */
 function ReceiveDeliveryView() {
-  const [supplier, setSupplier] = useState("Beverage Distributor Limited");
-  const [deliveryDate, setDeliveryDate] = useState("May 15, 2025");
-  const [invoice, setInvoice] = useState("INV-5678.......");
-  const [items, setItems] = useState<ReceivedItem[]>(INITIAL_RECEIVED);
+  const { suppliers, createDelivery, isSubmittingDelivery } = useDrinksStore();
+
+  const [supplierId, setSupplierId] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [invoice, setInvoice] = useState("");
+  const [items, setItems] = useState<DraftLineItem[]>([]);
   const [addItemOpen, setAddItemOpen] = useState(false);
   const [addSupplierOpen, setAddSupplierOpen] = useState(false);
 
   const totalCost = items.reduce((sum, i) => sum + i.qty * i.costPerUnit, 0);
+
+  const submit = async (isDraft: boolean) => {
+    if (!items.length) return;
+    const ok = await createDelivery({
+      supplierId: supplierId || null,
+      deliveryDate,
+      invoiceNumber: invoice,
+      isDraft,
+      items: items.map((i) => ({ itemName: i.name, quantity: i.qty, costPerUnit: i.costPerUnit })),
+    });
+    if (ok && !isDraft) {
+      setItems([]);
+      setInvoice("");
+    }
+  };
 
   return (
     <>
       <div className="card">
         <Field label="Supplier">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <select className="input" value={supplier} onChange={(e) => setSupplier(e.target.value)} style={{ flex: 1, minWidth: 200 }}>
-              <option>Beverage Distributor Limited</option>
-              <option>Fresh Farm Limited</option>
+            <select className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} style={{ flex: 1, minWidth: 200 }}>
+              <option value="">Select supplier</option>
+              {suppliers?.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
             </select>
             <button
               onClick={() => setAddSupplierOpen(true)}
@@ -146,6 +152,7 @@ function ReceiveDeliveryView() {
             <Calendar size={16} strokeWidth={1.8} color="var(--color-primary)" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
             <input
               className="input"
+              type="date"
               value={deliveryDate}
               onChange={(e) => setDeliveryDate(e.target.value)}
               style={{ paddingLeft: 38, maxWidth: 260 }}
@@ -154,7 +161,7 @@ function ReceiveDeliveryView() {
         </Field>
 
         <Field label="Invoice Number">
-          <input className="input" value={invoice} onChange={(e) => setInvoice(e.target.value)} style={{ maxWidth: 300 }} />
+          <input className="input" placeholder="INV-5678......." value={invoice} onChange={(e) => setInvoice(e.target.value)} style={{ maxWidth: 300 }} />
         </Field>
       </div>
 
@@ -172,8 +179,15 @@ function ReceiveDeliveryView() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
-                <tr key={item.name}>
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan={4} style={{ textAlign: "center", padding: 20, color: "var(--color-text-muted)" }}>
+                    No items added yet
+                  </td>
+                </tr>
+              )}
+              {items.map((item, i) => (
+                <tr key={`${item.name}-${i}`}>
                   <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{item.name}</td>
                   <td>{item.qty}</td>
                   <td>₦{item.costPerUnit.toLocaleString()}</td>
@@ -209,8 +223,15 @@ function ReceiveDeliveryView() {
       </p>
 
       <div style={{ display: "flex", gap: 10 }}>
-        <button style={outlineBtn}>Save Draft</button>
-        <button className="btn btn-primary" style={{ padding: "10px 20px", fontSize: "0.85rem" }}>
+        <button style={outlineBtn} disabled={!items.length || isSubmittingDelivery} onClick={() => submit(true)}>
+          {isSubmittingDelivery ? "Saving…" : "Save Draft"}
+        </button>
+        <button
+          className="btn btn-primary"
+          style={{ padding: "10px 20px", fontSize: "0.85rem" }}
+          disabled={!items.length || isSubmittingDelivery}
+          onClick={() => submit(false)}
+        >
           Confirm Receipt
         </button>
       </div>
@@ -229,32 +250,55 @@ function ReceiveDeliveryView() {
   );
 }
 
-/* ── Transfer to Fridge (inline form, not a modal) ── */
+/* ── Transfer to Fridge ── */
 function TransferToFridgeView() {
-  const [item] = useState("Can Pepsi");
-  const [fridgeStock] = useState(3);
-  const [warehouseStock] = useState(20);
-  const [threshold] = useState(10);
-  const [qty, setQty] = useState(7);
+  const { items, itemsLoading, itemsError, transferToFridge, isTransferring } = useDrinksStore();
+  const [itemId, setItemId] = useState<string>("");
+  const [qty, setQty] = useState(0);
   const [reason, setReason] = useState("Restock fridge for lunch rush");
 
-  const newFridgeStock = fridgeStock + qty;
-  const newWarehouseStock = warehouseStock - qty;
-  const belowThreshold = fridgeStock < threshold;
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (items?.length && !itemId) setItemId(items[0].id);
+  }, [items, itemId]);
+
+  const selected: DrinksItem | undefined = items?.find((i) => i.id === itemId);
+
+  if (itemsLoading) {
+    return <div className="card"><p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p></div>;
+  }
+
+  if (itemsError || !items?.length || !selected) {
+    return (
+      <div className="card">
+        <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+          {/* TODO(BACKEND): GET /admin/drinks/items not implemented — see request doc #1 */}
+          No drinks data available
+        </p>
+      </div>
+    );
+  }
+
+  const newFridgeStock = selected.fridgeStock + qty;
+  const newWarehouseStock = selected.warehouseStock - qty;
+  const belowThreshold = selected.fridgeStock < selected.fridgeThreshold;
+  const exceedsWarehouse = qty > selected.warehouseStock;
 
   return (
     <div className="card">
       <Field label="Item">
-        <input className="input" value={item} readOnly />
+        <select className="input" value={itemId} onChange={(e) => { setItemId(e.target.value); setQty(0); }}>
+          {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+        </select>
       </Field>
-      <Field label="Current Fridge Stock (packs)">
-        <input className="input" value={fridgeStock} readOnly />
+      <Field label={`Current Fridge Stock (${selected.unit})`}>
+        <input className="input" value={selected.fridgeStock} readOnly />
       </Field>
-      <Field label="Current Warehouse Stock (packs)">
-        <input className="input" value={warehouseStock} readOnly />
+      <Field label={`Current Warehouse Stock (${selected.unit})`}>
+        <input className="input" value={selected.warehouseStock} readOnly />
       </Field>
       <Field label="Fridge Threshold">
-        <input className="input" value={`${threshold} units`} readOnly />
+        <input className="input" value={`${selected.fridgeThreshold} units`} readOnly />
       </Field>
 
       {belowThreshold && (
@@ -264,13 +308,20 @@ function TransferToFridgeView() {
         </p>
       )}
 
-      <Field label="Qty to Transfer (packs)">
+      <Field label={`Qty to Transfer (${selected.unit})`}>
         <input className="input" type="number" value={qty} onChange={(e) => setQty(Number(e.target.value) || 0)} />
       </Field>
-      <Field label="New Fridge Stock (packs)">
+
+      {exceedsWarehouse && (
+        <p style={{ margin: "-6px 0 14px", fontSize: "0.8rem", color: "#E10B1C" }}>
+          Exceeds available warehouse stock.
+        </p>
+      )}
+
+      <Field label={`New Fridge Stock (${selected.unit})`}>
         <input className="input" value={newFridgeStock} readOnly />
       </Field>
-      <Field label="New Warehouse Stock (packs)">
+      <Field label={`New Warehouse Stock (${selected.unit})`}>
         <input className="input" value={newWarehouseStock} readOnly />
       </Field>
       <Field label="Reason:">
@@ -278,9 +329,17 @@ function TransferToFridgeView() {
       </Field>
 
       <div style={{ display: "flex", gap: 10 }}>
-        <button style={outlineBtn}>Cancel</button>
-        <button className="btn btn-primary" style={{ padding: "10px 20px", fontSize: "0.85rem" }}>
-          Transfer to Fridge
+        <button style={outlineBtn} onClick={() => setQty(0)}>Cancel</button>
+        <button
+          className="btn btn-primary"
+          style={{ padding: "10px 20px", fontSize: "0.85rem" }}
+          disabled={!qty || exceedsWarehouse || isTransferring}
+          onClick={async () => {
+            const ok = await transferToFridge({ itemId: selected.id, quantity: qty, reason });
+            if (ok) setQty(0);
+          }}
+        >
+          {isTransferring ? "Transferring…" : "Transfer to Fridge"}
         </button>
       </div>
     </div>
@@ -289,14 +348,28 @@ function TransferToFridgeView() {
 
 /* ── Fridge Threshold ── */
 function FridgeThresholdView() {
+  const { thresholds, thresholdsLoading, thresholdsError, savingThresholds, fetchThresholds, saveThresholds } =
+    useDrinksStore();
   const [defaultThreshold, setDefaultThreshold] = useState(10);
   const [search, setSearch] = useState("");
-  const [rows, setRows] = useState(INITIAL_THRESHOLDS);
+  const [rows, setRows] = useState<{ itemId: string; itemName: string; threshold: number; notify: boolean }[]>([]);
 
-  const updateRow = (i: number, patch: Partial<ThresholdRow>) =>
+  useEffect(() => {
+    fetchThresholds();
+  }, [fetchThresholds]);
+
+  useEffect(() => {
+    if (thresholds) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDefaultThreshold(thresholds.defaultThreshold);
+      setRows(thresholds.items);
+    }
+  }, [thresholds]);
+
+  const updateRow = (i: number, patch: Partial<(typeof rows)[number]>) =>
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
-  const filtered = rows.filter((r) => r.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = rows.filter((r) => r.itemName.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <>
@@ -330,39 +403,61 @@ function FridgeThresholdView() {
             ITEM SPECIFIC FRIDGE THRESHOLDS
           </p>
         </div>
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                {["Item", "Fridge Threshold", "Notify?"].map((c) => <th key={c}>{c}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((row, i) => (
-                <tr key={row.name}>
-                  <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{row.name}</td>
-                  <td>
-                    <input
-                      className="input"
-                      type="number"
-                      value={row.threshold}
-                      onChange={(e) => updateRow(i, { threshold: Number(e.target.value) || 0 })}
-                      style={{ width: 90 }}
-                    />
-                  </td>
-                  <td>
-                    <Radio checked={row.notify} onClick={() => updateRow(i, { notify: !row.notify })} label="Yes" />
-                  </td>
+
+        {thresholdsLoading && (
+          <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p>
+        )}
+        {!thresholdsLoading && (thresholdsError || !rows.length) && (
+          <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            {/* TODO(BACKEND): GET /admin/drinks/thresholds not implemented — see request doc #4 */}
+            No fridge threshold data available
+          </p>
+        )}
+        {!thresholdsLoading && rows.length > 0 && (
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  {["Item", "Fridge Threshold", "Notify?"].map((c) => <th key={c}>{c}</th>)}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filtered.map((row, i) => (
+                  <tr key={row.itemId}>
+                    <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{row.itemName}</td>
+                    <td>
+                      <input
+                        className="input"
+                        type="number"
+                        value={row.threshold}
+                        onChange={(e) => updateRow(i, { threshold: Number(e.target.value) || 0 })}
+                        style={{ width: 90 }}
+                      />
+                    </td>
+                    <td>
+                      <Radio checked={row.notify} onClick={() => updateRow(i, { notify: !row.notify })} label="Yes" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div>
-        <button className="btn btn-primary" style={{ padding: "10px 20px", fontSize: "0.85rem" }}>
-          Save Changes
+        <button
+          className="btn btn-primary"
+          style={{ padding: "10px 20px", fontSize: "0.85rem" }}
+          disabled={savingThresholds}
+          onClick={() =>
+            saveThresholds({
+              defaultThreshold,
+              items: rows.map((r) => ({ itemId: r.itemId, threshold: r.threshold, notify: r.notify })),
+            })
+          }
+        >
+          {savingThresholds ? "Saving…" : "Save Changes"}
         </button>
       </div>
     </>
@@ -388,7 +483,7 @@ function Radio({ checked, onClick, label }: { checked: boolean; onClick: () => v
   );
 }
 
-/* ── Modal shell (scrollable, capped height — same pattern as Stock Inventory) ── */
+/* ── Modal shell ── */
 function ModalShell({ title, onClose, children, width = 460 }: { title: string; onClose: () => void; children: React.ReactNode; width?: number }) {
   return (
     <div
@@ -419,10 +514,10 @@ function ModalShell({ title, onClose, children, width = 460 }: { title: string; 
 }
 
 /* ── Add Item modal ── */
-function AddItemModal({ onClose, onSave }: { onClose: () => void; onSave: (item: ReceivedItem) => void }) {
-  const [name, setName] = useState("Can Pepsi");
-  const [qty, setQty] = useState(50);
-  const [cost, setCost] = useState(500);
+function AddItemModal({ onClose, onSave }: { onClose: () => void; onSave: (item: DraftLineItem) => void }) {
+  const [name, setName] = useState("");
+  const [qty, setQty] = useState(0);
+  const [cost, setCost] = useState(0);
   const totalCost = qty * cost;
 
   return (
@@ -442,6 +537,7 @@ function AddItemModal({ onClose, onSave }: { onClose: () => void; onSave: (item:
       <button
         className="btn btn-primary"
         style={{ width: "100%", padding: "10px 0", fontSize: "0.9rem", display: "flex", alignItems: "center", justifyContent: "center" }}
+        disabled={!name.trim() || !qty}
         onClick={() => onSave({ name, qty, costPerUnit: cost })}
       >
         Save
@@ -451,15 +547,17 @@ function AddItemModal({ onClose, onSave }: { onClose: () => void; onSave: (item:
 }
 
 /* ── Add New Supplier modal ── */
-const SUPPLIER_TYPES = ["Beverage Supplier", "Food Supplier", "Packaging Supplier", "Other"];
+const SUPPLIER_TYPES: SupplierType[] = ["Beverage Supplier", "Food Supplier", "Packaging Supplier"];
 
 function AddSupplierModal({ onClose }: { onClose: () => void }) {
-  const [name, setName] = useState("Fresh farm limited");
-  const [type, setType] = useState("");
-  const [specify, setSpecify] = useState("+234 813 6666 888");
-  const [contactPerson, setContactPerson] = useState("Mr. Adaralegbe");
-  const [phone, setPhone] = useState("+234 813 6666 888");
-  const [address, setAddress] = useState("Zone 9. Ajagbe Estate, Ogun State");
+  const { addSupplier } = useDrinksStore();
+  const [name, setName] = useState("");
+  const [type, setType] = useState<SupplierType | "">("");
+  const [contactPerson, setContactPerson] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+
+  const canSave = name.trim() && type;
 
   return (
     <ModalShell title="Add New Supplier" onClose={onClose}>
@@ -472,7 +570,7 @@ function AddSupplierModal({ onClose }: { onClose: () => void }) {
           <select
             className="input"
             value={type}
-            onChange={(e) => setType(e.target.value)}
+            onChange={(e) => setType(e.target.value as SupplierType)}
             style={{ appearance: "none", width: "100%" }}
           >
             <option value="">select type....</option>
@@ -481,12 +579,6 @@ function AddSupplierModal({ onClose }: { onClose: () => void }) {
           <ChevronDown size={16} strokeWidth={1.8} color="var(--color-text-muted)" style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
         </div>
       </Field>
-
-      {type === "Other" && (
-        <Field label="Specfy Here">
-          <input className="input" value={specify} onChange={(e) => setSpecify(e.target.value)} />
-        </Field>
-      )}
 
       <Field label="Contact Person">
         <input className="input" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} />
@@ -500,7 +592,21 @@ function AddSupplierModal({ onClose }: { onClose: () => void }) {
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
         <button onClick={onClose} style={outlineBtn}>Cancel</button>
-        <button className="btn btn-primary" style={{ padding: "9px 18px", fontSize: "0.85rem" }} onClick={onClose}>
+        <button
+          className="btn btn-primary"
+          style={{ padding: "9px 18px", fontSize: "0.85rem" }}
+          disabled={!canSave}
+          onClick={async () => {
+            const ok = await addSupplier({
+              name,
+              type: type as SupplierType,
+              contactPerson,
+              phone,
+              address,
+            });
+            if (ok) onClose();
+          }}
+        >
           Save
         </button>
       </div>

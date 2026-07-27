@@ -18,33 +18,23 @@ import {
   Minus,
   Plus,
 } from "lucide-react";
+import { useKitchenStore } from "@/store/useKitchenStore";
+import { OrderSource, KitchenDisplaySettings } from "@/types/kitchen.types";
+import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
 
-type Source = "Mobile App" | "Walk-In" | "Phone" | "Delivery" | "Dine-In" | "Takeaway" | "POS";
-
-type KitchenOrder = {
-  id: string;
-  source: Source;
-  icon: React.ElementType;
-  createdAt: string;
-  dueAt: string;
-  items: { name: string; qty: number }[];
-  special?: string;
+const SOURCE_ICON: Record<OrderSource, React.ElementType> = {
+  "Mobile App": Smartphone,
+  "POS": CreditCard,
+  "Walk-In": User,
+  "Phone": Phone,
+  "Delivery": Truck,
+  "Dine-In": UtensilsCrossed,
+  "Takeaway": Package,
 };
 
-const ORDERS: KitchenOrder[] = [
-  { id: "#FD-2847", source: "Mobile App", icon: Smartphone, createdAt: "12:30 PM", dueAt: "12:45 PM", items: [{ name: "Jollof Rice", qty: 2 }, { name: "Grilled Chicken", qty: 1 }], special: "Extra Spicy" },
-  { id: "#FD-2848", source: "Walk-In",    icon: User,       createdAt: "12:32 PM", dueAt: "12:48 PM", items: [{ name: "Egusi Soup", qty: 1 }, { name: "Pounded Yam", qty: 2 }, { name: "Zobo", qty: 1 }], special: "No Onions" },
-  { id: "#FD-2849", source: "Phone",      icon: Phone,      createdAt: "12:35 PM", dueAt: "12:50 PM", items: [{ name: "Fried Rice", qty: 2 }, { name: "Asun", qty: 1 }], special: "Extra Suya" },
-  { id: "#FD-2850", source: "Delivery",   icon: Truck,      createdAt: "12:40 PM", dueAt: "12:50 PM", items: [{ name: "Oha Soup", qty: 1 }, { name: "Smoked Chicken", qty: 1 }] },
-  { id: "#FD-2851", source: "Dine-In",    icon: UtensilsCrossed, createdAt: "12:45 PM", dueAt: "12:55 PM", items: [{ name: "Asun", qty: 2 }, { name: "Goat Meat", qty: 2 }], special: "Extra Spicy" },
-  { id: "#FD-2852", source: "Takeaway",   icon: Package,    createdAt: "12:50 PM", dueAt: "01:00 PM", items: [{ name: "Jollof Rice", qty: 1 }, { name: "5Alive", qty: 1 }, { name: "Peppered Chicken", qty: 1 }], special: "Extra Spicy" },
-];
-
-const COMPLETED = [
-  { id: "#FD-2846", time: "12:15 PM", source: "Mobile App" },
-  { id: "#FD-2847", time: "12:30 PM", source: "Walk-In"    },
-  { id: "#FD-2848", time: "12:45 PM", source: "POS"        },
-];
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+}
 
 export default function KitchenDisplayPage() {
   const [view, setView] = useState<"live" | "settings">("live");
@@ -56,13 +46,6 @@ export default function KitchenDisplayPage() {
   }, []);
 
   const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-
-  const counts = {
-    "Mobile App": ORDERS.filter((o) => o.source === "Mobile App").length,
-    "POS": 0,
-    "Walk-In": ORDERS.filter((o) => o.source === "Walk-In").length,
-    "Phone": ORDERS.filter((o) => o.source === "Phone").length,
-  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -100,18 +83,45 @@ export default function KitchenDisplayPage() {
         )}
       </div>
 
-      {view === "live" ? <LiveQueueView counts={counts} /> : <SettingsView />}
+      {view === "live" ? <LiveQueueView /> : <SettingsView />}
     </div>
   );
 }
 
 /* ══════════════════════════ Live Queue ══════════════════════════ */
-function LiveQueueView({ counts }: { counts: Record<string, number> }) {
+function LiveQueueView() {
+  const {
+    liveQueue, liveQueueLoading, liveQueueError, fetchLiveQueue,
+    completed, completedLoading, completedError, fetchCompleted,
+    settings,
+  } = useKitchenStore();
+
+  useEffect(() => {
+    fetchLiveQueue();
+    fetchCompleted();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Poll the live queue at whatever interval settings specify, defaulting
+  // to a sane 15s until settings load (mock's "2 seconds" would hammer a
+  // real API — worth confirming the real default with backend/product).
+  useEffect(() => {
+    const intervalMs = (settings?.refreshIntervalSeconds ?? 15) * 1000;
+    const t = setInterval(() => fetchLiveQueue(), intervalMs);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.refreshIntervalSeconds]);
+
+  const counts: Record<string, number> = { "Mobile App": 0, "POS": 0, "Walk-In": 0, "Phone": 0 };
+  liveQueue?.forEach((o) => {
+    if (o.source in counts) counts[o.source] += 1;
+  });
+
   const statCards = [
     { label: "Mobile App", value: counts["Mobile App"], icon: Smartphone, color: "gold" },
-    { label: "POS",        value: counts["POS"],        icon: CreditCard, color: "red"  },
-    { label: "Walk-In",    value: counts["Walk-In"],    icon: User,       color: "gold" },
-    { label: "Phone",      value: counts["Phone"],      icon: Phone,      color: "red"  },
+    { label: "POS", value: counts["POS"], icon: CreditCard, color: "red" },
+    { label: "Walk-In", value: counts["Walk-In"], icon: User, color: "gold" },
+    { label: "Phone", value: counts["Phone"], icon: Phone, color: "red" },
   ];
 
   return (
@@ -129,77 +139,125 @@ function LiveQueueView({ counts }: { counts: Record<string, number> }) {
               <s.icon size={18} strokeWidth={1.8} color={s.color === "gold" ? "#7a5500" : "#fff"} />
             </div>
             <div>
-              <p style={{ margin: 0, fontSize: "1.3rem", fontWeight: 700, color: "var(--color-heading)" }}>{s.value}</p>
+              <p style={{ margin: 0, fontSize: "1.3rem", fontWeight: 700, color: "var(--color-heading)" }}>
+                {liveQueueLoading ? <SkeletonText width={24} height={20} /> : s.value}
+              </p>
               <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{s.label}</p>
             </div>
           </div>
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
-        {ORDERS.map((order, i) => {
-          const gold = i % 2 === 0;
-          const headerBg = gold ? "var(--color-secondary)" : "var(--color-primary)";
-          const headerText = gold ? "#5c4200" : "#fff";
-          return (
-            <div key={order.id} style={{ borderRadius: 12, overflow: "hidden", border: "1px solid var(--color-border)" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", background: headerBg, color: headerText }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: "0.9rem" }}>
-                  <order.icon size={15} strokeWidth={1.8} />
-                  {order.source}
-                </span>
-                <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>{order.id}</span>
+      {liveQueueLoading && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} style={{ borderRadius: 12, overflow: "hidden", border: "1px solid var(--color-border)" }}>
+              <Skeleton width="100%" height={40} radius={0} />
+              <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+                <Skeleton width="60%" height={12} />
+                <Skeleton width="80%" height={12} />
+                <Skeleton width="70%" height={12} />
+                <Skeleton width="100%" height={30} radius={8} />
               </div>
-
-              <div style={{ padding: 16, background: "#fff" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-                    <Clock size={13} strokeWidth={1.8} />
-                    {order.createdAt}
-                  </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-                    <Clock size={13} strokeWidth={1.8} />
-                    Due: {order.dueAt}
-                  </span>
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: order.special ? 14 : 0 }}>
-                  {order.items.map((item) => (
-                    <div key={item.name} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.88rem", color: "var(--color-text)" }}>
-                      <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--color-text-muted)", flexShrink: 0 }} />
-                      {item.name}&nbsp;&nbsp;x{item.qty}
-                    </div>
-                  ))}
-                </div>
-
-                {order.special && (
-                  <div
-                    style={{
-                      padding: "8px 12px", borderRadius: 8, fontSize: "0.82rem", fontWeight: 500,
-                      background: gold ? "rgba(252,208,99,0.15)" : "rgba(225,11,28,0.08)",
-                      border: `1px solid ${gold ? "rgba(160,122,0,0.25)" : "rgba(225,11,28,0.25)"}`,
-                      color: gold ? "#7a5500" : "var(--color-primary)",
-                    }}
-                  >
-                    Special: {order.special}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="card">
-        <p style={{ margin: "0 0 14px", fontSize: "0.9rem", fontWeight: 700, color: "var(--color-heading)" }}>Completed Last 30 Minutes</p>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          {COMPLETED.map((c, i) => (
-            <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderTop: i > 0 ? "1px solid var(--color-border)" : "none" }}>
-              <span style={{ fontSize: "0.88rem", color: "var(--color-text)" }}>{c.id} • {c.time} • {c.source}</span>
-              <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#16A34A" }}>Completed</span>
             </div>
           ))}
         </div>
+      )}
+
+      {!liveQueueLoading && (liveQueueError || !liveQueue?.length) && (
+        <div className="card">
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            {/* TODO(BACKEND): GET /admin/kitchen/orders not implemented */}
+            No orders in the queue
+          </p>
+        </div>
+      )}
+
+      {!liveQueueLoading && !liveQueueError && liveQueue && liveQueue.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
+          {liveQueue.map((order, i) => {
+            const gold = i % 2 === 0;
+            const headerBg = gold ? "var(--color-secondary)" : "var(--color-primary)";
+            const headerText = gold ? "#5c4200" : "#fff";
+            const Icon = SOURCE_ICON[order.source] ?? Package;
+            return (
+              <div key={order.id} style={{ borderRadius: 12, overflow: "hidden", border: "1px solid var(--color-border)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", background: headerBg, color: headerText }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: "0.9rem" }}>
+                    <Icon size={15} strokeWidth={1.8} />
+                    {order.source}
+                  </span>
+                  <span style={{ fontWeight: 700, fontSize: "0.9rem" }}>{order.orderNumber}</span>
+                </div>
+
+                <div style={{ padding: 16, background: "#fff" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+                      <Clock size={13} strokeWidth={1.8} />
+                      {formatTime(order.createdAt)}
+                    </span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+                      <Clock size={13} strokeWidth={1.8} />
+                      Due: {formatTime(order.dueAt)}
+                    </span>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: order.special ? 14 : 0 }}>
+                    {order.items.map((item, idx) => (
+                      <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.88rem", color: "var(--color-text)" }}>
+                        <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--color-text-muted)", flexShrink: 0 }} />
+                        {item.name}&nbsp;&nbsp;x{item.qty}
+                      </div>
+                    ))}
+                  </div>
+
+                  {order.special && (
+                    <div
+                      style={{
+                        padding: "8px 12px", borderRadius: 8, fontSize: "0.82rem", fontWeight: 500,
+                        background: gold ? "rgba(252,208,99,0.15)" : "rgba(225,11,28,0.08)",
+                        border: `1px solid ${gold ? "rgba(160,122,0,0.25)" : "rgba(225,11,28,0.25)"}`,
+                        color: gold ? "#7a5500" : "var(--color-primary)",
+                      }}
+                    >
+                      Special: {order.special}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="card">
+        <p style={{ margin: "0 0 14px", fontSize: "0.9rem", fontWeight: 700, color: "var(--color-heading)" }}>Completed Last 30 Minutes</p>
+
+        {completedLoading && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <SkeletonText key={i} width="70%" height={13} />
+            ))}
+          </div>
+        )}
+
+        {!completedLoading && (completedError || !completed?.length) && (
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            {/* TODO(BACKEND): GET /admin/kitchen/completed not implemented */}
+            No completed orders in this window
+          </p>
+        )}
+
+        {!completedLoading && !completedError && (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {completed?.map((c, i) => (
+              <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderTop: i > 0 ? "1px solid var(--color-border)" : "none" }}>
+                <span style={{ fontSize: "0.88rem", color: "var(--color-text)" }}>{c.orderNumber} • {formatTime(c.completedAt)} • {c.source}</span>
+                <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#16A34A" }}>Completed</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </>
   );
@@ -207,38 +265,75 @@ function LiveQueueView({ counts }: { counts: Record<string, number> }) {
 
 /* ══════════════════════════ Settings ══════════════════════════ */
 function SettingsView() {
-  const [showSource, setShowSource] = useState(true);
-  const [showPrepTime, setShowPrepTime] = useState(true);
-  const [urgentThreshold, setUrgentThreshold] = useState("15 minutes");
-  const [completedFor, setCompletedFor] = useState("30 minutes");
-  const [refreshInterval, setRefreshInterval] = useState("2 seconds");
-  const [volume, setVolume] = useState("70%");
+  const { settings, settingsLoading, settingsError, fetchSettings, saveSettings, isSavingSettings } = useKitchenStore();
 
-  const [grillTV, setGrillTV] = useState("http://192.168.1.101:8080");
-  const [pastryTV, setPastryTV] = useState("http://192.168.1.102:8080");
-  const [expoTV, setExpoTV] = useState("http://192.168.1.103:8080");
-  const [grillAssign, setGrillAssign] = useState("All grilled proteins, rice dishes");
-  const [pastryAssign, setPastryAssign] = useState("Pastries, Snacks");
-
-  const [printerBackup, setPrinterBackup] = useState(true);
-  const [printerIP, setPrinterIP] = useState("192.168.1.50");
-  const [fallbackMinutes, setFallbackMinutes] = useState(2);
+  const [form, setForm] = useState<KitchenDisplaySettings | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const url = "https://kds.foodieshotandspicy.com/branch/1";
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (settings) setForm(settings);
+  }, [settings]);
 
   const copyUrl = () => {
-    navigator.clipboard?.writeText(url).catch(() => {});
+    if (!form?.tvDisplayUrl) return;
+    navigator.clipboard?.writeText(form.tvDisplayUrl).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
+
+  const update = (patch: Partial<KitchenDisplaySettings>) =>
+    setForm((prev) => (prev ? { ...prev, ...patch } : prev));
+
+  const updateStations = (patch: Partial<KitchenDisplaySettings["stations"]>) =>
+    setForm((prev) => (prev ? { ...prev, stations: { ...prev.stations, ...patch } } : prev));
+
+  const updatePrinter = (patch: Partial<KitchenDisplaySettings["printerBackup"]>) =>
+    setForm((prev) => (prev ? { ...prev, printerBackup: { ...prev.printerBackup, ...patch } } : prev));
+
+  const parseNumber = (raw: string) => Number(raw.replace(/\D/g, "")) || 0;
+
+  if (settingsLoading || !form) {
+    return (
+      <>
+        <div className="card">
+          <SkeletonText width="30%" height={13} />
+          <div style={{ marginTop: 10 }}>
+            <Skeleton width="100%" height={40} radius={8} />
+          </div>
+        </div>
+        <div className="card">
+          <SkeletonText width="35%" height={13} />
+          <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <Skeleton width="100%" height={38} radius={8} />
+                <Skeleton width="100%" height={38} radius={8} />
+                <Skeleton width="100%" height={38} radius={8} />
+              </div>
+            ))}
+          </div>
+        </div>
+        {settingsError && (
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            {/* TODO(BACKEND): GET /admin/kitchen/settings not implemented */}
+            Settings unavailable
+          </p>
+        )}
+      </>
+    );
+  }
 
   return (
     <>
       <div className="card">
         <p style={{ margin: "0 0 8px", fontSize: "0.85rem", fontWeight: 700, letterSpacing: "0.03em", color: "var(--color-heading)" }}>TV DISPLAY URL</p>
         <div style={{ display: "flex", gap: 10 }}>
-          <input className="input" value={url} readOnly style={{ flex: 1 }} />
+          <input className="input" value={form.tvDisplayUrl} readOnly style={{ flex: 1 }} />
           <button
             onClick={copyUrl}
             style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 16px", borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)", fontFamily: "var(--font-sans)", whiteSpace: "nowrap" }}
@@ -253,14 +348,38 @@ function SettingsView() {
         <p style={{ margin: "0 0 16px", fontSize: "0.85rem", fontWeight: 700, letterSpacing: "0.03em", color: "var(--color-heading)" }}>DISPLAY SETTINGS</p>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
           <div>
-            <CheckPair label="Show order source:" hint="(for kitchen awareness)" value={showSource} onChange={setShowSource} />
-            <Field label="Urgent threshold:"><input className="input" value={urgentThreshold} onChange={(e) => setUrgentThreshold(e.target.value)} /></Field>
-            <Field label="Auto-refresh interval:"><input className="input" value={refreshInterval} onChange={(e) => setRefreshInterval(e.target.value)} /></Field>
+            <CheckPair label="Show order source:" hint="(for kitchen awareness)" value={form.showOrderSource} onChange={(v) => update({ showOrderSource: v })} />
+            <Field label="Urgent threshold:">
+              <input
+                className="input"
+                value={`${form.urgentThresholdMinutes} minutes`}
+                onChange={(e) => update({ urgentThresholdMinutes: parseNumber(e.target.value) })}
+              />
+            </Field>
+            <Field label="Auto-refresh interval:">
+              <input
+                className="input"
+                value={`${form.refreshIntervalSeconds} seconds`}
+                onChange={(e) => update({ refreshIntervalSeconds: parseNumber(e.target.value) })}
+              />
+            </Field>
           </div>
           <div>
-            <CheckPair label="Show estimated prep time:" value={showPrepTime} onChange={setShowPrepTime} />
-            <Field label="Show completed orders for:"><input className="input" value={completedFor} onChange={(e) => setCompletedFor(e.target.value)} /></Field>
-            <Field label="Audio alert volume:"><input className="input" value={volume} onChange={(e) => setVolume(e.target.value)} /></Field>
+            <CheckPair label="Show estimated prep time:" value={form.showPrepTime} onChange={(v) => update({ showPrepTime: v })} />
+            <Field label="Show completed orders for:">
+              <input
+                className="input"
+                value={`${form.completedForMinutes} minutes`}
+                onChange={(e) => update({ completedForMinutes: parseNumber(e.target.value) })}
+              />
+            </Field>
+            <Field label="Audio alert volume:">
+              <input
+                className="input"
+                value={`${form.audioAlertVolumePercent}%`}
+                onChange={(e) => update({ audioAlertVolumePercent: parseNumber(e.target.value) })}
+              />
+            </Field>
           </div>
         </div>
       </div>
@@ -269,41 +388,63 @@ function SettingsView() {
         <p style={{ margin: "0 0 16px", fontSize: "0.85rem", fontWeight: 700, letterSpacing: "0.03em", color: "var(--color-heading)" }}>
           STATION ROUTING (multiple TVs per branch)
         </p>
-        <Field label="Grill station TV:"><input className="input" value={grillTV} onChange={(e) => setGrillTV(e.target.value)} /></Field>
-        <Field label="Pastry station TV:"><input className="input" value={pastryTV} onChange={(e) => setPastryTV(e.target.value)} /></Field>
-        <Field label="Expo station TV:"><input className="input" value={expoTV} onChange={(e) => setExpoTV(e.target.value)} /></Field>
+        <Field label="Grill station TV:">
+          <input className="input" value={form.stations.grillTvUrl} onChange={(e) => updateStations({ grillTvUrl: e.target.value })} />
+        </Field>
+        <Field label="Pastry station TV:">
+          <input className="input" value={form.stations.pastryTvUrl} onChange={(e) => updateStations({ pastryTvUrl: e.target.value })} />
+        </Field>
+        <Field label="Expo station TV:">
+          <input className="input" value={form.stations.expoTvUrl} onChange={(e) => updateStations({ expoTvUrl: e.target.value })} />
+        </Field>
 
         <p style={{ margin: "12px 0 12px", fontSize: "0.85rem", fontWeight: 700, color: "var(--color-heading)" }}>Station Assignment:</p>
-        <Field label="Grill:"><input className="input" value={grillAssign} onChange={(e) => setGrillAssign(e.target.value)} /></Field>
-        <Field label="Pastry:"><input className="input" value={pastryAssign} onChange={(e) => setPastryAssign(e.target.value)} /></Field>
-        <Field label="Expo TV:"><input className="input" value={expoTV} onChange={(e) => setExpoTV(e.target.value)} /></Field>
+        <Field label="Grill:">
+          <input className="input" value={form.stations.grillAssignment} onChange={(e) => updateStations({ grillAssignment: e.target.value })} />
+        </Field>
+        <Field label="Pastry:">
+          <input className="input" value={form.stations.pastryAssignment} onChange={(e) => updateStations({ pastryAssignment: e.target.value })} />
+        </Field>
       </div>
 
       <div className="card">
         <button
-          onClick={() => setPrinterBackup((v) => !v)}
+          onClick={() => updatePrinter({ enabled: !form.printerBackup.enabled })}
           style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-sans)", marginBottom: 16 }}
         >
-          <CheckBox checked={printerBackup} />
+          <CheckBox checked={form.printerBackup.enabled} />
           <span style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--color-heading)" }}>Enable thermal printer backup</span>
         </button>
 
-        <Field label="Printer IP"><input className="input" value={printerIP} onChange={(e) => setPrinterIP(e.target.value)} style={{ maxWidth: 260 }} /></Field>
+        <Field label="Printer IP">
+          <input className="input" value={form.printerBackup.printerIp} onChange={(e) => updatePrinter({ printerIp: e.target.value })} style={{ maxWidth: 260 }} />
+        </Field>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <label style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)" }}>Fallback after</label>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <button onClick={() => setFallbackMinutes((m) => Math.max(0, m - 1))} style={stepperBtn}><Minus size={13} /></button>
-            <input className="input" type="number" value={fallbackMinutes} onChange={(e) => setFallbackMinutes(Number(e.target.value) || 0)} style={{ width: 60, textAlign: "center" }} />
-            <button onClick={() => setFallbackMinutes((m) => m + 1)} style={stepperBtn}><Plus size={13} /></button>
+            <button onClick={() => updatePrinter({ fallbackAfterMinutes: Math.max(0, form.printerBackup.fallbackAfterMinutes - 1) })} style={stepperBtn}><Minus size={13} /></button>
+            <input
+              className="input"
+              type="number"
+              value={form.printerBackup.fallbackAfterMinutes}
+              onChange={(e) => updatePrinter({ fallbackAfterMinutes: Number(e.target.value) || 0 })}
+              style={{ width: 60, textAlign: "center" }}
+            />
+            <button onClick={() => updatePrinter({ fallbackAfterMinutes: form.printerBackup.fallbackAfterMinutes + 1 })} style={stepperBtn}><Plus size={13} /></button>
           </div>
           <span style={{ fontSize: "0.85rem", color: "var(--color-text)" }}>minutes of TV disconnection</span>
         </div>
       </div>
 
       <div>
-        <button className="btn btn-primary" style={{ padding: "10px 20px", fontSize: "0.85rem" }}>
-          Save Changes
+        <button
+          className="btn btn-primary"
+          style={{ padding: "10px 20px", fontSize: "0.85rem" }}
+          disabled={isSavingSettings}
+          onClick={() => saveSettings(form)}
+        >
+          {isSavingSettings ? "Saving…" : "Save Changes"}
         </button>
       </div>
     </>

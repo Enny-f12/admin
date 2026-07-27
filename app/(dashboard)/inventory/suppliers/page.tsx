@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Plus,
   X,
@@ -10,101 +10,34 @@ import {
   ChevronDown,
   Check,
 } from "lucide-react";
-
-type Payment = {
-  date: string;
-  invoice: string;
-  amount: string;
-  paid: boolean;
-  reference: string;
-};
-
-type PurchaseOrder = {
-  poNumber: string;
-  date: string;
-  items: string;
-  status: string;
-  deliveryDate: string;
-};
-
-type Supplier = {
-  name: string;
-  phone: string;
-  address: string;
-  deliveries: number;
-  outstanding: number;
-  payments: Payment[];
-  purchaseOrders: PurchaseOrder[];
-};
-
-const SUPPLIERS: Supplier[] = [
-  {
-    name: "FARM FRESH LIMITED",
-    phone: "+234 811 8888 999",
-    address: "Mile 12 Market, Lagos",
-    deliveries: 42,
-    outstanding: 184000,
-    payments: [
-      { date: "May 10, 2026", invoice: "INV-123", amount: "₦70,000", paid: true, reference: "TRANSFER-005" },
-      { date: "May 5, 2026",  invoice: "INV-120", amount: "₦48,000", paid: true, reference: "TRANSFER-001" },
-    ],
-    purchaseOrders: [
-      { poNumber: "POOO6", date: "May 5, 2026", items: "Fish  x50",    status: "Delivered", deliveryDate: "May 10, 2026" },
-      { poNumber: "POOO1", date: "May 1, 2026", items: "Chicken  x50", status: "Delivered", deliveryDate: "May 4, 2026"  },
-    ],
-  },
-  {
-    name: "LAGOS BEVERAGE CO.",
-    phone: "+234 810 0000 345",
-    address: "Apapa Industrial, Lagos",
-    deliveries: 28,
-    outstanding: 0,
-    payments: [],
-    purchaseOrders: [],
-  },
-  {
-    name: "GOLDEN GRAIN",
-    phone: "+234 812 8976 342",
-    address: "Zone 9 Ikeja, Lagos",
-    deliveries: 56,
-    outstanding: 0,
-    payments: [],
-    purchaseOrders: [],
-  },
-  {
-    name: "SPICE ROUTE IMPORTS",
-    phone: "+234 811 6543 909",
-    address: "2 Anthony Estate, Victoria Island, Lagos",
-    deliveries: 15,
-    outstanding: 10000,
-    payments: [],
-    purchaseOrders: [],
-  },
-  {
-    name: "ZARTECH LTD",
-    phone: "+234 811 1023 900",
-    address: "26 Oluyole Estate Ibadan, Oyo",
-    deliveries: 90,
-    outstanding: 50000,
-    payments: [],
-    purchaseOrders: [],
-  },
-  {
-    name: "LACASERA COMPANY PLC",
-    phone: "+234 810 9087 234",
-    address: "Apapa Industrial, Lagos",
-    deliveries: 12,
-    outstanding: 0,
-    payments: [],
-    purchaseOrders: [],
-  },
-];
+import { useSuppliersStore } from "@/store/useSuppliersStore";
+import { SupplierType } from "@/types/suppliers.types";
 
 export default function SuppliersPage() {
-  const [suppliers] = useState(SUPPLIERS);
-  const [selected, setSelected] = useState<Supplier | null>(null);
+  const {
+    suppliers,
+    suppliersLoading,
+    suppliersError,
+    detail,
+    detailLoading,
+    detailError,
+    fetchSuppliers,
+    fetchSupplierDetail,
+    clearDetail,
+    addSupplier,
+  } = useSuppliersStore();
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [successName, setSuccessName] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchSuppliers();
+  }, [fetchSuppliers]);
+
+  useEffect(() => {
+    if (selectedId) fetchSupplierDetail(selectedId);
+  }, [selectedId, fetchSupplierDetail]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -131,73 +64,103 @@ export default function SuppliersPage() {
         </button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
-        {suppliers.map((s) => (
-          <button
-            key={s.name}
-            onClick={() => setSelected(s)}
-            className="card"
-            style={{ textAlign: "left", cursor: "pointer", position: "relative", border: "1px solid var(--color-border)", background: "#fff" }}
-          >
-            {s.outstanding > 0 && (
-              <span
-                style={{
-                  position: "absolute", top: 20, right: 20, padding: "5px 12px", borderRadius: 999,
-                  border: "1px solid rgba(225,11,28,0.3)", background: "rgba(225,11,28,0.06)",
-                  color: "var(--color-primary)", fontWeight: 700, fontSize: "0.8rem",
-                }}
-              >
-                ₦{s.outstanding.toLocaleString()}
-              </span>
-            )}
+      {suppliersLoading && (
+        <div className="card"><p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p></div>
+      )}
 
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-              <div
-                style={{
-                  width: 38, height: 38, borderRadius: 8, background: "var(--color-secondary)",
-                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                }}
-              >
-                <Building2 size={18} strokeWidth={1.8} color="#7a5500" />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: "var(--color-heading)" }}>{s.name}</p>
-                <p style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0 0", fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
-                  <Phone size={13} strokeWidth={1.8} />
-                  {s.phone}
-                </p>
-              </div>
-            </div>
+      {!suppliersLoading && (suppliersError || !suppliers?.length) && (
+        <div className="card">
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            {/* TODO(BACKEND): GET /admin/suppliers (with deliveries/outstanding) not implemented — see request doc A1 */}
+            No supplier data available
+          </p>
+        </div>
+      )}
 
-            <p style={{ display: "flex", alignItems: "center", gap: 6, margin: "10px 0 14px", fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
-              <MapPin size={13} strokeWidth={1.8} />
-              {s.address}
-            </p>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <div style={{ padding: "12px 10px", borderRadius: 10, background: "var(--color-bg-soft)", textAlign: "center" }}>
-                <p style={{ margin: 0, fontWeight: 700, fontSize: "1rem", color: "var(--color-heading)" }}>{s.deliveries}</p>
-                <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>deliveries</p>
-              </div>
-              <div style={{ padding: "12px 10px", borderRadius: 10, background: "var(--color-bg-soft)", textAlign: "center" }}>
-                <p style={{ margin: 0, fontWeight: 700, fontSize: "1rem", color: s.outstanding > 0 ? "var(--color-primary)" : "var(--color-heading)" }}>
+      {!suppliersLoading && !suppliersError && suppliers && suppliers.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
+          {suppliers.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setSelectedId(s.id)}
+              className="card"
+              style={{ textAlign: "left", cursor: "pointer", position: "relative", border: "1px solid var(--color-border)", background: "#fff" }}
+            >
+              {s.outstanding > 0 && (
+                <span
+                  style={{
+                    position: "absolute", top: 20, right: 20, padding: "5px 12px", borderRadius: 999,
+                    border: "1px solid rgba(225,11,28,0.3)", background: "rgba(225,11,28,0.06)",
+                    color: "var(--color-primary)", fontWeight: 700, fontSize: "0.8rem",
+                  }}
+                >
                   ₦{s.outstanding.toLocaleString()}
-                </p>
-                <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>outstanding</p>
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
+                </span>
+              )}
 
-      {selected && <SupplierDetailModal supplier={selected} onClose={() => setSelected(null)} />}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <div
+                  style={{
+                    width: 38, height: 38, borderRadius: 8, background: "var(--color-secondary)",
+                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                  }}
+                >
+                  <Building2 size={18} strokeWidth={1.8} color="#7a5500" />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: "var(--color-heading)" }}>{s.name}</p>
+                  {s.phone && (
+                    <p style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0 0", fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
+                      <Phone size={13} strokeWidth={1.8} />
+                      {s.phone}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {s.address && (
+                <p style={{ display: "flex", alignItems: "center", gap: 6, margin: "10px 0 14px", fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
+                  <MapPin size={13} strokeWidth={1.8} />
+                  {s.address}
+                </p>
+              )}
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div style={{ padding: "12px 10px", borderRadius: 10, background: "var(--color-bg-soft)", textAlign: "center" }}>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: "1rem", color: "var(--color-heading)" }}>{s.deliveries}</p>
+                  <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>deliveries</p>
+                </div>
+                <div style={{ padding: "12px 10px", borderRadius: 10, background: "var(--color-bg-soft)", textAlign: "center" }}>
+                  <p style={{ margin: 0, fontWeight: 700, fontSize: "1rem", color: s.outstanding > 0 ? "var(--color-primary)" : "var(--color-heading)" }}>
+                    ₦{s.outstanding.toLocaleString()}
+                  </p>
+                  <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>outstanding</p>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selectedId && (
+        <SupplierDetailModal
+          supplierName={suppliers?.find((s) => s.id === selectedId)?.name ?? ""}
+          detail={detail}
+          loading={detailLoading}
+          error={detailError}
+          onClose={() => { setSelectedId(null); clearDetail(); }}
+        />
+      )}
 
       {addOpen && (
         <AddSupplierModal
           onClose={() => setAddOpen(false)}
-          onSaved={(name) => {
-            setAddOpen(false);
-            setSuccessName(name);
+          onSave={async (payload) => {
+            const supplier = await addSupplier(payload);
+            if (supplier) {
+              setAddOpen(false);
+              setSuccessName(supplier.name);
+            }
           }}
         />
       )}
@@ -207,7 +170,7 @@ export default function SuppliersPage() {
   );
 }
 
-/* ── Shared modal shell (scrollable, capped height) ── */
+/* ── Shared modal shell ── */
 function ModalShell({ title, onClose, children, width = 700 }: { title?: string; onClose: () => void; children: React.ReactNode; width?: number }) {
   return (
     <div
@@ -240,98 +203,135 @@ function ModalShell({ title, onClose, children, width = 700 }: { title?: string;
 }
 
 /* ── Supplier detail modal ── */
-function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier; onClose: () => void }) {
+function SupplierDetailModal({
+  supplierName, detail, loading, error, onClose,
+}: {
+  supplierName: string;
+  detail: import("@/types/suppliers.types").SupplierDetail | null;
+  loading: boolean;
+  error: boolean;
+  onClose: () => void;
+}) {
   return (
-    <ModalShell title={supplier.name} onClose={onClose}>
-      <div style={{ padding: "14px 16px", borderRadius: 10, background: "var(--color-bg-soft)", display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--color-text)" }}>
-          <Phone size={15} strokeWidth={1.8} color="var(--color-primary)" />
-          {supplier.phone}
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--color-text)" }}>
-          <MapPin size={15} strokeWidth={1.8} color="var(--color-primary)" />
-          {supplier.address}
-        </span>
-      </div>
+    <ModalShell title={supplierName || "Supplier"} onClose={onClose}>
+      {loading && <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p>}
 
-      <p style={{ margin: "0 0 10px", fontSize: "0.95rem", fontWeight: 700, color: "var(--color-heading)" }}>
-        Supplier Payment Tracking:
-      </p>
-      <div style={{ borderRadius: 10, background: "var(--color-bg-soft)", padding: "4px 16px", marginBottom: 24 }}>
-        {supplier.payments.length === 0 ? (
-          <p style={{ margin: "12px 0", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No payment records yet.</p>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                {["Date", "Invoice #", "Amount", "Paid", "Reference"].map((c) => (
-                  <th key={c} style={{ textAlign: "left", fontSize: "0.78rem", fontWeight: 600, color: "var(--color-text-muted)", padding: "12px 8px", borderBottom: "1px solid var(--color-border)" }}>
-                    {c}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {supplier.payments.map((p, i) => (
-                <tr key={i}>
-                  <td style={cellStyle}>{p.date}</td>
-                  <td style={cellStyle}>{p.invoice}</td>
-                  <td style={{ ...cellStyle, fontWeight: 600 }}>{p.amount}</td>
-                  <td style={cellStyle}>{p.paid ? "Yes" : "No"}</td>
-                  <td style={cellStyle}>{p.reference}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {!loading && (error || !detail) && (
+        <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+          {/* TODO(BACKEND): GET /admin/suppliers/:id not implemented — see request doc A2 */}
+          No supplier detail available
+        </p>
+      )}
 
-      <p style={{ margin: "0 0 10px", fontSize: "0.95rem", fontWeight: 700, color: "var(--color-heading)" }}>
-        Purchase Order History:
-      </p>
-      <div style={{ borderRadius: 10, background: "var(--color-bg-soft)", padding: "4px 16px" }}>
-        {supplier.purchaseOrders.length === 0 ? (
-          <p style={{ margin: "12px 0", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No purchase orders yet.</p>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                {["PO #", "Date", "Items", "Status", "Delivery Date"].map((c) => (
-                  <th key={c} style={{ textAlign: "left", fontSize: "0.78rem", fontWeight: 600, color: "var(--color-text-muted)", padding: "12px 8px", borderBottom: "1px solid var(--color-border)" }}>
-                    {c}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {supplier.purchaseOrders.map((po, i) => (
-                <tr key={i}>
-                  <td style={cellStyle}>{po.poNumber}</td>
-                  <td style={cellStyle}>{po.date}</td>
-                  <td style={cellStyle}>{po.items}</td>
-                  <td style={cellStyle}>{po.status}</td>
-                  <td style={cellStyle}>{po.deliveryDate}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {!loading && detail && (
+        <>
+          <div style={{ padding: "14px 16px", borderRadius: 10, background: "var(--color-bg-soft)", display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+            {detail.phone && (
+              <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--color-text)" }}>
+                <Phone size={15} strokeWidth={1.8} color="var(--color-primary)" />
+                {detail.phone}
+              </span>
+            )}
+            {detail.address && (
+              <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--color-text)" }}>
+                <MapPin size={15} strokeWidth={1.8} color="var(--color-primary)" />
+                {detail.address}
+              </span>
+            )}
+          </div>
+
+          <p style={{ margin: "0 0 10px", fontSize: "0.95rem", fontWeight: 700, color: "var(--color-heading)" }}>
+            Supplier Payment Tracking:
+          </p>
+          <div style={{ borderRadius: 10, background: "var(--color-bg-soft)", padding: "4px 16px", marginBottom: 24 }}>
+            {detail.payments.length === 0 ? (
+              <p style={{ margin: "12px 0", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No payment records yet.</p>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    {["Date", "Invoice #", "Amount", "Paid", "Reference"].map((c) => (
+                      <th key={c} style={{ textAlign: "left", fontSize: "0.78rem", fontWeight: 600, color: "var(--color-text-muted)", padding: "12px 8px", borderBottom: "1px solid var(--color-border)" }}>
+                        {c}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.payments.map((p, i) => (
+                    <tr key={i}>
+                      <td style={cellStyle}>{p.date}</td>
+                      <td style={cellStyle}>{p.invoiceNumber}</td>
+                      <td style={{ ...cellStyle, fontWeight: 600 }}>₦{p.amount.toLocaleString()}</td>
+                      <td style={cellStyle}>{p.paid ? "Yes" : "No"}</td>
+                      <td style={cellStyle}>{p.reference}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <p style={{ margin: "0 0 10px", fontSize: "0.95rem", fontWeight: 700, color: "var(--color-heading)" }}>
+            Purchase Order History:
+          </p>
+          <div style={{ borderRadius: 10, background: "var(--color-bg-soft)", padding: "4px 16px" }}>
+            {detail.purchaseOrders.length === 0 ? (
+              <p style={{ margin: "12px 0", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No purchase orders yet.</p>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    {["PO #", "Date", "Items", "Status", "Delivery Date"].map((c) => (
+                      <th key={c} style={{ textAlign: "left", fontSize: "0.78rem", fontWeight: 600, color: "var(--color-text-muted)", padding: "12px 8px", borderBottom: "1px solid var(--color-border)" }}>
+                        {c}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.purchaseOrders.map((po, i) => (
+                    <tr key={i}>
+                      <td style={cellStyle}>{po.poNumber}</td>
+                      <td style={cellStyle}>{po.date}</td>
+                      <td style={cellStyle}>{po.items}</td>
+                      <td style={cellStyle}>{po.status}</td>
+                      <td style={cellStyle}>{po.deliveryDate}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
     </ModalShell>
   );
 }
 const cellStyle: React.CSSProperties = { padding: "12px 8px", fontSize: "0.85rem", color: "var(--color-text)", borderBottom: "1px solid var(--color-border)" };
 
-/* ── Add Supplier modal (Name/Type/Specify/Contact/Phone/Address) ── */
-const SUPPLIER_TYPES = ["Food Supplier", "Beverage Supplier", "Packaging Supplier", "Other"];
+/* ── Add Supplier modal ── */
+const SUPPLIER_TYPES: SupplierType[] = ["Food Supplier", "Beverage Supplier", "Packaging Supplier"];
 
-function AddSupplierModal({ onClose, onSaved }: { onClose: () => void; onSaved: (name: string) => void }) {
-  const [name, setName] = useState("Fresh farm limited");
-  const [type, setType] = useState("");
-  const [specify, setSpecify] = useState("+234 813 6666 888");
-  const [contactPerson, setContactPerson] = useState("Mr. Adaralegbe");
-  const [phone, setPhone] = useState("+234 813 6666 888");
-  const [address, setAddress] = useState("Zone 9. Ajagbe Estate, Ogun State");
+function AddSupplierModal({
+  onClose, onSave,
+}: {
+  onClose: () => void;
+  onSave: (payload: {
+    name: string;
+    type: SupplierType | null;
+    contactPerson: string | null;
+    phone: string | null;
+    address: string | null;
+  }) => void;
+}) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState<SupplierType | "">("");
+  const [contactPerson, setContactPerson] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+
+  const canSave = name.trim().length > 0;
 
   return (
     <ModalShell title="Add New Supplier" onClose={onClose} width={460}>
@@ -341,19 +341,13 @@ function AddSupplierModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
 
       <Field label="Type">
         <div style={{ position: "relative" }}>
-          <select className="input" value={type} onChange={(e) => setType(e.target.value)} style={{ appearance: "none", width: "100%" }}>
+          <select className="input" value={type} onChange={(e) => setType(e.target.value as SupplierType)} style={{ appearance: "none", width: "100%" }}>
             <option value="">select type....</option>
             {SUPPLIER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
           <ChevronDown size={16} strokeWidth={1.8} color="var(--color-text-muted)" style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
         </div>
       </Field>
-
-      {type === "Other" && (
-        <Field label="Specfy Here">
-          <input className="input" value={specify} onChange={(e) => setSpecify(e.target.value)} />
-        </Field>
-      )}
 
       <Field label="Contact Person">
         <input className="input" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} />
@@ -370,7 +364,16 @@ function AddSupplierModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
         <button
           className="btn btn-primary"
           style={{ padding: "9px 18px", fontSize: "0.85rem" }}
-          onClick={() => onSaved(name)}
+          disabled={!canSave}
+          onClick={() =>
+            onSave({
+              name,
+              type: type || null,
+              contactPerson: contactPerson || null,
+              phone: phone || null,
+              address: address || null,
+            })
+          }
         >
           Save
         </button>

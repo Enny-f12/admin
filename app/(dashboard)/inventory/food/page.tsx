@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   TrendingUp,
@@ -20,61 +20,18 @@ import {
   X,
   Calendar,
 } from "lucide-react";
+import { useInventoryDashboardStore } from "@/store/useInventoryStore";
+import { FoodInventoryItem } from "@/types/food-inventory.types";
+import { DrinksInventoryItem, Supplier } from "@/types/drinks.types";
+import { drinksService } from "@/services/drinks.service";
 
 type Status = "In Stock" | "Low Stock" | "Out of Stock";
 
-type FoodItem = {
-  name: string;
-  category: string;
-  unit: string;
-  pack: number;
-  stock: number;
-  threshold: number;
-  status: Status;
-};
-
-type DrinkItem = {
-  name: string;
-  unit: string;
-  pack: number; // fridge quantity
-  stock: number; // warehouse quantity
-  threshold: number;
-  status: Status;
-};
-
-const FOOD_CATEGORIES = ["All Categories", "Pastry", "Swallow", "Soup", "Protein", "Intercontinental", "Africana", "Salad", "Catering"];
 const STATUS_OPTIONS: (Status | "All Status")[] = ["All Status", "In Stock", "Low Stock", "Out of Stock"];
-
-const FOOD_ITEMS: FoodItem[] = [
-  { name: "Puff puff",      category: "Pastry",          unit: "Piece",   pack: 4, stock: 0,  threshold: 4,  status: "Out of Stock" },
-  { name: "Chicken pie",    category: "Pastry",          unit: "Piece",   pack: 1, stock: 0,  threshold: 5,  status: "Out of Stock" },
-  { name: "Meat pie",       category: "Pastry",          unit: "Piece",   pack: 1, stock: 0,  threshold: 2,  status: "Out of Stock" },
-  { name: "Milk doughnut",  category: "Pastry",          unit: "Piece",   pack: 1, stock: 0,  threshold: 5,  status: "Out of Stock" },
-  { name: "Sugar doughnut", category: "Pastry",          unit: "Piece",   pack: 1, stock: 0,  threshold: 4,  status: "Out of Stock" },
-  { name: "Semo",           category: "Swallow",         unit: "Wrap",    pack: 1, stock: 5,  threshold: 10, status: "Low Stock"    },
-  { name: "Pounded yam",    category: "Swallow",         unit: "Wrap",    pack: 1, stock: 3,  threshold: 5,  status: "Low Stock"    },
-  { name: "Eba",            category: "Swallow",         unit: "Wrap",    pack: 1, stock: 2,  threshold: 7,  status: "Low Stock"    },
-  { name: "Poundo yam",     category: "Swallow",         unit: "Wrap",    pack: 1, stock: 1,  threshold: 4,  status: "Low Stock"    },
-  { name: "Fufu",           category: "Swallow",         unit: "Wrap",    pack: 1, stock: 4,  threshold: 6,  status: "Low Stock"    },
-  { name: "Starch",         category: "Swallow",         unit: "Wrap",    pack: 1, stock: 2,  threshold: 5,  status: "Low Stock"    },
-  { name: "Egusi soup",     category: "Soup",            unit: "Bowl",    pack: 1, stock: 12, threshold: 10, status: "Low Stock"    },
-  { name: "Grilled chicken", category: "Protein",        unit: "Piece",   pack: 1, stock: 0,  threshold: 5,  status: "Out of Stock" },
-  { name: "Jollof Rice",    category: "Intercontinental", unit: "Serving", pack: 1, stock: 55, threshold: 10, status: "In Stock"    },
-];
-
-const DRINK_ITEMS: DrinkItem[] = [
-  { name: "Can Coke",       unit: "Can",    pack: 45, stock: 100, threshold: 145, status: "In Stock"     },
-  { name: "Plastic Coke",   unit: "Bottle", pack: 20, stock: 50,  threshold: 70,  status: "In Stock"     },
-  { name: "Can Fanta",      unit: "Can",    pack: 3,  stock: 20,  threshold: 23,  status: "Low Stock"    },
-  { name: "Can Sprite",     unit: "Can",    pack: 0,  stock: 15,  threshold: 15,  status: "Low Stock"    },
-  { name: "Can Monster",    unit: "Can",    pack: 0,  stock: 0,   threshold: 0,   status: "Out of Stock" },
-  { name: "Aquafina Water", unit: "Bottle", pack: 25, stock: 100, threshold: 125, status: "In Stock"     },
-];
-
 const PAGE_SIZE = 6;
 
 const STATUS_CLASS: Record<Status, string> = {
-  "In Stock":  "badge badge-green",
+  "In Stock": "badge badge-green",
   "Low Stock": "badge badge-yellow",
   "Out of Stock": "badge badge-red",
 };
@@ -96,10 +53,57 @@ export default function InventoryDashboardPage() {
   const [page, setPage] = useState(1);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
-  const [fridgeAlertOpen, setFridgeAlertOpen] = useState(true);
+  const [fridgeAlertOpen, setFridgeAlertOpen] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
+
+  const {
+    foodItems,
+    foodTotal,
+    foodStats,
+    foodCategories,
+    foodLoading,
+    foodError,
+    drinkItems,
+    drinksTotal,
+    drinksStats,
+    drinksLoading,
+    drinksError,
+    banner,
+    fetchFoodItems,
+    fetchFoodCategories,
+    fetchDrinkItems,
+    fetchBanner,
+    adjustWarehouseStock,
+    transferToFridge,
+    receiveDelivery,
+  } = useInventoryDashboardStore();
+
+  useEffect(() => {
+    fetchFoodCategories();
+    fetchBanner();
+  }, [fetchFoodCategories, fetchBanner]);
+
+  useEffect(() => {
+    if (tab === "food") {
+      fetchFoodItems({
+        search: search || undefined,
+        category: category === "All Categories" ? undefined : category,
+        status: status === "All Status" ? undefined : status,
+        page,
+        pageSize: PAGE_SIZE,
+      });
+    } else {
+      fetchDrinkItems({
+        search: search || undefined,
+        status: status === "All Status" ? undefined : status,
+        page,
+        pageSize: PAGE_SIZE,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, search, category, status, page]);
 
   const switchTab = (t: "food" | "drinks") => {
     setTab(t);
@@ -110,29 +114,19 @@ export default function InventoryDashboardPage() {
     if (t === "drinks") setFridgeAlertOpen(true);
   };
 
-  const filteredFood = FOOD_ITEMS.filter(
-    (i) =>
-      i.name.toLowerCase().includes(search.toLowerCase()) &&
-      (category === "All Categories" || i.category === category) &&
-      (status === "All Status" || i.status === status)
-  );
-  const filteredDrinks = DRINK_ITEMS.filter(
-    (i) => i.name.toLowerCase().includes(search.toLowerCase()) && (status === "All Status" || i.status === status)
-  );
+  const loading = tab === "food" ? foodLoading : drinksLoading;
+  const hasError = tab === "food" ? foodError : drinksError;
+  const total = tab === "food" ? foodTotal : drinksTotal;
+  const stats = tab === "food" ? foodStats : drinksStats;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const rows = tab === "food" ? filteredFood : filteredDrinks;
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  const pagedRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const drinkStatusOf = (i: DrinksInventoryItem): Status => i.status;
 
-  // stat card figures — mock's own headline numbers (kept independent of the sample rows above)
-  const stats =
-    tab === "food"
-      ? { total: 25, low: 4, out: 3, value: "₦450,000" }
-      : { total: 18, low: 2, out: 1, value: "₦125,000" };
-
-  const inStockRows = rows.filter((r) => r.status === "In Stock");
-  const lowStockRows = rows.filter((r) => r.status === "Low Stock");
-  const outOfStockRows = rows.filter((r) => r.status === "Out of Stock");
+  const lowStockDrinks = drinkItems?.filter((i) => i.status === "Low Stock") ?? [];
+  const outOfStockDrinks = drinkItems?.filter((i) => i.status === "Out of Stock") ?? [];
+  const lowStockFood = foodItems?.filter((i) => i.status === "Low Stock") ?? [];
+  const outOfStockFood = foodItems?.filter((i) => i.status === "Out of Stock") ?? [];
+  const inStockFood = foodItems?.filter((i) => i.status === "In Stock") ?? [];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, position: "relative" }}>
@@ -148,12 +142,21 @@ export default function InventoryDashboardPage() {
       </div>
 
       <div className="card">
-        <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
-          <strong>Last Updated:</strong> Today, 8:35 AM by Sarah Johnson (Counter)
-        </p>
-        <p style={{ margin: "6px 0 0", fontSize: "0.85rem", color: "var(--color-text)" }}>
-          <strong>Next morning count due:</strong> Tomorrow, 8:00 AM
-        </p>
+        {banner ? (
+          <>
+            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
+              <strong>Last Updated:</strong> {new Date(banner.lastUpdatedAt).toLocaleString()} by {banner.lastUpdatedByName}
+            </p>
+            <p style={{ margin: "6px 0 0", fontSize: "0.85rem", color: "var(--color-text)" }}>
+              <strong>Next morning count due:</strong> {new Date(banner.nextCountDueAt).toLocaleString()}
+            </p>
+          </>
+        ) : (
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            {/* TODO(BACKEND): GET /admin/inventory/status-banner not implemented — see request doc #3 */}
+            Status unavailable
+          </p>
+        )}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
@@ -161,22 +164,30 @@ export default function InventoryDashboardPage() {
           {tab === "food"
             ? <ChefHat size={20} strokeWidth={1.8} color="#E10B1C" style={{ margin: "0 auto" }} />
             : <GlassWater size={20} strokeWidth={1.8} color="#E10B1C" style={{ margin: "0 auto" }} />}
-          <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>{stats.total}</p>
+          <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>
+            {stats ? stats.totalItems : loading ? "…" : "–"}
+          </p>
           <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Total Items</p>
         </div>
         <div className="card" style={{ textAlign: "center" }}>
           <AlertTriangle size={20} strokeWidth={1.8} color="#a07a00" style={{ margin: "0 auto" }} />
-          <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "#a07a00" }}>{stats.low}</p>
+          <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "#a07a00" }}>
+            {stats ? stats.lowStock : loading ? "…" : "–"}
+          </p>
           <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Low Stock</p>
         </div>
         <div className="card" style={{ textAlign: "center" }}>
           <AlertTriangle size={20} strokeWidth={1.8} color="#E10B1C" style={{ margin: "0 auto" }} />
-          <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "#E10B1C" }}>{stats.out}</p>
+          <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "#E10B1C" }}>
+            {stats ? stats.outOfStock : loading ? "…" : "–"}
+          </p>
           <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Out of Stock</p>
         </div>
         <div className="card" style={{ textAlign: "center" }}>
           <DollarSign size={20} strokeWidth={1.8} color="var(--color-heading)" style={{ margin: "0 auto" }} />
-          <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>{stats.value}</p>
+          <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>
+            {stats ? `₦${stats.totalValue.toLocaleString()}` : loading ? "…" : "–"}
+          </p>
           <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Total Value</p>
         </div>
       </div>
@@ -202,7 +213,7 @@ export default function InventoryDashboardPage() {
           {tab === "food" && (
             <Dropdown
               value={category}
-              options={FOOD_CATEGORIES}
+              options={["All Categories", ...(foodCategories ?? [])]}
               open={categoryOpen}
               setOpen={setCategoryOpen}
               onChange={(v) => { setCategory(v); setPage(1); }}
@@ -223,12 +234,31 @@ export default function InventoryDashboardPage() {
           <table>
             <thead>
               <tr>
-                {["Item", "Unit", "Pack", "Stock", "Threshold", "Status"].map((c) => <th key={c}>{c}</th>)}
+                {tab === "food"
+                  ? ["Item", "Unit", "Pack", "Stock", "Threshold", "Status"].map((c) => <th key={c}>{c}</th>)
+                  : ["Item", "Unit", "Fridge", "Warehouse", "Threshold", "Status"].map((c) => <th key={c}>{c}</th>)}
               </tr>
             </thead>
             <tbody>
-              {pagedRows.map((item) => (
-                <tr key={item.name}>
+              {loading && (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
+                    Loading…
+                  </td>
+                </tr>
+              )}
+
+              {!loading && hasError && (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
+                    {/* TODO(BACKEND): tab === "food" ? see request doc #1 : see request doc #4 */}
+                    No inventory data available
+                  </td>
+                </tr>
+              )}
+
+              {!loading && !hasError && tab === "food" && (foodItems ?? []).map((item: FoodInventoryItem) => (
+                <tr key={item.id}>
                   <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{item.name}</td>
                   <td>{item.unit}</td>
                   <td>{item.pack}</td>
@@ -237,7 +267,19 @@ export default function InventoryDashboardPage() {
                   <td><StatusBadge status={item.status} /></td>
                 </tr>
               ))}
-              {pagedRows.length === 0 && (
+
+              {!loading && !hasError && tab === "drinks" && (drinkItems ?? []).map((item) => (
+                <tr key={item.id}>
+                  <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{item.name}</td>
+                  <td>{item.unit}</td>
+                  <td>{item.fridgeStock}</td>
+                  <td>{item.warehouseStock}</td>
+                  <td>{item.fridgeThreshold}</td>
+                  <td><StatusBadge status={drinkStatusOf(item)} /></td>
+                </tr>
+              ))}
+
+              {!loading && !hasError && ((tab === "food" ? foodItems?.length : drinkItems?.length) ?? 0) === 0 && (
                 <tr>
                   <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
                     No items match this filter.
@@ -279,40 +321,46 @@ export default function InventoryDashboardPage() {
 
       {tab === "food" ? (
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {inStockRows.length > 0 && (
+          {inStockFood.length > 0 && (
             <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
               <TrendingUp size={14} strokeWidth={2} color="#16A34A" />
-              <strong>In Stock:</strong> {inStockRows.length} items well stocked
+              <strong>In Stock:</strong> {inStockFood.length} items well stocked
             </p>
           )}
-          {lowStockRows.length > 0 && (
+          {lowStockFood.length > 0 && (
             <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
               <AlertTriangle size={14} strokeWidth={1.8} color="#a07a00" />
-              <strong>Low Stock Alert:</strong> {lowStockRows.length} items below threshold
+              <strong>Low Stock Alert:</strong> {lowStockFood.length} items below threshold
             </p>
           )}
-          {outOfStockRows.length > 0 && (
+          {outOfStockFood.length > 0 && (
             <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
               <AlertTriangle size={14} strokeWidth={1.8} color="#E10B1C" />
-              <strong>Out of Stock:</strong> {outOfStockRows.length} items - customers cannot order
+              <strong>Out of Stock:</strong> {outOfStockFood.length} items - customers cannot order
             </p>
+          )}
+          {!loading && !hasError && (foodItems?.length ?? 0) === 0 && (
+            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No status data to show.</p>
           )}
         </div>
       ) : (
         <>
           <div className="card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {lowStockRows.length > 0 && (
+            {lowStockDrinks.length > 0 && (
               <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
                 <AlertTriangle size={14} strokeWidth={1.8} color="#a07a00" />
                 <strong>Low Fridge Alert:</strong>{" "}
-                {lowStockRows.map((r, i) => `${r.name} (${r.pack} left)`).join(", ")}
+                {lowStockDrinks.map((r) => `${r.name} (${r.fridgeStock} left)`).join(", ")}
               </p>
             )}
-            {outOfStockRows.length > 0 && (
+            {outOfStockDrinks.length > 0 && (
               <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
                 <AlertTriangle size={14} strokeWidth={1.8} color="#E10B1C" />
-                <strong>Out of Stock:</strong> {outOfStockRows.map((r) => r.name).join(", ")} - order from supplier
+                <strong>Out of Stock:</strong> {outOfStockDrinks.map((r) => r.name).join(", ")} - order from supplier
               </p>
+            )}
+            {!loading && !hasError && lowStockDrinks.length === 0 && outOfStockDrinks.length === 0 && (
+              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No alerts right now.</p>
             )}
           </div>
 
@@ -324,14 +372,40 @@ export default function InventoryDashboardPage() {
         </>
       )}
 
-      {receiveOpen && <ReceiveDeliveryModal onClose={() => setReceiveOpen(false)} />}
-      {transferOpen && <TransferModal onClose={() => setTransferOpen(false)} />}
-      {adjustOpen && <AdjustStockModal onClose={() => setAdjustOpen(false)} />}
+      {receiveOpen && (
+        <ReceiveDeliveryModal
+          onClose={() => setReceiveOpen(false)}
+          onSubmit={async (payload) => {
+            const ok = await receiveDelivery(payload);
+            if (ok) setReceiveOpen(false);
+          }}
+        />
+      )}
+      {transferOpen && (
+        <TransferModal
+          items={drinkItems ?? []}
+          onClose={() => setTransferOpen(false)}
+          onSubmit={async (payload) => {
+            const ok = await transferToFridge(payload);
+            if (ok) setTransferOpen(false);
+          }}
+        />
+      )}
+      {adjustOpen && (
+        <AdjustStockModal
+          items={drinkItems ?? []}
+          onClose={() => setAdjustOpen(false)}
+          onSubmit={async (payload) => {
+            const ok = await adjustWarehouseStock(payload);
+            if (ok) setAdjustOpen(false);
+          }}
+        />
+      )}
 
-      {tab === "drinks" && fridgeAlertOpen && (
+      {tab === "drinks" && fridgeAlertOpen && (lowStockDrinks.length > 0 || outOfStockDrinks.length > 0) && (
         <LowFridgeAlertModal
-          lowStockItems={DRINK_ITEMS.filter((i) => i.status === "Low Stock")}
-          outOfStockItems={DRINK_ITEMS.filter((i) => i.status === "Out of Stock")}
+          lowStockItems={lowStockDrinks}
+          outOfStockItems={outOfStockDrinks}
           onDismiss={() => setFridgeAlertOpen(false)}
         />
       )}
@@ -433,7 +507,7 @@ function Dropdown({
   );
 }
 
-/* ── Shared modal shell (scrollable, capped height) ── */
+/* ── Shared modal shell ── */
 function ModalShell({ title, onClose, children, width = 460 }: { title: string; onClose: () => void; children: React.ReactNode; width?: number }) {
   return (
     <div
@@ -492,39 +566,64 @@ const outlineBtn: React.CSSProperties = {
 
 /* ── Receive Delivery modal ── */
 type ReceivedRow = { name: string; qty: number; costPerUnit: number };
-const DEFAULT_RECEIVED: ReceivedRow[] = [
-  { name: "Can Coke", qty: 50, costPerUnit: 500 },
-  { name: "Can Fanta", qty: 50, costPerUnit: 500 },
-];
 
-function ReceiveDeliveryModal({ onClose }: { onClose: () => void }) {
-  const [supplier, setSupplier] = useState("Beverage Distributor Limited");
-  const [deliveryDate, setDeliveryDate] = useState("May 15, 2025");
-  const [invoice, setInvoice] = useState("INV-5678.......");
-  const [items, setItems] = useState<ReceivedRow[]>(DEFAULT_RECEIVED);
+function ReceiveDeliveryModal({
+  onClose, onSubmit,
+}: {
+  onClose: () => void;
+  onSubmit: (payload: {
+    supplierId: string | null;
+    deliveryDate: string;
+    invoiceNumber: string;
+    isDraft: boolean;
+    items: { itemName: string; quantity: number; costPerUnit: number }[];
+  }) => void;
+}) {
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [supplierId, setSupplierId] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [invoice, setInvoice] = useState("");
+  const [items, setItems] = useState<ReceivedRow[]>([{ name: "", qty: 0, costPerUnit: 0 }]);
+
+  useEffect(() => {
+    drinksService.getSuppliers().then(setSuppliers).catch(() => setSuppliers([]));
+  }, []);
 
   const totalCost = items.reduce((sum, i) => sum + i.qty * i.costPerUnit, 0);
+  const canSubmit = items.some((i) => i.name.trim() && i.qty > 0);
 
-  const addItem = () => setItems((prev) => [...prev, { name: "New item", qty: 1, costPerUnit: 0 }]);
+  const addItem = () => setItems((prev) => [...prev, { name: "", qty: 0, costPerUnit: 0 }]);
   const updateItem = (i: number, patch: Partial<ReceivedRow>) =>
     setItems((prev) => prev.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+
+  const submit = (isDraft: boolean) => {
+    onSubmit({
+      supplierId: supplierId || null,
+      deliveryDate,
+      invoiceNumber: invoice,
+      isDraft,
+      items: items
+        .filter((i) => i.name.trim() && i.qty > 0)
+        .map((i) => ({ itemName: i.name, quantity: i.qty, costPerUnit: i.costPerUnit })),
+    });
+  };
 
   return (
     <ModalShell title="Receive Delivery" onClose={onClose} width={620}>
       <Field label="Supplier">
-        <select className="input" value={supplier} onChange={(e) => setSupplier(e.target.value)}>
-          <option>Beverage Distributor Limited</option>
-          <option>Fresh Farm Limited</option>
+        <select className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+          <option value="">Select supplier</option>
+          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
       </Field>
       <Field label="Delivery Date">
         <div style={{ position: "relative" }}>
           <Calendar size={16} strokeWidth={1.8} color="var(--color-primary)" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
-          <input className="input" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} style={{ paddingLeft: 38 }} />
+          <input className="input" type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} style={{ paddingLeft: 38 }} />
         </div>
       </Field>
       <Field label="Invoice Number">
-        <input className="input" value={invoice} onChange={(e) => setInvoice(e.target.value)} />
+        <input className="input" placeholder="INV-5678......." value={invoice} onChange={(e) => setInvoice(e.target.value)} />
       </Field>
 
       <p style={{ margin: "0 0 10px", fontSize: "0.85rem", fontWeight: 700, color: "var(--color-heading)" }}>
@@ -533,7 +632,7 @@ function ReceiveDeliveryModal({ onClose }: { onClose: () => void }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
         {items.map((row, i) => (
           <div key={i} style={{ display: "grid", gridTemplateColumns: "1.4fr 0.8fr 0.9fr auto", gap: 8, alignItems: "center" }}>
-            <input className="input" value={row.name} onChange={(e) => updateItem(i, { name: e.target.value })} />
+            <input className="input" placeholder="Item name" value={row.name} onChange={(e) => updateItem(i, { name: e.target.value })} />
             <input className="input" type="number" value={row.qty} onChange={(e) => updateItem(i, { qty: Number(e.target.value) || 0 })} placeholder="Qty" />
             <input className="input" type="number" value={row.costPerUnit} onChange={(e) => updateItem(i, { costPerUnit: Number(e.target.value) || 0 })} placeholder="Cost/unit" />
             <span style={{ fontWeight: 600, fontSize: "0.85rem", whiteSpace: "nowrap" }}>₦{(row.qty * row.costPerUnit).toLocaleString()}</span>
@@ -558,8 +657,8 @@ function ReceiveDeliveryModal({ onClose }: { onClose: () => void }) {
       </p>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-        <button onClick={onClose} style={outlineBtn}>Save Draft</button>
-        <button className="btn btn-primary" style={{ padding: "9px 18px", fontSize: "0.85rem" }} onClick={onClose}>
+        <button onClick={() => submit(true)} disabled={!canSubmit} style={outlineBtn}>Save Draft</button>
+        <button className="btn btn-primary" style={{ padding: "9px 18px", fontSize: "0.85rem" }} disabled={!canSubmit} onClick={() => submit(false)}>
           Confirm Receipt
         </button>
       </div>
@@ -568,31 +667,46 @@ function ReceiveDeliveryModal({ onClose }: { onClose: () => void }) {
 }
 
 /* ── Transfer to Fridge modal ── */
-function TransferModal({ onClose }: { onClose: () => void }) {
-  const [itemName, setItemName] = useState(DRINK_ITEMS[2].name); // Can Fanta by default
-  const item = DRINK_ITEMS.find((i) => i.name === itemName) ?? DRINK_ITEMS[0];
-  const [qty, setQty] = useState(7);
+function TransferModal({
+  items, onClose, onSubmit,
+}: {
+  items: DrinksInventoryItem[];
+  onClose: () => void;
+  onSubmit: (payload: { itemId: string; quantity: number; reason: string }) => void;
+}) {
+  const [itemId, setItemId] = useState(items[0]?.id ?? "");
+  const item = items.find((i) => i.id === itemId) ?? items[0];
+  const [qty, setQty] = useState(0);
   const [reason, setReason] = useState("Restock fridge for lunch rush");
 
-  const newFridgeStock = item.pack + qty;
-  const newWarehouseStock = item.stock - qty;
-  const belowThreshold = item.pack < item.threshold;
+  if (!item) {
+    return (
+      <ModalShell title="Transfer to Fridge" onClose={onClose}>
+        <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No drinks data available.</p>
+      </ModalShell>
+    );
+  }
+
+  const newFridgeStock = item.fridgeStock + qty;
+  const newWarehouseStock = item.warehouseStock - qty;
+  const belowThreshold = item.fridgeStock < item.fridgeThreshold;
+  const exceedsWarehouse = qty > item.warehouseStock;
 
   return (
     <ModalShell title="Transfer to Fridge" onClose={onClose}>
       <Field label="Item">
-        <select className="input" value={itemName} onChange={(e) => setItemName(e.target.value)}>
-          {DRINK_ITEMS.map((i) => <option key={i.name}>{i.name}</option>)}
+        <select className="input" value={itemId} onChange={(e) => { setItemId(e.target.value); setQty(0); }}>
+          {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
         </select>
       </Field>
-      <Field label="Current Fridge Stock (packs)">
-        <input className="input" value={item.pack} readOnly />
+      <Field label="Current Fridge Stock">
+        <input className="input" value={item.fridgeStock} readOnly />
       </Field>
-      <Field label="Current Warehouse Stock (packs)">
-        <input className="input" value={item.stock} readOnly />
+      <Field label="Current Warehouse Stock">
+        <input className="input" value={item.warehouseStock} readOnly />
       </Field>
       <Field label="Fridge Threshold">
-        <input className="input" value={`${item.threshold} units`} readOnly />
+        <input className="input" value={`${item.fridgeThreshold} units`} readOnly />
       </Field>
 
       {belowThreshold && (
@@ -602,13 +716,20 @@ function TransferModal({ onClose }: { onClose: () => void }) {
         </p>
       )}
 
-      <Field label="Qty to Transfer (packs)">
+      <Field label="Qty to Transfer">
         <Stepper value={qty} onChange={setQty} />
       </Field>
-      <Field label="New Fridge Stock (packs)">
+
+      {exceedsWarehouse && (
+        <p style={{ margin: "-6px 0 14px", fontSize: "0.8rem", color: "#E10B1C" }}>
+          Exceeds available warehouse stock.
+        </p>
+      )}
+
+      <Field label="New Fridge Stock">
         <input className="input" value={newFridgeStock} readOnly />
       </Field>
-      <Field label="New Warehouse Stock (packs)">
+      <Field label="New Warehouse Stock">
         <input className="input" value={newWarehouseStock} readOnly />
       </Field>
       <Field label="Reason">
@@ -617,7 +738,12 @@ function TransferModal({ onClose }: { onClose: () => void }) {
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
         <button onClick={onClose} style={outlineBtn}>Cancel</button>
-        <button className="btn btn-primary" style={{ padding: "9px 18px", fontSize: "0.85rem" }} onClick={onClose}>
+        <button
+          className="btn btn-primary"
+          style={{ padding: "9px 18px", fontSize: "0.85rem" }}
+          disabled={!qty || exceedsWarehouse}
+          onClick={() => onSubmit({ itemId: item.id, quantity: qty, reason })}
+        >
           Transfer to Fridge
         </button>
       </div>
@@ -626,26 +752,40 @@ function TransferModal({ onClose }: { onClose: () => void }) {
 }
 
 /* ── Adjust Stock modal ── */
-function AdjustStockModal({ onClose }: { onClose: () => void }) {
-  const [itemName, setItemName] = useState(DRINK_ITEMS[0].name);
-  const item = DRINK_ITEMS.find((i) => i.name === itemName) ?? DRINK_ITEMS[0];
-  const [qty, setQty] = useState(20);
-  const [cost, setCost] = useState(500);
+function AdjustStockModal({
+  items, onClose, onSubmit,
+}: {
+  items: DrinksInventoryItem[];
+  onClose: () => void;
+  onSubmit: (payload: { itemId: string; quantity: number; costPerUnit: number; reason: string }) => void;
+}) {
+  const [itemId, setItemId] = useState(items[0]?.id ?? "");
+  const item = items.find((i) => i.id === itemId) ?? items[0];
+  const [qty, setQty] = useState(0);
+  const [cost, setCost] = useState(0);
   const [reason, setReason] = useState("New delivery received from supplier");
 
-  const newStock = item.stock + qty;
+  if (!item) {
+    return (
+      <ModalShell title="Adjust Stock" onClose={onClose}>
+        <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No drinks data available.</p>
+      </ModalShell>
+    );
+  }
+
+  const newStock = item.warehouseStock + qty;
   const totalCost = qty * cost;
 
   return (
     <ModalShell title="Adjust Stock" onClose={onClose}>
       <Field label="Item">
-        <select className="input" value={itemName} onChange={(e) => setItemName(e.target.value)}>
-          {DRINK_ITEMS.map((i) => <option key={i.name}>{i.name}</option>)}
+        <select className="input" value={itemId} onChange={(e) => { setItemId(e.target.value); setQty(0); }}>
+          {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
         </select>
       </Field>
 
       <p style={{ margin: "0 0 6px", fontSize: "0.85rem", color: "var(--color-text)" }}>
-        Current: <strong>{item.stock} {item.unit}</strong>
+        Current: <strong>{item.warehouseStock} {item.unit}</strong>
       </p>
       <Field label="Qty to Adjust">
         <Stepper value={qty} onChange={setQty} />
@@ -668,16 +808,22 @@ function AdjustStockModal({ onClose }: { onClose: () => void }) {
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
         <button onClick={onClose} style={outlineBtn}>Cancel</button>
-        <button className="btn btn-primary" style={{ padding: "9px 18px", fontSize: "0.85rem" }} onClick={onClose}>
+        <button
+          className="btn btn-primary"
+          style={{ padding: "9px 18px", fontSize: "0.85rem" }}
+          disabled={!qty || !reason.trim()}
+          onClick={() => onSubmit({ itemId: item.id, quantity: qty, costPerUnit: cost, reason })}
+        >
           Apply Change
         </button>
       </div>
     </ModalShell>
   );
 }
+
 function LowFridgeAlertModal({
   lowStockItems, outOfStockItems, onDismiss,
-}: { lowStockItems: DrinkItem[]; outOfStockItems: DrinkItem[]; onDismiss: () => void }) {
+}: { lowStockItems: DrinksInventoryItem[]; outOfStockItems: DrinksInventoryItem[]; onDismiss: () => void }) {
   return (
     <div
       onClick={onDismiss}
@@ -699,8 +845,8 @@ function LowFridgeAlertModal({
             </p>
             <ul style={{ margin: "0 0 16px", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
               {lowStockItems.map((i) => (
-                <li key={i.name} style={{ fontSize: "0.9rem" }}>
-                  {i.name} ({i.pack} in fridge, {i.stock} in warehouse){" "}
+                <li key={i.id} style={{ fontSize: "0.9rem" }}>
+                  {i.name} ({i.fridgeStock} in fridge, {i.warehouseStock} in warehouse){" "}
                   <a href="#" style={{ color: "#fff", textDecoration: "underline", fontStyle: "italic" }} onClick={(e) => e.preventDefault()}>
                     Transfer to Fridge
                   </a>
@@ -717,8 +863,8 @@ function LowFridgeAlertModal({
             </p>
             <ul style={{ margin: "0 0 20px", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
               {outOfStockItems.map((i) => (
-                <li key={i.name} style={{ fontSize: "0.9rem" }}>
-                  {i.name} ({i.pack} fridge, {i.stock} warehouse){" "}
+                <li key={i.id} style={{ fontSize: "0.9rem" }}>
+                  {i.name} ({i.fridgeStock} fridge, {i.warehouseStock} warehouse){" "}
                   <a href="#" style={{ color: "#fff", textDecoration: "underline", fontStyle: "italic" }} onClick={(e) => e.preventDefault()}>
                     Order from Supplier
                   </a>

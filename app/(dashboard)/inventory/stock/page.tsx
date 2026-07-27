@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Box,
   AlertTriangle,
@@ -15,68 +15,25 @@ import {
   TrendingUp,
   TrendingDown,
 } from "lucide-react";
-
-/* ── Types ── */
-type Status = "In Stock" | "Low Stock" | "Critical";
-
-type Item = {
-  name: string;
-  unit: string;
-  lekki1: number;
-  lekki2: number;
-  maitama: number;
-  status: Status;
-  costPerUnit: number;
-};
-
-type ThresholdRow = {
-  name: string;
-  unit: string;
-  threshold: number;
-  notify: boolean;
-  autoReorder: boolean;
-};
+import { useStockStore } from "@/store/useStockStore";
+import { StockItem, StockStatus } from "@/types/stock.types";
 
 type ModalItem = {
+  itemId: string;
   name: string;
   unit: string;
-  status?: Status;
+  status?: StockStatus;
   current: number;
+  branchId: string;
 };
 
-/* ── Data ── */
-const ITEMS: Item[] = [
-  { name: "Melon",         unit: "kg",    lekki1: 55,  lekki2: 30,  maitama: 55,  status: "In Stock",  costPerUnit: 1200 },
-  { name: "Basmati Rice",  unit: "kg",    lekki1: 15,  lekki2: 10,  maitama: 15,  status: "Low Stock", costPerUnit: 1200 },
-  { name: "Ofada Rice",    unit: "kg",    lekki1: 100, lekki2: 150, maitama: 100, status: "In Stock",  costPerUnit: 1200 },
-  { name: "Frozen Turkey", unit: "kg",    lekki1: 0,   lekki2: 0,   maitama: 0,   status: "Critical",  costPerUnit: 1200 },
-  { name: "Yam",           unit: "Pcs",   lekki1: 100, lekki2: 80,  maitama: 100, status: "In Stock",  costPerUnit: 1200 },
-  { name: "Seasoning",     unit: "packs", lekki1: 13,  lekki2: 8,   maitama: 13,  status: "Low Stock", costPerUnit: 1200 },
-];
-
-const THRESHOLD_ROWS: ThresholdRow[] = [
-  { name: "Melon",          unit: "kg",    threshold: 20, notify: true,  autoReorder: false },
-  { name: "Basmati Rice",   unit: "kg",    threshold: 15, notify: false, autoReorder: false },
-  { name: "Ofada  Rice",    unit: "kg",    threshold: 5,  notify: false, autoReorder: false },
-  { name: "Frozen Chicken", unit: "kg",    threshold: 10, notify: false, autoReorder: false },
-  { name: "Yam",            unit: "pcs",   threshold: 30, notify: false, autoReorder: false },
-  { name: "Seasoning",      unit: "packs", threshold: 10, notify: false, autoReorder: false },
-];
-
-const ALERT = [
-  { name: "Seasoning",     left: "20 packs left" },
-  { name: "Basmati Rice",  left: "8 kg left" },
-];
-
-const BRANCH_OPTIONS = ["All Branches", "Lekki 1", "Lekki 2", "Maitama"];
-
-const STATUS_CLASS: Record<Status, string> = {
-  "In Stock":  "badge badge-green",
+const STATUS_CLASS: Record<StockStatus, string> = {
+  "In Stock": "badge badge-green",
   "Low Stock": "badge badge-yellow",
-  "Critical":  "badge badge-red",
+  Critical: "badge badge-red",
 };
 
-const StatusBadge = ({ status }: { status: Status }) => (
+const StatusBadge = ({ status }: { status: StockStatus }) => (
   <span className={STATUS_CLASS[status]} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
     {status === "In Stock" && <TrendingUp size={12} strokeWidth={2} />}
     {status === "Low Stock" && <TrendingDown size={12} strokeWidth={2} />}
@@ -85,12 +42,27 @@ const StatusBadge = ({ status }: { status: Status }) => (
   </span>
 );
 
-export default function StockInventoryPage() {
-  const totalItems = ITEMS.length;
-  const lowStockCount = ITEMS.filter((i) => i.status === "Low Stock").length;
-  const criticalCount = ITEMS.filter((i) => i.status === "Critical").length;
+const ALL_BRANCHES_ID = "all";
 
-  const [branch, setBranch] = useState("Lekki 1");
+export default function StockInventoryPage() {
+  const {
+    items,
+    itemsLoading,
+    itemsError,
+    branches,
+    lowStock,
+    lowStockLoading,
+    suppliers,
+    fetchAll,
+    fetchItems,
+    fetchSuppliers,
+    adjustStock,
+    transferStock,
+    removeStock,
+    addSupplier,
+  } = useStockStore();
+
+  const [branchId, setBranchId] = useState<string>(ALL_BRANCHES_ID);
   const [branchOpen, setBranchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [showThresholds, setShowThresholds] = useState(false);
@@ -100,22 +72,34 @@ export default function StockInventoryPage() {
   const [removeItem, setRemoveItem] = useState<ModalItem | null>(null);
   const [supplierOpen, setSupplierOpen] = useState(false);
 
-  const filteredItems = ITEMS.filter((i) =>
-    i.name.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => {
+    fetchAll();
+    fetchSuppliers();
+  }, [fetchAll, fetchSuppliers]);
 
-  const branchValue = (item: Item, key: "lekki1" | "lekki2" | "maitama") => {
-    if (branch === "All Branches") return item[key];
-    const selectedKey =
-      branch === "Lekki 1" ? "lekki1" : branch === "Lekki 2" ? "lekki2" : "maitama";
-    return key === selectedKey ? item[key] : undefined;
-  };
+  useEffect(() => {
+    fetchItems(branchId === ALL_BRANCHES_ID ? undefined : branchId, search || undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchId, search]);
 
-  const totalFor = (item: Item) => {
-    if (branch === "All Branches") return item.lekki1 + item.lekki2 + item.maitama;
-    const selectedKey =
-      branch === "Lekki 1" ? "lekki1" : branch === "Lekki 2" ? "lekki2" : "maitama";
-    return item[selectedKey];
+  const branchOptions = [{ id: ALL_BRANCHES_ID, name: "All Branches" }, ...(branches ?? [])];
+  const branchLabel = branchOptions.find((b) => b.id === branchId)?.name ?? "All Branches";
+
+  const totalItems = items?.length ?? 0;
+  const lowStockCount = items?.filter((i) => i.status === "Low Stock").length ?? 0;
+  const criticalCount = items?.filter((i) => i.status === "Critical").length ?? 0;
+
+  const toModalItem = (item: StockItem, fallbackBranchId?: string): ModalItem => {
+    const qty =
+      item.quantities.find((q) => q.branchId === fallbackBranchId) ?? item.quantities[0];
+    return {
+      itemId: item.id,
+      name: item.name,
+      unit: item.unit,
+      status: item.status,
+      current: qty?.quantity ?? item.total,
+      branchId: qty?.branchId ?? "",
+    };
   };
 
   return (
@@ -131,17 +115,23 @@ export default function StockInventoryPage() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
             <div className="card" style={{ textAlign: "center" }}>
               <Box size={20} strokeWidth={1.8} color="#B5442E" style={{ margin: "0 auto 6px" }} />
-              <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>{totalItems}</p>
+              <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>
+                {itemsLoading ? "…" : totalItems}
+              </p>
               <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Total Items</p>
             </div>
             <div className="card" style={{ textAlign: "center" }}>
               <AlertTriangle size={20} strokeWidth={1.8} color="#a07a00" style={{ margin: "0 auto 6px" }} />
-              <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700, color: "#a07a00" }}>{lowStockCount}</p>
+              <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700, color: "#a07a00" }}>
+                {itemsLoading ? "…" : lowStockCount}
+              </p>
               <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Low Stock</p>
             </div>
             <div className="card" style={{ textAlign: "center" }}>
               <AlertTriangle size={20} strokeWidth={1.8} color="#E10B1C" style={{ margin: "0 auto 6px" }} />
-              <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700, color: "#E10B1C" }}>{criticalCount}</p>
+              <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700, color: "#E10B1C" }}>
+                {itemsLoading ? "…" : criticalCount}
+              </p>
               <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Critical</p>
             </div>
           </div>
@@ -151,7 +141,8 @@ export default function StockInventoryPage() {
             <button
               className="btn btn-primary"
               style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", fontSize: "0.85rem" }}
-              onClick={() => setAdjustItem({ name: ITEMS[0].name, unit: ITEMS[0].unit, status: ITEMS[0].status, current: ITEMS[0].lekki1 })}
+              disabled={!items?.length}
+              onClick={() => items?.[0] && setAdjustItem(toModalItem(items[0]))}
             >
               <Plus size={16} strokeWidth={2} />
               Adjust Stock
@@ -159,12 +150,12 @@ export default function StockInventoryPage() {
             <ActionButton
               icon={<ArrowLeftRight size={16} strokeWidth={1.8} />}
               label="Transfer"
-              onClick={() => setTransferItem({ name: ITEMS[0].name, unit: ITEMS[0].unit, current: ITEMS[0].lekki1 })}
+              onClick={() => items?.[0] && setTransferItem(toModalItem(items[0]))}
             />
             <ActionButton
               icon={<PackageMinus size={16} strokeWidth={1.8} />}
               label="Remove Stock"
-              onClick={() => setRemoveItem({ name: ITEMS[0].name, unit: ITEMS[0].unit, status: ITEMS[0].status, current: ITEMS[0].lekki1 })}
+              onClick={() => items?.[0] && setRemoveItem(toModalItem(items[0]))}
             />
             <ActionButton
               icon={<SlidersHorizontal size={16} strokeWidth={1.8} />}
@@ -185,7 +176,7 @@ export default function StockInventoryPage() {
                   fontFamily: "var(--font-sans)",
                 }}
               >
-                {branch}
+                {branchLabel}
                 <ChevronDown size={16} strokeWidth={1.8} color="var(--color-text-muted)" />
               </button>
               {branchOpen && (
@@ -196,19 +187,19 @@ export default function StockInventoryPage() {
                     boxShadow: "0 8px 24px rgba(0,0,0,0.10)", overflow: "hidden", zIndex: 60,
                   }}
                 >
-                  {BRANCH_OPTIONS.map((b) => (
+                  {branchOptions.map((b) => (
                     <button
-                      key={b}
-                      onClick={() => { setBranch(b); setBranchOpen(false); }}
+                      key={b.id}
+                      onClick={() => { setBranchId(b.id); setBranchOpen(false); }}
                       style={{
                         display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
-                        padding: "10px 14px", background: b === branch ? "var(--color-bg-soft)" : "#fff",
+                        padding: "10px 14px", background: b.id === branchId ? "var(--color-bg-soft)" : "#fff",
                         border: "none", cursor: "pointer", fontSize: "0.85rem", fontFamily: "var(--font-sans)",
                         color: "var(--color-text)", textAlign: "left",
                       }}
                     >
-                      {b === branch && <span style={{ marginRight: 6 }}>✓</span>}
-                      {b}
+                      {b.id === branchId && <span style={{ marginRight: 6 }}>✓</span>}
+                      {b.name}
                     </button>
                   ))}
                 </div>
@@ -233,54 +224,78 @@ export default function StockInventoryPage() {
               <AlertTriangle size={16} strokeWidth={1.8} />
               Critical Stock Alert
             </p>
-            {ALERT.map((a) => (
-              <div key={a.name} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", padding: "3px 0" }}>
-                <span style={{ color: "var(--color-text)" }}>{a.name}</span>
-                <span style={{ color: "#E10B1C", fontWeight: 600 }}>{a.left}</span>
-              </div>
-            ))}
+            {lowStockLoading && (
+              <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p>
+            )}
+            {!lowStockLoading && !lowStock?.length && (
+              <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No alerts right now</p>
+            )}
+            {!lowStockLoading &&
+              lowStock?.map((a) => (
+                <div key={a.itemId} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", padding: "3px 0" }}>
+                  <span style={{ color: "var(--color-text)" }}>{a.itemName}</span>
+                  <span style={{ color: "#E10B1C", fontWeight: 600 }}>{a.currentQuantity} {a.unit} left</span>
+                </div>
+              ))}
           </div>
 
           {/* Main table */}
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-            <div className="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    {["Item", "Lekki 1", "Lekki 2", "Maitama", "Total", "Status", "Actions"].map((c) => (
-                      <th key={c}>{c}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredItems.map((item) => (
-                    <tr key={item.name}>
-                      <td>
-                        <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{item.name}</p>
-                        <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{item.unit}</p>
-                      </td>
-                      <td>{branchValue(item, "lekki1") ?? "-"}</td>
-                      <td>{branchValue(item, "lekki2") ?? "-"}</td>
-                      <td>{branchValue(item, "maitama") ?? "-"}</td>
-                      <td style={{ fontWeight: 600 }}>{totalFor(item)}</td>
-                      <td><StatusBadge status={item.status} /></td>
-                      <td>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <IconButton
-                            icon={<Plus size={14} strokeWidth={2} />}
-                            onClick={() => setAdjustItem({ name: item.name, unit: item.unit, status: item.status, current: item.lekki1 })}
-                          />
-                          <IconButton
-                            icon={<ArrowLeftRight size={14} strokeWidth={1.8} />}
-                            onClick={() => setTransferItem({ name: item.name, unit: item.unit, current: item.lekki1 })}
-                          />
-                        </div>
-                      </td>
+            {itemsLoading && (
+              <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p>
+            )}
+            {!itemsLoading && (itemsError || !items?.length) && (
+              <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+                {/* TODO(BACKEND): GET /admin/inventory/items not implemented — see request doc #1 */}
+                No inventory data available
+              </p>
+            )}
+            {!itemsLoading && items && items.length > 0 && (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Item</th>
+                      {(branches ?? []).map((b) => (
+                        <th key={b.id}>{b.name}</th>
+                      ))}
+                      <th>Total</th>
+                      <th>Status</th>
+                      <th>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {items.map((item) => (
+                      <tr key={item.id}>
+                        <td>
+                          <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{item.name}</p>
+                          <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{item.unit}</p>
+                        </td>
+                        {(branches ?? []).map((b) => (
+                          <td key={b.id}>
+                            {item.quantities.find((q) => q.branchId === b.id)?.quantity ?? "-"}
+                          </td>
+                        ))}
+                        <td style={{ fontWeight: 600 }}>{item.total}</td>
+                        <td><StatusBadge status={item.status} /></td>
+                        <td>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <IconButton
+                              icon={<Plus size={14} strokeWidth={2} />}
+                              onClick={() => setAdjustItem(toModalItem(item, branchId === ALL_BRANCHES_ID ? undefined : branchId))}
+                            />
+                            <IconButton
+                              icon={<ArrowLeftRight size={14} strokeWidth={1.8} />}
+                              onClick={() => setTransferItem(toModalItem(item, branchId === ALL_BRANCHES_ID ? undefined : branchId))}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </>
       ) : (
@@ -290,14 +305,68 @@ export default function StockInventoryPage() {
       {adjustItem && (
         <AdjustStockModal
           item={adjustItem}
+          suppliers={suppliers ?? []}
           onClose={() => setAdjustItem(null)}
           onOpenSupplier={() => setSupplierOpen(true)}
           hidden={supplierOpen}
+          onSubmit={async (form) => {
+            const ok = await adjustStock({
+              itemId: adjustItem.itemId,
+              branchId: adjustItem.branchId,
+              quantity: form.qty,
+              supplierId: form.supplierId || null,
+              invoiceNumber: form.invoice || null,
+              costPerUnit: form.cost,
+              reason: form.reason,
+            });
+            if (ok) setAdjustItem(null);
+          }}
         />
       )}
-      {transferItem && <TransferStockModal item={transferItem} onClose={() => setTransferItem(null)} />}
-      {removeItem && <RemoveStockModal item={removeItem} onClose={() => setRemoveItem(null)} />}
-      {supplierOpen && <AddSupplierModal onClose={() => setSupplierOpen(false)} />}
+      {transferItem && (
+        <TransferStockModal
+          item={transferItem}
+          branches={branches ?? []}
+          onClose={() => setTransferItem(null)}
+          onSubmit={async (form) => {
+            const ok = await transferStock({
+              itemId: transferItem.itemId,
+              fromBranchId: form.fromBranchId,
+              toBranchId: form.toBranchId,
+              quantity: form.qty,
+              approvingManagerId: form.managerId || null,
+              reason: form.reason,
+            });
+            if (ok) setTransferItem(null);
+          }}
+        />
+      )}
+      {removeItem && (
+        <RemoveStockModal
+          item={removeItem}
+          onClose={() => setRemoveItem(null)}
+          onSubmit={async (form) => {
+            const ok = await removeStock({
+              itemId: removeItem.itemId,
+              branchId: removeItem.branchId,
+              quantity: form.qty,
+              costPerUnit: form.cost,
+              reason: form.reason,
+              otherDetails: form.reason.startsWith("Other") ? form.details : null,
+            });
+            if (ok) setRemoveItem(null);
+          }}
+        />
+      )}
+      {supplierOpen && (
+        <AddSupplierModal
+          onClose={() => setSupplierOpen(false)}
+          onSubmit={async (form) => {
+            const ok = await addSupplier(form);
+            if (ok) setSupplierOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -404,9 +473,16 @@ const stepperBtn: React.CSSProperties = {
 
 /* ── Adjust Stock modal ── */
 function AdjustStockModal({
-  item, onClose, onOpenSupplier, hidden,
-}: { item: ModalItem; onClose: () => void; onOpenSupplier: () => void; hidden?: boolean }) {
-  const [supplier, setSupplier] = useState("");
+  item, suppliers, onClose, onOpenSupplier, hidden, onSubmit,
+}: {
+  item: ModalItem;
+  suppliers: { id: string; name: string }[];
+  onClose: () => void;
+  onOpenSupplier: () => void;
+  hidden?: boolean;
+  onSubmit: (form: { supplierId: string; invoice: string; qty: number; cost: number; reason: string }) => void;
+}) {
+  const [supplierId, setSupplierId] = useState("");
   const [invoice, setInvoice] = useState("");
   const [qty, setQty] = useState(20);
   const [cost, setCost] = useState(1200);
@@ -423,9 +499,11 @@ function AdjustStockModal({
 
       <Field label="Supplier">
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <select className="input" value={supplier} onChange={(e) => setSupplier(e.target.value)} style={{ flex: 1, minWidth: 160 }}>
+          <select className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} style={{ flex: 1, minWidth: 160 }}>
             <option value="">Select supplier</option>
-            <option value="fresh-farm">Fresh Farm Limited</option>
+            {suppliers.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
           </select>
           <button
             onClick={onOpenSupplier}
@@ -469,20 +547,36 @@ function AdjustStockModal({
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
         <button onClick={onClose} style={cancelBtn}>Cancel</button>
-        <button className="btn btn-primary" style={{ padding: "9px 18px", fontSize: "0.85rem" }} onClick={onClose}>Apply Change</button>
+        <button
+          className="btn btn-primary"
+          style={{ padding: "9px 18px", fontSize: "0.85rem" }}
+          disabled={!reason.trim()}
+          onClick={() => onSubmit({ supplierId, invoice, qty, cost, reason })}
+        >
+          Apply Change
+        </button>
       </div>
     </ModalShell>
   );
 }
 
 /* ── Transfer Stock modal ── */
-function TransferStockModal({ item, onClose }: { item: ModalItem; onClose: () => void }) {
-  const [from, setFrom] = useState("Foodies 1 Lekki");
-  const [to, setTo] = useState("Maitama");
+function TransferStockModal({
+  item, branches, onClose, onSubmit,
+}: {
+  item: ModalItem;
+  branches: { id: string; name: string }[];
+  onClose: () => void;
+  onSubmit: (form: { fromBranchId: string; toBranchId: string; qty: number; managerId: string; reason: string }) => void;
+}) {
+  const [fromBranchId, setFromBranchId] = useState(item.branchId || branches[0]?.id || "");
+  const [toBranchId, setToBranchId] = useState(branches[1]?.id ?? branches[0]?.id ?? "");
   const [qty, setQty] = useState(20);
-  const [manager, setManager] = useState("");
-  const [reason, setReason] = useState("High demand in Maitama, surplus in Foodies 1");
+  const [managerId, setManagerId] = useState("");
+  const [reason, setReason] = useState("High demand, surplus at source branch");
   const needsApproval = qty > 10;
+
+  const branchName = (id: string) => branches.find((b) => b.id === id)?.name ?? "–";
 
   return (
     <ModalShell title="Transfer Stock" onClose={onClose}>
@@ -493,17 +587,13 @@ function TransferStockModal({ item, onClose }: { item: ModalItem; onClose: () =>
       <p style={{ margin: "0 0 8px", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)" }}>Transfer:</p>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
         <Field label="From">
-          <select className="input" value={from} onChange={(e) => setFrom(e.target.value)}>
-            <option>Foodies 1 Lekki</option>
-            <option>Foodies 2 Lekki</option>
-            <option>Foodies Maitama</option>
+          <select className="input" value={fromBranchId} onChange={(e) => setFromBranchId(e.target.value)}>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </Field>
         <Field label="To">
-          <select className="input" value={to} onChange={(e) => setTo(e.target.value)}>
-            <option>Maitama</option>
-            <option>Foodies 1 Lekki</option>
-            <option>Foodies 2 Lekki</option>
+          <select className="input" value={toBranchId} onChange={(e) => setToBranchId(e.target.value)}>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </Field>
       </div>
@@ -524,9 +614,8 @@ function TransferStockModal({ item, onClose }: { item: ModalItem; onClose: () =>
       )}
 
       <Field label="Approving Manager:">
-        <select className="input" value={manager} onChange={(e) => setManager(e.target.value)}>
+        <select className="input" value={managerId} onChange={(e) => setManagerId(e.target.value)}>
           <option value="">Select Manager</option>
-          <option value="michael">Michael E.</option>
         </select>
       </Field>
 
@@ -537,15 +626,22 @@ function TransferStockModal({ item, onClose }: { item: ModalItem; onClose: () =>
       <div style={{ padding: 14, borderRadius: 10, background: "rgba(225,11,28,0.05)", border: "1px solid rgba(225,11,28,0.25)", marginBottom: 20 }}>
         <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: "0.85rem", color: "var(--color-text)" }}>Transfer will:</p>
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: "0.85rem", color: "var(--color-text)" }}>
-          <li>Deduct {qty} from {from}</li>
-          <li>Add {qty} to {to}</li>
+          <li>Deduct {qty} from {branchName(fromBranchId)}</li>
+          <li>Add {qty} to {branchName(toBranchId)}</li>
           <li>Log both transactions</li>
         </ul>
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
         <button onClick={onClose} style={cancelBtn}>Cancel</button>
-        <button className="btn btn-primary" style={{ padding: "9px 18px", fontSize: "0.85rem" }} onClick={onClose}>Confirm Transfer</button>
+        <button
+          className="btn btn-primary"
+          style={{ padding: "9px 18px", fontSize: "0.85rem" }}
+          disabled={needsApproval && !managerId}
+          onClick={() => onSubmit({ fromBranchId, toBranchId, qty, managerId, reason })}
+        >
+          Confirm Transfer
+        </button>
       </div>
     </ModalShell>
   );
@@ -554,11 +650,17 @@ function TransferStockModal({ item, onClose }: { item: ModalItem; onClose: () =>
 /* ── Remove Stock Wastage modal ── */
 const WASTAGE_REASONS = ["Spoiled / Expired", "Damaged during preparation", "Customer return", "Overproduction", "Other (please specify)"];
 
-function RemoveStockModal({ item, onClose }: { item: ModalItem; onClose: () => void }) {
+function RemoveStockModal({
+  item, onClose, onSubmit,
+}: {
+  item: ModalItem;
+  onClose: () => void;
+  onSubmit: (form: { qty: number; cost: number; reason: string; details: string }) => void;
+}) {
   const [qty, setQty] = useState(3);
   const [cost, setCost] = useState(1200);
-  const [reason, setReason] = useState("Other (please specify)");
-  const [details, setDetails] = useState("Sauce spilled during transfer");
+  const [reason, setReason] = useState(WASTAGE_REASONS[0]);
+  const [details, setDetails] = useState("");
   const newStock = Math.max(0, item.current - qty);
   const totalCost = qty * cost;
 
@@ -601,17 +703,29 @@ function RemoveStockModal({ item, onClose }: { item: ModalItem; onClose: () => v
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
         <button onClick={onClose} style={cancelBtn}>Cancel</button>
-        <button className="btn btn-primary" style={{ padding: "9px 18px", fontSize: "0.85rem" }} onClick={onClose}>Remove</button>
+        <button
+          className="btn btn-primary"
+          style={{ padding: "9px 18px", fontSize: "0.85rem" }}
+          disabled={reason.startsWith("Other") && !details.trim()}
+          onClick={() => onSubmit({ qty, cost, reason, details })}
+        >
+          Remove
+        </button>
       </div>
     </ModalShell>
   );
 }
 
 /* ── Add New Supplier modal ── */
-function AddSupplierModal({ onClose }: { onClose: () => void }) {
-  const [name, setName] = useState("Fresh farm limited");
-  const [contact, setContact] = useState("+234 813 6666 888");
-  const [address, setAddress] = useState("Zone 9. Ajagbe Estate, Ogun State");
+function AddSupplierModal({
+  onClose, onSubmit,
+}: {
+  onClose: () => void;
+  onSubmit: (form: { name: string; contact: string; address: string }) => void;
+}) {
+  const [name, setName] = useState("");
+  const [contact, setContact] = useState("");
+  const [address, setAddress] = useState("");
 
   return (
     <ModalShell title="Add New Supplier" onClose={onClose} width={420}>
@@ -624,7 +738,12 @@ function AddSupplierModal({ onClose }: { onClose: () => void }) {
       <Field label="Address">
         <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} />
       </Field>
-      <button className="btn btn-primary" style={{ width: "100%", padding: "10px 0", fontSize: "0.9rem", display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
+      <button
+        className="btn btn-primary"
+        style={{ width: "100%", padding: "10px 0", fontSize: "0.9rem", display: "flex", alignItems: "center", justifyContent: "center" }}
+        disabled={!name.trim()}
+        onClick={() => onSubmit({ name, contact, address })}
+      >
         Add
       </button>
     </ModalShell>
@@ -633,14 +752,30 @@ function AddSupplierModal({ onClose }: { onClose: () => void }) {
 
 /* ── Threshold Configuration view ── */
 function ThresholdView({ onBack }: { onBack: () => void }) {
-  const [rows, setRows] = useState(THRESHOLD_ROWS);
-  const [defaultThreshold, setDefaultThreshold] = useState(10);
+  const { thresholds, thresholdsLoading, thresholdsError, savingThresholds, fetchThresholds, saveThresholds } =
+    useStockStore();
   const [search, setSearch] = useState("");
+  const [defaultThreshold, setDefaultThreshold] = useState(10);
+  const [rows, setRows] = useState<
+    { itemId: string; itemName: string; unit: string; threshold: number; notify: boolean; autoReorder: boolean }[]
+  >([]);
 
-  const updateRow = (i: number, patch: Partial<ThresholdRow>) =>
+  useEffect(() => {
+    fetchThresholds();
+  }, [fetchThresholds]);
+
+  useEffect(() => {
+    if (thresholds) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDefaultThreshold(thresholds.defaultThreshold);
+      setRows(thresholds.items);
+    }
+  }, [thresholds]);
+
+  const updateRow = (i: number, patch: Partial<(typeof rows)[number]>) =>
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
-  const filtered = rows.filter((r) => r.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = rows.filter((r) => r.itemName.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <>
@@ -687,40 +822,52 @@ function ThresholdView({ onBack }: { onBack: () => void }) {
             ITEM SPECIFIC THRESHOLDS
           </p>
         </div>
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                {["Item", "Threshold", "Notify?", "Auto-reorder"].map((c) => <th key={c}>{c}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((row, i) => (
-                <tr key={row.name}>
-                  <td>
-                    <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{row.name}</p>
-                    <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{row.unit}</p>
-                  </td>
-                  <td>
-                    <input
-                      className="input"
-                      type="number"
-                      value={row.threshold}
-                      onChange={(e) => updateRow(i, { threshold: Number(e.target.value) || 0 })}
-                      style={{ width: 90 }}
-                    />
-                  </td>
-                  <td>
-                    <Radio checked={row.notify} onClick={() => updateRow(i, { notify: !row.notify })} label="Yes" />
-                  </td>
-                  <td>
-                    <Radio checked={row.autoReorder} onClick={() => updateRow(i, { autoReorder: !row.autoReorder })} label="Yes" />
-                  </td>
+
+        {thresholdsLoading && (
+          <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p>
+        )}
+        {!thresholdsLoading && (thresholdsError || !rows.length) && (
+          <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            {/* TODO(BACKEND): GET /admin/inventory/thresholds not implemented — see request doc #7 */}
+            No threshold data available
+          </p>
+        )}
+        {!thresholdsLoading && rows.length > 0 && (
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  {["Item", "Threshold", "Notify?", "Auto-reorder"].map((c) => <th key={c}>{c}</th>)}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filtered.map((row, i) => (
+                  <tr key={row.itemId}>
+                    <td>
+                      <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{row.itemName}</p>
+                      <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{row.unit}</p>
+                    </td>
+                    <td>
+                      <input
+                        className="input"
+                        type="number"
+                        value={row.threshold}
+                        onChange={(e) => updateRow(i, { threshold: Number(e.target.value) || 0 })}
+                        style={{ width: 90 }}
+                      />
+                    </td>
+                    <td>
+                      <Radio checked={row.notify} onClick={() => updateRow(i, { notify: !row.notify })} label="Yes" />
+                    </td>
+                    <td>
+                      <Radio checked={row.autoReorder} onClick={() => updateRow(i, { autoReorder: !row.autoReorder })} label="Yes" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
@@ -728,8 +875,23 @@ function ThresholdView({ onBack }: { onBack: () => void }) {
       </p>
 
       <div>
-        <button className="btn btn-primary" style={{ padding: "10px 20px", fontSize: "0.85rem" }}>
-          Save Changes
+        <button
+          className="btn btn-primary"
+          style={{ padding: "10px 20px", fontSize: "0.85rem" }}
+          disabled={savingThresholds}
+          onClick={() =>
+            saveThresholds({
+              defaultThreshold,
+              items: rows.map((r) => ({
+                itemId: r.itemId,
+                threshold: r.threshold,
+                notify: r.notify,
+                autoReorder: r.autoReorder,
+              })),
+            })
+          }
+        >
+          {savingThresholds ? "Saving…" : "Save Changes"}
         </button>
       </div>
     </>

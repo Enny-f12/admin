@@ -14,15 +14,10 @@ interface OrderState {
   ordersLoading: boolean;
   ordersError: boolean;
 
-  orderDetail: AdminOrder | null;
-  orderDetailLoading: boolean;
-  orderDetailError: boolean;
-
   isUpdatingStatus: boolean;
 
   fetchOrders: (filters?: AdminOrderFilters) => Promise<void>;
-  fetchOrderDetails: (id: string) => Promise<void>;
-  clearOrderDetail: () => void;
+  getOrderById: (id: string) => AdminOrder | null;
   updateOrderStatus: (id: string, payload: UpdateOrderStatusPayload) => Promise<boolean>;
 }
 
@@ -30,10 +25,6 @@ export const useOrderStore = create<OrderState>((set, get) => ({
   orders: null,
   ordersLoading: false,
   ordersError: false,
-
-  orderDetail: null,
-  orderDetailLoading: false,
-  orderDetailError: false,
 
   isUpdatingStatus: false,
 
@@ -48,61 +39,34 @@ export const useOrderStore = create<OrderState>((set, get) => ({
     }
   },
 
-  fetchOrderDetails: async (id) => {
-    set({ orderDetailLoading: true, orderDetailError: false });
-    try {
-      const orderDetail = await orderService.getAdminOrderDetails(id);
-      set({ orderDetail, orderDetailLoading: false });
-    } catch (error) {
-      set({ orderDetailLoading: false, orderDetailError: true });
-      toast.error(extractErrorMessage(error, 'Could not load order details'));
-    }
+  // No network call — the list response already has everything the
+  // detail modal renders (customer, items, totals, delivery address).
+  // See backend request doc, Orders #4.
+  getOrderById: (id) => {
+    const { orders } = get();
+    return orders?.find((o) => o.id === id) ?? null;
   },
 
-  clearOrderDetail: () => set({ orderDetail: null, orderDetailError: false }),
-
   updateOrderStatus: async (id, payload) => {
-    const { orders, orderDetail } = get();
-
-    // Snapshot for rollback
+    const { orders } = get();
     const previousOrders = orders;
-    const previousDetail = orderDetail;
 
     // Optimistic update — apply immediately, before the request resolves
     set({
       isUpdatingStatus: true,
-      orders: orders
-        ? orders.map((o) => (o.id === id ? { ...o, status: payload.status } : o))
-        : orders,
-      orderDetail:
-        orderDetail && orderDetail.id === id
-          ? { ...orderDetail, status: payload.status }
-          : orderDetail,
+      orders: orders ? orders.map((o) => (o.id === id ? { ...o, status: payload.status } : o)) : orders,
     });
 
     try {
       const updated = await orderService.updateStatus(id, payload);
-      // Reconcile with the server's actual response (in case it includes
-      // other server-computed fields we don't know about optimistically)
       set((state) => ({
         isUpdatingStatus: false,
-        orders: state.orders
-          ? state.orders.map((o) => (o.id === id ? { ...o, ...updated } : o))
-          : state.orders,
-        orderDetail:
-          state.orderDetail && state.orderDetail.id === id
-            ? { ...state.orderDetail, ...updated }
-            : state.orderDetail,
+        orders: state.orders ? state.orders.map((o) => (o.id === id ? { ...o, ...updated } : o)) : state.orders,
       }));
       toast.success('Order status updated');
       return true;
     } catch (error) {
-      // Roll back to the pre-optimistic snapshot
-      set({
-        isUpdatingStatus: false,
-        orders: previousOrders,
-        orderDetail: previousDetail,
-      });
+      set({ isUpdatingStatus: false, orders: previousOrders });
       toast.error(extractErrorMessage(error, 'Could not update order status'));
       return false;
     }

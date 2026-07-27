@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Calendar,
   ChevronDown,
@@ -9,50 +9,58 @@ import {
   Check,
   X,
 } from "lucide-react";
-
-type ReconItem = {
-  name: string;
-  category: string;
-  unit: string;
-  system: number;
-  physical: number;
-};
+import { useReconciliationStore } from "@/store/useReconciliationStore";
+import { ReconciliationItem } from "@/types/reconciliation.types";
 
 const CATEGORIES = ["All Categories", "Pastry", "Swallow", "Soup", "Intercontinental", "Protein", "Drinks"];
-
-const ITEMS: ReconItem[] = [
-  { name: "Puff puff",       category: "Pastry",          unit: "Piece",   system: 55,  physical: 53   },
-  { name: "Semo",            category: "Swallow",         unit: "Wrap",    system: 12,  physical: 9    },
-  { name: "Egusi soup",      category: "Soup",            unit: "Bowl",    system: 9,   physical: 8    },
-  { name: "Jollof rice",     category: "Intercontinental", unit: "Serving", system: 40,  physical: 40   },
-  { name: "Cocacola",        category: "Drinks",          unit: "Can",     system: 240, physical: 235  },
-  { name: "Grilled chicken", category: "Protein",         unit: "Piece",   system: 12,  physical: 11.4 },
-  { name: "Egg roll",        category: "Pastry",          unit: "Piece",   system: 20,  physical: 15   },
-  { name: "Milky doughnut",  category: "Pastry",          unit: "Piece",   system: 10,  physical: 8    },
-  { name: "Chicken pie",     category: "Pastry",          unit: "Piece",   system: 25,  physical: 25   },
-  { name: "Meat pie",        category: "Pastry",          unit: "Piece",   system: 40,  physical: 36   },
-  { name: "Sugar doughnut",  category: "Pastry",          unit: "Piece",   system: 50,  physical: 45   },
-];
-
 const PAGE_SIZE = 6;
 
 export default function ReconciliationPage() {
-  const [countDate, setCountDate] = useState("May 15, 2025");
-  const [conductedBy, setConductedBy] = useState("Sarah Johnson");
+  const {
+    items,
+    total,
+    itemsLoading,
+    itemsError,
+    staff,
+    fetchItems,
+    fetchStaff,
+    adjustItem,
+    sync,
+    isSyncing,
+  } = useReconciliationStore();
+
+  const [countDate, setCountDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [conductedBy, setConductedBy] = useState("");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All Categories");
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [page, setPage] = useState(1);
-  const [reasonForVariance, setReasonForVariance] = useState("Counting error");
-  const [adjustItem, setAdjustItem] = useState<ReconItem | null>(null);
+  const [reasonForVariance, setReasonForVariance] = useState("Counting Error");
+  const [adjustTarget, setAdjustTarget] = useState<ReconciliationItem | null>(null);
 
-  const filtered = ITEMS.filter(
-    (i) =>
-      i.name.toLowerCase().includes(search.toLowerCase()) &&
-      (category === "All Categories" || i.category === category)
-  );
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => {
+    fetchStaff();
+  }, [fetchStaff]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (staff?.length && !conductedBy) setConductedBy(staff[0].id);
+  }, [staff, conductedBy]);
+
+  useEffect(() => {
+    fetchItems({
+      date: countDate,
+      conductedBy: conductedBy || undefined,
+      search: search || undefined,
+      category: category === "All Categories" ? undefined : category,
+      page,
+      pageSize: PAGE_SIZE,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countDate, conductedBy, search, category, page]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const hasVariance = (items ?? []).some((i) => i.variance !== 0);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, position: "relative" }}>
@@ -70,8 +78,13 @@ export default function ReconciliationPage() {
         <Field label="Count Date">
           <div style={{ position: "relative", maxWidth: 260 }}>
             <Calendar size={16} strokeWidth={1.8} color="var(--color-primary)" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
-            <input className="input" value={countDate} onChange={(e) => setCountDate(e.target.value)} style={{ paddingLeft: 38, width: "100%" }} />
-            <ChevronDown size={15} strokeWidth={1.8} color="var(--color-text-muted)" style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+            <input
+              className="input"
+              type="date"
+              value={countDate}
+              onChange={(e) => { setCountDate(e.target.value); setPage(1); }}
+              style={{ paddingLeft: 38, width: "100%" }}
+            />
           </div>
         </Field>
 
@@ -80,12 +93,11 @@ export default function ReconciliationPage() {
             <select
               className="input"
               value={conductedBy}
-              onChange={(e) => setConductedBy(e.target.value)}
+              onChange={(e) => { setConductedBy(e.target.value); setPage(1); }}
               style={{ width: "100%", appearance: "none" }}
             >
-              <option>Sarah Johnson</option>
-              <option>Michael E.</option>
-              <option>Tunde</option>
+              {!staff?.length && <option value="">No staff available</option>}
+              {staff?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <ChevronDown size={15} strokeWidth={1.8} color="var(--color-text-muted)" style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
           </div>
@@ -152,11 +164,27 @@ export default function ReconciliationPage() {
               </tr>
             </thead>
             <tbody>
-              {paged.map((item) => {
-                const variance = Math.round((item.physical - item.system) * 10) / 10;
-                const isMatch = variance === 0;
+              {itemsLoading && (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
+                    Loading…
+                  </td>
+                </tr>
+              )}
+
+              {!itemsLoading && (itemsError || !items?.length) && (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
+                    {/* TODO(BACKEND): GET /admin/reconciliation/items not implemented — see request doc B1 */}
+                    No reconciliation data available
+                  </td>
+                </tr>
+              )}
+
+              {!itemsLoading && !itemsError && items?.map((item) => {
+                const isMatch = item.variance === 0;
                 return (
-                  <tr key={item.name}>
+                  <tr key={item.id}>
                     <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{item.name}</td>
                     <td>{item.unit}</td>
                     <td>{item.system}</td>
@@ -170,14 +198,14 @@ export default function ReconciliationPage() {
                       ) : (
                         <span style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--color-primary)", fontWeight: 600 }}>
                           <AlertTriangle size={14} strokeWidth={1.8} />
-                          {variance.toFixed(1)}
+                          {item.variance > 0 ? "+" : ""}{item.variance}
                         </span>
                       )}
                     </td>
                     <td>
                       {!isMatch && (
                         <button
-                          onClick={() => setAdjustItem(item)}
+                          onClick={() => setAdjustTarget(item)}
                           style={{
                             padding: "7px 16px", borderRadius: 8, border: "1px solid var(--color-border)",
                             background: "#fff", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600,
@@ -191,7 +219,8 @@ export default function ReconciliationPage() {
                   </tr>
                 );
               })}
-              {paged.length === 0 && (
+
+              {!itemsLoading && !itemsError && items?.length === 0 && (
                 <tr>
                   <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
                     No items match this filter.
@@ -230,22 +259,44 @@ export default function ReconciliationPage() {
       </Field>
 
       <div style={{ display: "flex", gap: 10 }}>
-        <button style={outlineBtn}>Cancel</button>
-        <button className="btn btn-primary" style={{ padding: "10px 20px", fontSize: "0.85rem" }}>
-          Confirm &amp; Sync
+        <button style={outlineBtn} onClick={() => setReasonForVariance("Counting Error")}>Cancel</button>
+        <button
+          className="btn btn-primary"
+          style={{ padding: "10px 20px", fontSize: "0.85rem" }}
+          disabled={!hasVariance || !conductedBy || isSyncing}
+          onClick={async () => {
+            await sync({ date: countDate, conductedBy, reasonForVariance });
+          }}
+        >
+          {isSyncing ? "Syncing…" : "Confirm & Sync"}
         </button>
       </div>
 
-      {adjustItem && <AdjustModal item={adjustItem} onClose={() => setAdjustItem(null)} />}
+      {adjustTarget && (
+        <AdjustModal
+          item={adjustTarget}
+          onClose={() => setAdjustTarget(null)}
+          onSubmit={async (payload) => {
+            const ok = await adjustItem(adjustTarget.id, payload);
+            if (ok) setAdjustTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 const REASONS = ["Spoilage/Waste", "Counting Error", "Theft", "Damaged", "Other"];
 
-function AdjustModal({ item, onClose }: { item: ReconItem; onClose: () => void }) {
+function AdjustModal({
+  item, onClose, onSubmit,
+}: {
+  item: ReconciliationItem;
+  onClose: () => void;
+  onSubmit: (payload: { newValue: number; reason: string; notes: string }) => void;
+}) {
   const [newValue, setNewValue] = useState(item.physical);
-  const [reason, setReason] = useState("Spoilage/Waste");
+  const [reason, setReason] = useState(REASONS[0]);
   const [notes, setNotes] = useState("");
   const netAdjustment = Math.round((newValue - item.system) * 10) / 10;
 
@@ -299,7 +350,7 @@ function AdjustModal({ item, onClose }: { item: ReconItem; onClose: () => void }
           <button
             className="btn btn-primary"
             style={{ width: "100%", padding: "10px 0", fontSize: "0.9rem", display: "flex", alignItems: "center", justifyContent: "center" }}
-            onClick={onClose}
+            onClick={() => onSubmit({ newValue, reason, notes })}
           >
             Confirm Adjustment
           </button>

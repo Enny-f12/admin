@@ -1,199 +1,138 @@
-// store/useInventoryStore.ts
 import { create } from 'zustand';
 import { toast } from 'sonner';
-import { inventoryService } from '@/services/inventory.service';
-import {
-  InventoryItem,
-  UpdateStockPayload,
-  TransferBranchPayload,
-  TransferZonePayload,
-  ReceiveDeliveryPayload,
-  WastagePayload,
-  ThresholdConfig,
-  Supplier,
-  CreateSupplierPayload,
-} from '@/types/inventory';
+import { foodInventoryService } from '@/services/food-inventory.service';
+import { drinksService } from '@/services/drinks.service';
+import { FoodInventoryItem, InventoryStats, StatusBanner } from '@/types/food-inventory.types';
+import { DrinksInventoryItem, AdjustWarehousePayload } from '@/types/drinks.types';
+import { TransferToFridgePayload, CreateDeliveryPayload } from '@/types/drinks.types';
 
 function extractErrorMessage(error: unknown, fallback: string) {
   const anyErr = error as any;
   return anyErr?.response?.data?.message ?? anyErr?.message ?? fallback;
 }
 
-interface InventoryState {
-  items: InventoryItem[] | null;
-  isLoading: boolean;
-  isError: boolean;
-  isSaving: boolean;
+interface InventoryDashboardState {
+  // Food tab
+  foodItems: FoodInventoryItem[] | null;
+  foodTotal: number;
+  foodStats: InventoryStats | null;
+  foodCategories: string[] | null;
+  foodLoading: boolean;
+  foodError: boolean;
 
-  suppliers: Supplier[] | null;
-  suppliersLoading: boolean;
+  // Drinks tab
+  drinkItems: DrinksInventoryItem[] | null;
+  drinksTotal: number;
+  drinksStats: InventoryStats | null;
+  drinksLoading: boolean;
+  drinksError: boolean;
 
-  thresholds: ThresholdConfig[] | null;
-  thresholdsLoading: boolean;
-  thresholdsSaving: boolean;
+  // Shared banner
+  banner: StatusBanner | null;
+  bannerLoading: boolean;
+  bannerError: boolean;
 
-  fetchInventory: (branchId?: string) => Promise<void>;
-  updateStock: (id: string, payload: UpdateStockPayload) => Promise<boolean>;
-  transferBetweenBranches: (payload: TransferBranchPayload) => Promise<boolean>;
-  transferToFridge: (itemId: string, payload: TransferZonePayload) => Promise<boolean>;
-  receiveDelivery: (payload: ReceiveDeliveryPayload) => Promise<boolean>;
-  removeWastage: (itemId: string, payload: WastagePayload) => Promise<boolean>;
+  fetchFoodItems: (params: { search?: string; category?: string; status?: string; page?: number; pageSize?: number }) => Promise<void>;
+  fetchFoodCategories: () => Promise<void>;
+  fetchDrinkItems: (params: { search?: string; status?: string; page?: number; pageSize?: number }) => Promise<void>;
+  fetchBanner: () => Promise<void>;
 
-  fetchSuppliers: () => Promise<void>;
-  createSupplier: (payload: CreateSupplierPayload) => Promise<boolean>;
-
-  fetchThresholds: (branchId?: string) => Promise<void>;
-  saveThresholds: (rows: ThresholdConfig[]) => Promise<boolean>;
+  adjustWarehouseStock: (payload: AdjustWarehousePayload) => Promise<boolean>;
+  transferToFridge: (payload: TransferToFridgePayload) => Promise<boolean>;
+  receiveDelivery: (payload: CreateDeliveryPayload) => Promise<boolean>;
 }
 
-export const useInventoryStore = create<InventoryState>((set, get) => ({
-  items: null,
-  isLoading: false,
-  isError: false,
-  isSaving: false,
+export const useInventoryDashboardStore = create<InventoryDashboardState>((set) => ({
+  foodItems: null,
+  foodTotal: 0,
+  foodStats: null,
+  foodCategories: null,
+  foodLoading: false,
+  foodError: false,
 
-  suppliers: null,
-  suppliersLoading: false,
+  drinkItems: null,
+  drinksTotal: 0,
+  drinksStats: null,
+  drinksLoading: false,
+  drinksError: false,
 
-  thresholds: null,
-  thresholdsLoading: false,
-  thresholdsSaving: false,
+  banner: null,
+  bannerLoading: false,
+  bannerError: false,
 
-  fetchInventory: async (branchId) => {
-    set({ isLoading: true, isError: false });
+  fetchFoodItems: async (params) => {
+    set({ foodLoading: true, foodError: false });
     try {
-      const items = await inventoryService.getInventory(branchId);
-      set({ items, isLoading: false });
-    } catch (error) {
-      set({ isLoading: false, isError: true });
-      toast.error(extractErrorMessage(error, 'Could not load inventory'));
+      const { items, total, stats } = await foodInventoryService.getItems(params);
+      set({ foodItems: items, foodTotal: total, foodStats: stats, foodLoading: false });
+    } catch {
+      set({ foodLoading: false, foodError: true });
     }
   },
 
-  updateStock: async (id, payload) => {
-    set({ isSaving: true });
+  fetchFoodCategories: async () => {
     try {
-      await inventoryService.updateStock(id, payload);
-      set({ isSaving: false });
-      toast.success('Stock updated');
-      await get().fetchInventory();
+      const foodCategories = await foodInventoryService.getCategories();
+      set({ foodCategories });
+    } catch {
+      set({ foodCategories: null });
+    }
+  },
+
+  fetchDrinkItems: async (params) => {
+    set({ drinksLoading: true, drinksError: false });
+    try {
+      const { items, total, stats } = await drinksService.getInventorySummary(params);
+      set({ drinkItems: items, drinksTotal: total, drinksStats: stats, drinksLoading: false });
+    } catch {
+      set({ drinksLoading: false, drinksError: true });
+    }
+  },
+
+  fetchBanner: async () => {
+    set({ bannerLoading: true, bannerError: false });
+    try {
+      const banner = await foodInventoryService.getStatusBanner();
+      set({ banner, bannerLoading: false });
+    } catch {
+      set({ bannerLoading: false, bannerError: true });
+    }
+  },
+
+  adjustWarehouseStock: async (payload) => {
+    try {
+      const updated = await drinksService.adjustWarehouseStock(payload);
+      set((state) => ({
+        drinkItems: state.drinkItems
+          ? state.drinkItems.map((i) => (i.id === updated.id ? updated : i))
+          : state.drinkItems,
+      }));
+      toast.success('Stock adjusted.');
       return true;
     } catch (error) {
-      set({ isSaving: false });
-      toast.error(extractErrorMessage(error, 'Could not update stock'));
+      toast.error(extractErrorMessage(error, 'Could not adjust stock.'));
       return false;
     }
   },
 
-  transferBetweenBranches: async (payload) => {
-    set({ isSaving: true });
+  transferToFridge: async (payload) => {
     try {
-      await inventoryService.transferBetweenBranches(payload);
-      set({ isSaving: false });
-      toast.success('Stock transferred');
-      await get().fetchInventory();
+      await drinksService.transferToFridge(payload);
+      toast.success('Transferred to fridge.');
       return true;
     } catch (error) {
-      set({ isSaving: false });
-      toast.error(extractErrorMessage(error, 'Could not transfer stock — endpoint may not be live yet'));
-      return false;
-    }
-  },
-
-  transferToFridge: async (itemId, payload) => {
-    set({ isSaving: true });
-    try {
-      await inventoryService.transferToFridge(itemId, payload);
-      set({ isSaving: false });
-      toast.success('Transferred to fridge');
-      await get().fetchInventory();
-      return true;
-    } catch (error) {
-      set({ isSaving: false });
-      toast.error(extractErrorMessage(error, 'Could not transfer to fridge — endpoint may not be live yet'));
+      toast.error(extractErrorMessage(error, 'Could not complete transfer.'));
       return false;
     }
   },
 
   receiveDelivery: async (payload) => {
-    set({ isSaving: true });
     try {
-      await inventoryService.receiveDelivery(payload);
-      set({ isSaving: false });
-      toast.success('Delivery received');
-      await get().fetchInventory();
+      await drinksService.createDelivery(payload);
+      toast.success(payload.isDraft ? 'Delivery saved as draft.' : 'Delivery received.');
       return true;
     } catch (error) {
-      set({ isSaving: false });
-      toast.error(extractErrorMessage(error, 'Could not save delivery — endpoint may not be live yet'));
-      return false;
-    }
-  },
-
-  removeWastage: async (itemId, payload) => {
-    set({ isSaving: true });
-    try {
-      await inventoryService.removeWastage(itemId, payload);
-      set({ isSaving: false });
-      toast.success('Wastage recorded');
-      await get().fetchInventory();
-      return true;
-    } catch (error) {
-      set({ isSaving: false });
-      toast.error(extractErrorMessage(error, 'Could not record wastage — endpoint may not be live yet'));
-      return false;
-    }
-  },
-
-  fetchSuppliers: async () => {
-    set({ suppliersLoading: true });
-    try {
-      const suppliers = await inventoryService.getSuppliers();
-      set({ suppliers, suppliersLoading: false });
-    } catch (error) {
-      set({ suppliersLoading: false });
-      // Silent — suppliers list not critical path, endpoint likely not live yet
-    }
-  },
-
-  createSupplier: async (payload) => {
-    set({ isSaving: true });
-    try {
-      const supplier = await inventoryService.createSupplier(payload);
-      set((state) => ({
-        isSaving: false,
-        suppliers: state.suppliers ? [...state.suppliers, supplier] : [supplier],
-      }));
-      toast.success('Supplier added');
-      return true;
-    } catch (error) {
-      set({ isSaving: false });
-      toast.error(extractErrorMessage(error, 'Could not add supplier — endpoint may not be live yet'));
-      return false;
-    }
-  },
-
-  fetchThresholds: async (branchId) => {
-    set({ thresholdsLoading: true });
-    try {
-      const thresholds = await inventoryService.getThresholds(branchId);
-      set({ thresholds, thresholdsLoading: false });
-    } catch (error) {
-      set({ thresholdsLoading: false });
-      // Silent — endpoint likely not live yet
-    }
-  },
-
-  saveThresholds: async (rows) => {
-    set({ thresholdsSaving: true });
-    try {
-      await inventoryService.updateThresholds(rows);
-      set({ thresholdsSaving: false, thresholds: rows });
-      toast.success('Thresholds saved');
-      return true;
-    } catch (error) {
-      set({ thresholdsSaving: false });
-      toast.error(extractErrorMessage(error, 'Could not save thresholds — endpoint may not be live yet'));
+      toast.error(extractErrorMessage(error, 'Could not save delivery.'));
       return false;
     }
   },

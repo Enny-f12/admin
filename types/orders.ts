@@ -1,4 +1,4 @@
-// types/order.ts
+// types/orders.ts
 
 export type OrderStatus =
   | "RECEIVED"
@@ -11,15 +11,18 @@ export type OrderStatus =
 
 export type OrderType = "DINE_IN" | "TAKEAWAY" | "DELIVERY";
 
-// TODO(BACKEND): actual enum values unconfirmed — CheckoutDto references
-// PaymentMethodType but the enum itself wasn't shared. Guessing common
-// values; confirm before relying on this for payment-related UI.
-export type PaymentMethodType = "CARD" | "CASH" | "TRANSFER" | "WALLET";
+// Confirmed from real GET /admin/orders response — no longer a guess.
+export type PaymentMethodType = "CARD" | "CASH_ON_DELIVERY" | "BANK_TRANSFER";
+
+// PAID / PENDING / REFUNDED confirmed from real data. FAILED requested from
+// backend — see backend request doc, Orders #1. Revert to a loose `string`
+// on paymentStatus below if backend confirms other values exist beyond these four.
+export type PaymentStatus = "PAID" | "PENDING" | "REFUNDED" | "FAILED";
 
 export interface OrderItemOption {
   id: string;
   nameSnapshot: string;
-  priceDelta: number;
+  priceDelta: string; // decimal as string, matches unitPrice/totalPrice below
   quantity: number;
 }
 
@@ -28,11 +31,17 @@ export interface OrderItem {
   menuItemId: string | null;
   nameSnapshot: string;
   descriptionSnapshot: string | null;
-  unitPrice: number;
+  unitPrice: string;   // backend returns decimals as strings — wrap with Number() before display math
   quantity: number;
-  totalPrice: number;
+  totalPrice: string;
   notes: string | null;
-  options?: OrderItemOption[];
+  options: OrderItemOption[];
+}
+
+export interface OrderStatusHistoryChangedBy {
+  id: string;
+  fullName: string;
+  role: string;
 }
 
 export interface OrderStatusHistoryEntry {
@@ -40,6 +49,7 @@ export interface OrderStatusHistoryEntry {
   status: OrderStatus;
   notes: string | null;
   changedById: string | null;
+  changedBy?: OrderStatusHistoryChangedBy;
   createdAt: string;
 }
 
@@ -53,6 +63,9 @@ export interface OrderCustomer {
 export interface OrderBranch {
   id: string;
   name: string;
+  addressLine1?: string | null;
+  city?: string | null;
+  state?: string | null;
 }
 
 export interface AdminOrder {
@@ -61,22 +74,42 @@ export interface AdminOrder {
   userId: string | null;
   branchId: string;
   branch?: OrderBranch;
-  customer?: OrderCustomer; // present on list (getAdminOrders), see gap #3
+
+  // Present on GET /admin/orders (list), absent on GET /admin/orders/:id (detail).
+  // Confirmed backend gap — see backend request doc, Orders #2.
+  customer?: OrderCustomer;
+
   orderType: OrderType;
   status: OrderStatus;
-  paymentStatus: string;
+  paymentStatus: PaymentStatus;
   paymentMethod: PaymentMethodType;
+
   customerNotes: string | null;
   guestName: string | null;
   guestPhone: string | null;
   guestEmail: string | null;
-  subtotalAmount: number;
-  taxAmount: number;
-  deliveryFeeAmount: number;
-  totalAmount: number;
+
+  subtotalAmount: string;
+  taxAmount: string;
+  deliveryFeeAmount: string;
+  totalAmount: string;
+
   deliveryInstructions: string | null;
+  deliveryAddressLine1: string | null;
+  deliveryAddressLine2: string | null;
+  deliveryCity: string | null;
+  deliveryState: string | null;
+  deliveryCountry: string | null;
+  // Currently always null in real data even on completed DELIVERY orders —
+  // see backend request doc, Orders #4. Not yet used in the UI; add a map
+  // preview once backend confirms these are populated.
+  deliveryLatitude: string | null;
+  deliveryLongitude: string | null;
+
   items: OrderItem[];
   statusHistory?: OrderStatusHistoryEntry[];
+  deliveryAssignment?: unknown | null;
+
   createdAt: string;
 }
 

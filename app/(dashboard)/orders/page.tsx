@@ -17,7 +17,8 @@ import {
   Clock,
 } from "lucide-react";
 import { useOrderStore } from "@/store/useOrderStore";
-import { OrderStatus } from "@/types/orders";
+import { OrderStatus, AdminOrder } from "@/types/orders";
+import { SkeletonText, SkeletonTableRows } from "@/components/ui/Skeleton";
 
 const STATUS_OPTIONS: ("All Status" | OrderStatus)[] = [
   "All Status", "RECEIVED", "PREPARING", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY", "DELIVERED", "COMPLETED", "CANCELLED",
@@ -44,7 +45,7 @@ const STATUS_CLASS: Record<OrderStatus, string> = {
 };
 
 const SEARCH_BY_OPTIONS = ["Name", "Type", "Order ID"];
-const PAGE_SIZE = 6;
+const PAGE_SIZE = 10;
 
 function formatOrderType(type: string) {
   return type === "DINE_IN" ? "Dine-in" : type === "TAKEAWAY" ? "Pick Up" : "Delivery";
@@ -52,6 +53,23 @@ function formatOrderType(type: string) {
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatMoney(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return "–";
+  const n = Number(value);
+  return Number.isFinite(n) ? `₦${n.toLocaleString()}` : "–";
+}
+
+// Delivery address is assembled from the discrete address fields — not
+// deliveryInstructions, which is a separate free-text note field. Only
+// meaningful for DELIVERY orders; dine-in/pickup have no address.
+function formatDeliveryAddress(order: AdminOrder): string {
+  if (order.orderType !== "DELIVERY") return "–";
+  const parts = [order.deliveryAddressLine1, order.deliveryAddressLine2, order.deliveryCity, order.deliveryState].filter(
+    (p): p is string => Boolean(p && p.trim()),
+  );
+  return parts.length > 0 ? parts.join(", ") : "–";
 }
 
 export default function OrdersPage() {
@@ -63,10 +81,6 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1);
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
 
-  // ── Live data ──
-  // NOTE: AdminOrderFilterDto has no `search` param, so name/type/ID search
-  // happens client-side against whatever the status/date filters return.
-  // See backend request doc — Orders #1.
   const { orders, ordersLoading: isLoading, ordersError: isError, fetchOrders } = useOrderStore();
 
   useEffect(() => {
@@ -96,7 +110,7 @@ export default function OrdersPage() {
             MANAGE &amp; TRACK ALL ORDERS
           </h1>
           <p style={{ margin: "4px 0 0", fontSize: "0.875rem", color: "var(--color-text-muted)" }}>
-            {isLoading ? "Loading…" : `${filtered.length} orders`}
+            {isLoading ? <SkeletonText width={90} height={13} /> : `${filtered.length} orders`}
           </p>
         </div>
 
@@ -194,22 +208,20 @@ export default function OrdersPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>Loading…</td>
-                </tr>
-              )}
+              {isLoading && <SkeletonTableRows rows={PAGE_SIZE} columns={8} />}
+
               {!isLoading && isError && (
                 <tr>
                   <td colSpan={8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>Could not load orders</td>
                 </tr>
               )}
+
               {!isLoading && !isError && paged.map((order) => (
                 <tr key={order.id}>
                   <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{order.orderNumber}</td>
-                  <td>{order.customer?.fullName ?? order.guestName ?? "—"}</td>
+                  <td>{order.customer?.fullName ?? order.guestName ?? "–"}</td>
                   <td>{order.items.length} {order.items.length === 1 ? "Item" : "Items"}</td>
-                  <td style={{ fontWeight: 500, color: "var(--color-text)" }}>₦{Number(order.totalAmount).toLocaleString()}</td>
+                  <td style={{ fontWeight: 500, color: "var(--color-text)" }}>{formatMoney(order.totalAmount)}</td>
                   <td>{formatOrderType(order.orderType)}</td>
                   <td><span className={STATUS_CLASS[order.status]}>{STATUS_LABEL[order.status]}</span></td>
                   <td>
@@ -229,6 +241,7 @@ export default function OrdersPage() {
                   </td>
                 </tr>
               ))}
+
               {!isLoading && !isError && paged.length === 0 && (
                 <tr>
                   <td colSpan={8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
@@ -267,19 +280,11 @@ export default function OrdersPage() {
 }
 
 function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () => void }) {
-  const {
-    orderDetail: order,
-    orderDetailLoading: isLoading,
-    isUpdatingStatus,
-    fetchOrderDetails,
-    clearOrderDetail,
-    updateOrderStatus,
-  } = useOrderStore();
+  const { getOrderById, isUpdatingStatus, updateOrderStatus } = useOrderStore();
 
-  useEffect(() => {
-    fetchOrderDetails(orderId);
-    return () => clearOrderDetail();
-  }, [orderId, fetchOrderDetails, clearOrderDetail]);
+  // Sourced from the already-loaded order list — no network call. See
+  // backend request doc, Orders #4.
+  const order = getOrderById(orderId);
 
   const advanceStatus = async () => {
     if (!order) return;
@@ -289,10 +294,6 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
     };
     const nextStatus = next[order.status];
     if (nextStatus) {
-      // Optimistic — modal closes immediately, table row updates instantly.
-      // If the request fails, the store rolls both back and the toast
-      // surfaces the error; the modal will already be closed at that point,
-      // which matches the original mutation's onSuccess-only close behavior.
       const success = await updateOrderStatus(order.id, { status: nextStatus });
       if (success) onClose();
     }
@@ -301,7 +302,11 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
   return (
     <div
       onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 100, padding: "5vh 20px", overflowY: "auto" }}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 100, padding: "20px", overflowY: "auto",
+      }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -309,7 +314,7 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px 16px", flexShrink: 0, borderBottom: "1px solid var(--color-border)" }}>
           <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "var(--color-heading)" }}>
-            Order&nbsp; {order?.orderNumber ?? "…"}
+            Order&nbsp;{order?.orderNumber ?? "–"}
           </h3>
           <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex" }}>
             <X size={18} />
@@ -317,8 +322,6 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
         </div>
 
         <div style={{ padding: "20px 24px 24px", overflowY: "auto" }}>
-          {isLoading && <p style={{ color: "var(--color-text-muted)" }}>Loading…</p>}
-
           {order && (
             <>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
@@ -329,22 +332,21 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
               <div style={{ padding: "16px", borderRadius: 10, background: "var(--color-bg-soft)", display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>
                   <User size={15} strokeWidth={1.8} color="var(--color-secondary)" />
-                  {/* TODO(BACKEND): getOrderDetails doesn't include `customer` —
-                      see backend request doc, Orders #2 */}
-                  {order.guestName ?? "Registered customer (name unavailable — see gap)"}
+                  {/* Sourced from the list response's `customer` object for
+                      registered users, falling back to guest fields for
+                      guest checkouts. Both are present on GET /admin/orders. */}
+                  {order.customer?.fullName ?? order.guestName ?? "–"}
                 </span>
                 <span style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", marginLeft: 23 }}>
-                  {order.guestEmail ?? "—"}
+                  {order.customer?.email ?? order.guestEmail ?? "–"}
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", color: "var(--color-text)" }}>
                   <Phone size={15} strokeWidth={1.8} color="var(--color-primary)" />
-                  {order.guestPhone ?? "—"}
+                  {order.customer?.phone ?? order.guestPhone ?? "–"}
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", color: "var(--color-text)" }}>
                   <MapPin size={15} strokeWidth={1.8} color="var(--color-primary)" />
-                  {/* TODO(BACKEND): no address field on Order — see backend
-                      request doc, Orders #3 */}
-                  {order.deliveryInstructions ?? "No address on file"}
+                  {formatDeliveryAddress(order)}
                 </span>
               </div>
 
@@ -357,13 +359,13 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
                   {order.items.map((item) => (
                     <div key={item.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", color: "var(--color-text)" }}>
                       <span>{item.nameSnapshot} x {item.quantity}</span>
-                      <span>₦{Number(item.totalPrice).toLocaleString()}</span>
+                      <span>{formatMoney(item.totalPrice)}</span>
                     </div>
                   ))}
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: "1px solid var(--color-border)", fontWeight: 700, color: "var(--color-heading)" }}>
                   <span>Total</span>
-                  <span>₦{Number(order.totalAmount).toLocaleString()}</span>
+                  <span>{formatMoney(order.totalAmount)}</span>
                 </div>
               </div>
 
@@ -391,6 +393,12 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
                 </button>
               </div>
             </>
+          )}
+
+          {!order && (
+            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+              Could not find this order.
+            </p>
           )}
         </div>
       </div>
