@@ -22,6 +22,10 @@ interface AuthState {
   error: string | null;
 
   setAuth: (data: { user: User; accessToken: string; refreshToken: string }) => void;
+  // Lighter-weight than setAuth — used by the api-client interceptor after a
+  // silent token refresh, where we only get back new tokens, not a fresh
+  // user object. Leaves `user` and `isAuthenticated` untouched.
+  setTokens: (data: { accessToken: string; refreshToken: string }) => void;
   clearAuth: () => void;
   clearError: () => void;
 
@@ -52,6 +56,9 @@ export const useAuthStore = create<AuthState>()(
 
       setAuth: ({ user, accessToken, refreshToken }) =>
         set({ user, accessToken, refreshToken, isAuthenticated: true }),
+
+      setTokens: ({ accessToken, refreshToken }) =>
+        set({ accessToken, refreshToken }),
 
       clearAuth: () =>
         set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false }),

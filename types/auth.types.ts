@@ -64,3 +64,13 @@ export interface AppleAuthPayload {
   idToken: string;
   email?: string;
 }
+
+// POST /auth/refresh — NOT YET CONFIRMED, see backend request doc (Auth #1)
+export interface RefreshPayload {
+  refreshToken: string;
+}
+
+export interface RefreshResponse {
+  accessToken: string;
+  refreshToken: string;
+}

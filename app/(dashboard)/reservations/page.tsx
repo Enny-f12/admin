@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   Settings,
@@ -17,87 +17,25 @@ import {
   Info,
   CalendarClock,
 } from "lucide-react";
+import { useReservationsStore } from "@/store/useReservationsStore";
+import { ReservationPolicies } from "@/types/reservations.types";
+import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
 
-/* ══════════════════════════════════════════
-   TYPES
-══════════════════════════════════════════ */
+// NOTE: Policies, Waitlist, and Reminders tabs below are UNCHANGED from the
+// previous version — they still point at speculative endpoints, since
+// nothing in the real ReservationService covers table-type aggregates,
+// booking-rule persistence, a waitlist, or reminder rules. Only the
+// Availability tab (further down) has been rewired to real data — see the
+// AvailabilityTab component and its accompanying store/service changes.
+
 type Tab = "policies" | "availability" | "waitlist" | "reminders";
-type TableStatus = "Free" | "Booked" | "Occupied";
 
-type TableType   = { seats: number; count: number };
-type TableSlot   = { id: string; seats: number; status: TableStatus; time?: string };
-type SpecialDate = { id: number; date: string; label: string; type: string };
+const TIME_SLOTS = ["15 min", "30 min", "45 min", "60 min"];
+const SPECIAL_DATE_TYPES = ["Closed all day", "Reduced Hours", "Holiday Seating"];
 
-type WaitlistEntry = {
-  id: number;
-  name: string;
-  party: number;
-  phone: string;
-  branch: string;
-  time: string;
-  addedAgo: string;
-};
+// (table status colors moved into AvailabilityTab as colorsFor(), since
+// status is now derived per-render rather than a fixed lookup table)
 
-type ReminderRule = {
-  id: number;
-  label: string;
-  description: string;
-  enabled: boolean;
-};
-
-/* ══════════════════════════════════════════
-   SEED DATA
-══════════════════════════════════════════ */
-const INIT_TABLE_TYPES: TableType[] = [
-  { seats: 4, count: 3 },
-  { seats: 2, count: 2 },
-  { seats: 2, count: 8 },
-];
-
-const INIT_TABLES: TableSlot[] = [
-  { id: "T1",  seats: 4, status: "Occupied" },
-  { id: "T2",  seats: 4, status: "Free"     },
-  { id: "T3",  seats: 3, status: "Booked",  time: "7pm" },
-  { id: "T4",  seats: 2, status: "Free"     },
-  { id: "T5",  seats: 8, status: "Occupied" },
-  { id: "T6",  seats: 2, status: "Booked",  time: "5pm" },
-  { id: "T7",  seats: 2, status: "Booked",  time: "5pm" },
-  { id: "T8",  seats: 4, status: "Free"     },
-  { id: "T9",  seats: 3, status: "Booked",  time: "7pm" },
-  { id: "T10", seats: 4, status: "Occupied" },
-  { id: "T11", seats: 2, status: "Booked",  time: "5pm" },
-  { id: "T12", seats: 2, status: "Free"     },
-  { id: "T13", seats: 8, status: "Occupied" },
-  { id: "T14", seats: 2, status: "Booked",  time: "5pm" },
-];
-
-const INIT_SPECIAL_DATES: SpecialDate[] = [
-  { id: 1, date: "2026-12-25", label: "Christmas Day",                type: "Closed all day" },
-  { id: 2, date: "2026-02-14", label: "Valentine's — extended hours", type: "Special hours"  },
-];
-
-const INIT_WAITLIST: WaitlistEntry[] = [
-  { id: 1, name: "Chidi O.", party: 4, phone: "+234 803 555 0001", branch: "Foodies 1", time: "Tonight 7:30 PM",  addedAgo: "Added 12 min ago" },
-  { id: 2, name: "Amaka E.", party: 2, phone: "+234 805 222 9988", branch: "Foodies 3", time: "Tomorrow 6:00 PM", addedAgo: "Added 45 min ago"  },
-];
-
-const INIT_REMINDERS: ReminderRule[] = [
-  { id: 1, label: "Booking Confirmation", description: "Sent immediately after booking",        enabled: true  },
-  { id: 2, label: "24-Hour Reminder",     description: "Day before reservation",                 enabled: true  },
-  { id: 3, label: "2-Hour Reminder",      description: "Sent 2 hours before arrival",             enabled: true  },
-  { id: 4, label: "SMS Notifications",    description: "Also send via SMS (additional cost)",     enabled: false },
-];
-
-const TIME_SLOTS          = ["15 min", "30 min", "45 min", "60 min"];
-const SPECIAL_DATE_TYPES  = ["Closed all day", "Reduced Hours", "Holiday Seating"];
-
-const TABLE_STATUS_COLORS: Record<TableStatus, { bg: string; border: string }> = {
-  Free:     { bg: "#16a34a", border: "#15803d" },
-  Booked:   { bg: "#ca8a04", border: "#a16207" },
-  Occupied: { bg: "#b91c1c", border: "#991b1b" },
-};
-
-/* Converts a stored "11:00 AM" style time to 24-hour "11:00" for display */
 function to24Hour(t: string): string {
   const m = t.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (!m) return t;
@@ -108,9 +46,15 @@ function to24Hour(t: string): string {
   return `${String(hour).padStart(2, "0")}:${min}`;
 }
 
-/* ══════════════════════════════════════════
-   SHARED UI HELPERS
-══════════════════════════════════════════ */
+function timeAgo(iso: string) {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "Added just now";
+  if (mins < 60) return `Added ${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  return `Added ${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+}
+
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
     <button
@@ -164,8 +108,6 @@ function SimpleDropdown({ options, value, onChange }: { options: string[]; value
                 fontWeight: o === value ? 500 : 400, cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "space-between",
               }}
-              onMouseEnter={(e) => { if (o !== value) (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)"; }}
-              onMouseLeave={(e) => { if (o !== value) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
               {o}
               {o === value && <Check size={13} strokeWidth={2.2} color="var(--color-primary)" />}
@@ -196,42 +138,67 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
-/* ══════════════════════════════════════════
-   POLICIES TAB
-══════════════════════════════════════════ */
+/* ══════════════════════════ POLICIES TAB ══════════════════════════ */
 function PoliciesTab() {
-  const [tableTypes, setTableTypes]  = useState<TableType[]>(INIT_TABLE_TYPES);
-  const [reservationsOn, setResOn]   = useState(true);
-  const [timeSlot, setTimeSlot]      = useState("30 min");
-  const [requireDeposit, setDeposit] = useState(true);
-  const [depositAmount, setDepAmt]   = useState("5000");
-  const [bookingDuration, setBD]     = useState("90");
-  const [advanceWindow, setAW]       = useState("30");
-  const [minLeadTime, setMLT]        = useState("60");
-  const [cancellationWindow, setCW]  = useState("2");
-  const [gracePeriod, setGP]         = useState("15");
-  const [opHours, setOpHours]        = useState({ open: "11:00 AM", close: "10:00 PM" });
-  const [specialDates, setSpecial]   = useState<SpecialDate[]>(INIT_SPECIAL_DATES);
+  const { policies, policiesLoading, policiesError, fetchPolicies, savePolicies, isSavingPolicies, addSpecialDate, removeSpecialDate, isSavingSpecialDate } = useReservationsStore();
+
+  const [form, setForm] = useState<ReservationPolicies | null>(null);
 
   const [addTypeOpen, setAddTypeOpen] = useState(false);
   const [editHoursOpen, setEditHours] = useState(false);
-  const [addDateOpen, setAddDate]     = useState(false);
-  const [newType, setNewType]         = useState({ seats: "", count: "" });
-  const [editOp, setEditOp]           = useState({ open: "11:00 AM", close: "10:00 PM" });
-  const [newDate, setNewDate]         = useState({
+  const [addDateOpen, setAddDate] = useState(false);
+  const [newType, setNewType] = useState({ seats: "", count: "" });
+  const [editOp, setEditOp] = useState({ open: "", close: "" });
+  const [newDate, setNewDate] = useState({
     date: "", type: "Closed all day", note: "",
     openTime: "5:00 PM", closeTime: "10:00 PM",
     slot1: "5:00 PM - 7:00 PM", slot2: "7:30 PM - 10:00 PM",
   });
 
-  const totalTables = tableTypes.reduce((s, t) => s + t.count, 0);
-  const totalSeats  = tableTypes.reduce((s, t) => s + t.seats * t.count, 0);
+  useEffect(() => {
+    fetchPolicies();
+  }, [fetchPolicies]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (policies) setForm(policies);
+  }, [policies]);
+
+  if (policiesLoading || !form) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <SkeletonText width="30%" height={16} />
+            <Skeleton width="100%" height={40} radius={8} />
+            <Skeleton width="100%" height={40} radius={8} />
+          </div>
+        ))}
+        {policiesError && (
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            {/* TODO(BACKEND): GET /admin/reservations/policies not implemented */}
+            Policies unavailable
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  const totalTables = form.tableTypes.reduce((s, t) => s + t.count, 0);
+  const totalSeats = form.tableTypes.reduce((s, t) => s + t.seats * t.count, 0);
+
+  const update = (patch: Partial<ReservationPolicies>) => setForm((prev) => (prev ? { ...prev, ...patch } : prev));
+
+  const savePayload = () => {
+    if (!form) return;
+    const { branchId, specialDates, ...rest } = form;
+    savePolicies(rest);
+  };
 
   return (
     <>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-        {/* Branch + Table Inventory */}
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
@@ -242,7 +209,7 @@ function PoliciesTab() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text-secondary)" }}>Reservations</span>
-              <Toggle on={reservationsOn} onToggle={() => setResOn((v) => !v)} />
+              <Toggle on={form.reservationsEnabled} onToggle={() => update({ reservationsEnabled: !form.reservationsEnabled })} />
             </div>
           </div>
 
@@ -257,11 +224,11 @@ function PoliciesTab() {
               </button>
             </div>
 
-            {tableTypes.length === 0 ? (
+            {form.tableTypes.length === 0 ? (
               <p style={{ fontSize: "0.83rem", color: "var(--color-text-muted)", textAlign: "center", padding: "16px 0" }}>No tables configured</p>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {tableTypes.map((t, i) => (
+                {form.tableTypes.map((t, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", background: "var(--color-bg-soft)", borderRadius: 8 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <Users size={15} strokeWidth={1.8} color="var(--color-secondary)" style={{ flexShrink: 0 }} />
@@ -270,10 +237,8 @@ function PoliciesTab() {
                       </span>
                     </div>
                     <button
-                      onClick={() => setTableTypes((p) => p.filter((_, j) => j !== i))}
+                      onClick={() => update({ tableTypes: form.tableTypes.filter((_, j) => j !== i) })}
                       style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4 }}
-                      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-primary)")}
-                      onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-muted)")}
                     >
                       <Trash2 size={15} strokeWidth={1.8} />
                     </button>
@@ -284,35 +249,36 @@ function PoliciesTab() {
           </div>
         </div>
 
-        {/* Booking Rules */}
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <span style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--color-heading)" }}>Booking Rules</span>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            {[
-              { label: "Booking Duration (minutes)",        val: bookingDuration,     set: setBD  },
-              { label: "Advance Booking Window (days)",     val: advanceWindow,       set: setAW  },
-              { label: "Cancellation Window (hours before)",val: cancellationWindow,  set: setCW  },
-            ].map(({ label, val, set }) => (
-              <div key={label} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: "0.78rem", fontWeight: 500, color: "var(--color-text-secondary)" }}>{label}</label>
-                <input className="input" value={val} onChange={(e) => set(e.target.value)} />
-              </div>
-            ))}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: "0.78rem", fontWeight: 500, color: "var(--color-text-secondary)" }}>Booking Duration (minutes)</label>
+              <input className="input" value={form.bookingDurationMinutes} onChange={(e) => update({ bookingDurationMinutes: Number(e.target.value) || 0 })} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: "0.78rem", fontWeight: 500, color: "var(--color-text-secondary)" }}>Advance Booking Window (days)</label>
+              <input className="input" value={form.advanceBookingWindowDays} onChange={(e) => update({ advanceBookingWindowDays: Number(e.target.value) || 0 })} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: "0.78rem", fontWeight: 500, color: "var(--color-text-secondary)" }}>Cancellation Window (hours before)</label>
+              <input className="input" value={form.cancellationWindowHours} onChange={(e) => update({ cancellationWindowHours: Number(e.target.value) || 0 })} />
+            </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: "0.78rem", fontWeight: 500, color: "var(--color-text-secondary)" }}>Time Slot Increment (minutes)</label>
-              <SimpleDropdown options={TIME_SLOTS} value={timeSlot} onChange={setTimeSlot} />
+              <SimpleDropdown options={TIME_SLOTS} value={`${form.timeSlotIncrementMinutes} min`} onChange={(v) => update({ timeSlotIncrementMinutes: Number(v.replace(/\D/g, "")) || 0 })} />
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: "0.78rem", fontWeight: 500, color: "var(--color-text-secondary)" }}>Minimum Lead Time (minutes)</label>
-              <input className="input" value={minLeadTime} onChange={(e) => setMLT(e.target.value)} />
+              <input className="input" value={form.minimumLeadTimeMinutes} onChange={(e) => update({ minimumLeadTimeMinutes: Number(e.target.value) || 0 })} />
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: "0.78rem", fontWeight: 500, color: "var(--color-text-secondary)" }}>Grace Period (minutes)</label>
-              <input className="input" value={gracePeriod} onChange={(e) => setGP(e.target.value)} />
+              <input className="input" value={form.gracePeriodMinutes} onChange={(e) => update({ gracePeriodMinutes: Number(e.target.value) || 0 })} />
             </div>
           </div>
 
@@ -321,34 +287,32 @@ function PoliciesTab() {
               <p style={{ margin: 0, fontWeight: 500, fontSize: "0.875rem", color: "var(--color-text)" }}>Require Deposit</p>
               <p style={{ margin: "2px 0 0", fontWeight: 400, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>Charge deposit at booking</p>
             </div>
-            <Toggle on={requireDeposit} onToggle={() => setDeposit((v) => !v)} />
+            <Toggle on={form.requireDeposit} onToggle={() => update({ requireDeposit: !form.requireDeposit })} />
           </div>
 
-          {requireDeposit && (
+          {form.requireDeposit && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: "0.78rem", fontWeight: 500, color: "var(--color-text-secondary)" }}>Deposit Amount (₦)</label>
-              <input className="input" value={depositAmount} onChange={(e) => setDepAmt(e.target.value)} />
+              <input className="input" value={form.depositAmount} onChange={(e) => update({ depositAmount: Number(e.target.value) || 0 })} />
             </div>
           )}
         </div>
 
-        {/* Operating Hours */}
         <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <p style={{ margin: 0, fontWeight: 600, fontSize: "0.875rem", color: "var(--color-heading)" }}>Operating Hours</p>
             <p style={{ margin: "2px 0 0", fontWeight: 400, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
-              {to24Hour(opHours.open)} – {to24Hour(opHours.close)} daily
+              {to24Hour(form.operatingHours.open)} – {to24Hour(form.operatingHours.close)} daily
             </p>
           </div>
           <button
-            onClick={() => { setEditOp({ open: opHours.open, close: opHours.close }); setEditHours(true); }}
+            onClick={() => { setEditOp({ open: form.operatingHours.open, close: form.operatingHours.close }); setEditHours(true); }}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, border: "1px solid var(--color-border)", background: "none", fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)", cursor: "pointer", fontFamily: "var(--font-sans)" }}
           >
             <SquarePen size={13} strokeWidth={1.8} /> Edit
           </button>
         </div>
 
-        {/* Special Dates */}
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--color-heading)" }}>Special Dates</span>
@@ -359,7 +323,10 @@ function PoliciesTab() {
               <Plus size={13} strokeWidth={2.2} /> Add
             </button>
           </div>
-          {specialDates.map((d) => (
+          {form.specialDates.length === 0 && (
+            <p style={{ fontSize: "0.83rem", color: "var(--color-text-muted)", textAlign: "center", padding: "10px 0" }}>No special dates configured</p>
+          )}
+          {form.specialDates.map((d) => (
             <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", background: "var(--color-bg-soft)", borderRadius: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <CalendarClock size={15} strokeWidth={1.8} color="var(--color-primary)" style={{ flexShrink: 0 }} />
@@ -369,10 +336,8 @@ function PoliciesTab() {
                 </div>
               </div>
               <button
-                onClick={() => setSpecial((p) => p.filter((x) => x.id !== d.id))}
+                onClick={() => removeSpecialDate(d.id)}
                 style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4 }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-primary)")}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-muted)")}
               >
                 <Trash2 size={15} strokeWidth={1.8} />
               </button>
@@ -380,7 +345,6 @@ function PoliciesTab() {
           ))}
         </div>
 
-        {/* Info banner */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderRadius: 10, background: "rgba(252,208,99,0.12)", border: "1px solid rgba(252,208,99,0.3)" }}>
           <Info size={15} strokeWidth={1.8} color="#a07a00" style={{ flexShrink: 0 }} />
           <p style={{ margin: 0, fontSize: "0.82rem", fontWeight: 400, color: "#7a5800" }}>
@@ -390,19 +354,19 @@ function PoliciesTab() {
 
         <button
           className="btn btn-primary"
-          onClick={() => toast.success("Policies saved", { description: "Changes pushed to the customer app." })}
-          style={{ width: "100%", justifyContent: "center", padding: "13px", fontSize: "0.875rem" }}
+          onClick={savePayload}
+          disabled={isSavingPolicies}
+          style={{ width: "100%", justifyContent: "center", padding: "13px", fontSize: "0.875rem", opacity: isSavingPolicies ? 0.6 : 1 }}
         >
-          Save All Policies
+          {isSavingPolicies ? "Saving…" : "Save All Policies"}
         </button>
       </div>
 
-      {/* Add Table Type Modal */}
       {addTypeOpen && (
         <Modal title="Add Table Type" onClose={() => setAddTypeOpen(false)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {[
-              { label: "Seats per table",  key: "seats" as const, placeholder: "4" },
+              { label: "Seats per table", key: "seats" as const, placeholder: "4" },
               { label: "Number of tables", key: "count" as const, placeholder: "1" },
             ].map(({ label, key, placeholder }) => (
               <div key={key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -416,17 +380,16 @@ function PoliciesTab() {
             <button className="btn btn-primary" style={{ flex: 1, justifyContent: "center", padding: "11px" }}
               onClick={() => {
                 if (!newType.seats || !newType.count) return;
-                setTableTypes((p) => [...p, { seats: Number(newType.seats), count: Number(newType.count) }]);
+                update({ tableTypes: [...form.tableTypes, { seats: Number(newType.seats), count: Number(newType.count) }] });
                 setNewType({ seats: "", count: "" });
                 setAddTypeOpen(false);
-                toast.success("Table type added");
+                toast.success("Table type added — remember to Save All Policies");
               }}>Add</button>
             <button onClick={() => setAddTypeOpen(false)} style={{ flex: 1, padding: "11px", borderRadius: 8, border: "1px solid var(--color-border)", background: "none", cursor: "pointer", fontSize: "0.855rem", fontWeight: 500, color: "var(--color-text-secondary)", fontFamily: "var(--font-sans)" }}>Cancel</button>
           </div>
         </Modal>
       )}
 
-      {/* Edit Operating Hours Modal */}
       {editHoursOpen && (
         <Modal title="Edit Operating Hours" onClose={() => setEditHours(false)}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -443,16 +406,15 @@ function PoliciesTab() {
           <div style={{ display: "flex", gap: 10 }}>
             <button className="btn btn-primary" style={{ flex: 1, justifyContent: "center", padding: "11px" }}
               onClick={() => {
-                setOpHours({ open: editOp.open, close: editOp.close });
+                update({ operatingHours: { open: editOp.open, close: editOp.close } });
                 setEditHours(false);
-                toast.success("Operating hours updated");
+                toast.success("Operating hours updated — remember to Save All Policies");
               }}>Save</button>
             <button onClick={() => setEditHours(false)} style={{ flex: 1, padding: "11px", borderRadius: 8, border: "1px solid var(--color-border)", background: "none", cursor: "pointer", fontSize: "0.855rem", fontWeight: 500, color: "var(--color-text-secondary)", fontFamily: "var(--font-sans)" }}>Cancel</button>
           </div>
         </Modal>
       )}
 
-      {/* Add Special Date Modal */}
       {addDateOpen && (
         <Modal title="Add Special Date" onClose={() => setAddDate(false)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -492,14 +454,29 @@ function PoliciesTab() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            <button className="btn btn-primary" style={{ flex: 1, justifyContent: "center", padding: "11px" }}
-              onClick={() => {
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1, justifyContent: "center", padding: "11px", opacity: isSavingSpecialDate ? 0.6 : 1 }}
+              disabled={isSavingSpecialDate}
+              onClick={async () => {
                 if (!newDate.date) return;
-                setSpecial((p) => [...p, { id: Date.now(), date: newDate.date, label: newDate.note || newDate.type, type: newDate.type }]);
-                setAddDate(false);
-                setNewDate({ date: "", type: "Closed all day", note: "", openTime: "5:00 PM", closeTime: "10:00 PM", slot1: "5:00 PM - 7:00 PM", slot2: "7:30 PM - 10:00 PM" });
-                toast.success("Special date added");
-              }}>Add</button>
+                const ok = await addSpecialDate({
+                  date: newDate.date,
+                  type: newDate.type,
+                  note: newDate.note || null,
+                  openTime: newDate.openTime || null,
+                  closeTime: newDate.closeTime || null,
+                  slot1: newDate.slot1 || null,
+                  slot2: newDate.slot2 || null,
+                });
+                if (ok) {
+                  setAddDate(false);
+                  setNewDate({ date: "", type: "Closed all day", note: "", openTime: "5:00 PM", closeTime: "10:00 PM", slot1: "5:00 PM - 7:00 PM", slot2: "7:30 PM - 10:00 PM" });
+                }
+              }}
+            >
+              {isSavingSpecialDate ? "Adding…" : "Add"}
+            </button>
             <button onClick={() => setAddDate(false)} style={{ flex: 1, padding: "11px", borderRadius: 8, border: "1px solid var(--color-border)", background: "none", cursor: "pointer", fontSize: "0.855rem", fontWeight: 500, color: "var(--color-text-secondary)", fontFamily: "var(--font-sans)" }}>Cancel</button>
           </div>
         </Modal>
@@ -508,113 +485,162 @@ function PoliciesTab() {
   );
 }
 
-/* ══════════════════════════════════════════
-   AVAILABILITY TAB
-══════════════════════════════════════════ */
+/* ══════════════════════════ AVAILABILITY TAB ══════════════════════════ */
+// Rebuilt against the real backend: DiningTable has no status field, and
+// there is no endpoint to set one. Status shown here is DERIVED client-side
+// from live reservations overlapping "now" — it's read-only, not something
+// staff can click to change. See ReservationService.getAvailableTables for
+// the same overlap logic this mirrors.
 function AvailabilityTab() {
-  const [tables, setTables] = useState<TableSlot[]>(INIT_TABLES);
+  const { tables, tablesLoading, tablesError, fetchTables, reservations, reservationsLoading, fetchReservations } = useReservationsStore();
 
-  const cycleStatus = (id: string) => {
-    const cycle: TableStatus[] = ["Free", "Booked", "Occupied"];
-    setTables((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? { ...t, status: cycle[(cycle.indexOf(t.status) + 1) % cycle.length] }
-          : t
-      )
+  // TODO: replace with real branch context — GET /admin/reservations/tables
+  // requires branchId as a required query param, confirmed via the
+  // AdminReservationController. Hardcoded placeholder until branch
+  // selection is wired into this page.
+  const BRANCH_ID = "adf6fd7a-340b-4b32-977c-76d5177f2cc3";
+
+  useEffect(() => {
+    fetchTables(BRANCH_ID);
+    fetchReservations(BRANCH_ID);
+  }, [fetchTables, fetchReservations]);
+
+  const loading = tablesLoading || reservationsLoading;
+
+  const deriveStatus = (tableId: string) => {
+    const now = new Date();
+    const relevant = (reservations ?? []).filter(
+      (r) =>
+        r.status !== "CANCELLED" &&
+        r.status !== "NO_SHOW" &&
+        r.tableLinks.some((tl) => tl.table.id === tableId),
     );
+    const current = relevant.find((r) => new Date(r.startsAt) <= now && now <= new Date(r.endsAt));
+    if (current) return { label: "Reserved Now", time: null as string | null };
+
+    const upcoming = relevant
+      .filter((r) => new Date(r.startsAt) > now)
+      .sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt))[0];
+    if (upcoming) {
+      return { label: "Booked Later", time: new Date(upcoming.startsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
+    }
+    return { label: "Free", time: null };
+  };
+
+  const colorsFor = (label: string) => {
+    if (label === "Free") return { bg: "#16a34a", border: "#15803d" };
+    if (label === "Booked Later") return { bg: "#ca8a04", border: "#a16207" };
+    return { bg: "#b91c1c", border: "#991b1b" }; // Reserved Now
   };
 
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <p style={{ margin: 0, fontWeight: 600, fontSize: "0.9rem", color: "var(--color-heading)" }}>
-        Foodies 1 [Lekki] — Table Availability
-      </p>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))", gap: 12 }}>
-        {tables.map((t) => {
-          const colors = TABLE_STATUS_COLORS[t.status];
-          return (
-            <button
-              key={t.id}
-              onClick={() => cycleStatus(t.id)}
-              title="Click to cycle status"
-              style={{
-                background: colors.bg, border: `2px solid ${colors.border}`,
-                borderRadius: 12, padding: "16px 10px", cursor: "pointer",
-                display: "flex", flexDirection: "column", alignItems: "center",
-                gap: 4, transition: "opacity 0.15s",
-              }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "0.88")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "1")}
-            >
-              <span style={{ fontWeight: 600, fontSize: "0.95rem", color: "#fff" }}>{t.id}</span>
-              <span style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.85)" }}>
-                {t.seats}-Seat{t.time ? ` (${t.time})` : ""}
-              </span>
-              <span style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.95)", fontWeight: 500 }}>
-                {t.status}
-              </span>
-            </button>
-          );
-        })}
+      <div>
+        <p style={{ margin: 0, fontWeight: 600, fontSize: "0.9rem", color: "var(--color-heading)" }}>
+          Foodies 1 [Lekki] — Table Availability
+        </p>
+        <p style={{ margin: "4px 0 0", fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
+          Status is computed from current reservations, not manually set.
+        </p>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-        {(["Free", "Reserved", "Occupied"] as const).map((s) => {
-          const color = s === "Free" ? "#16a34a" : s === "Reserved" ? "#ca8a04" : "#b91c1c";
-          return (
-            <div key={s} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div style={{ width: 10, height: 10, borderRadius: "50%", background: color }} />
-              <span style={{ fontSize: "0.78rem", fontWeight: 400, color: "var(--color-text-secondary)" }}>{s}</span>
-            </div>
-          );
-        })}
-      </div>
+      {loading && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))", gap: 12 }}>
+          {Array.from({ length: 10 }).map((_, i) => (
+            <Skeleton key={i} width="100%" height={84} radius={12} />
+          ))}
+        </div>
+      )}
+
+      {!loading && (tablesError || !tables?.length) && (
+        <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+          {/* TODO(BACKEND): confirm exact route for ReservationService.listTables — inferred as GET /admin/reservations/tables?branchId */}
+          No table data available
+        </p>
+      )}
+
+      {!loading && !tablesError && tables && tables.length > 0 && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))", gap: 12 }}>
+            {tables.map((t) => {
+              const derived = deriveStatus(t.id);
+              const colors = colorsFor(derived.label);
+              return (
+                <div
+                  key={t.id}
+                  style={{
+                    background: colors.bg, border: `2px solid ${colors.border}`,
+                    borderRadius: 12, padding: "16px 10px",
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+                  }}
+                >
+                  <span style={{ fontWeight: 600, fontSize: "0.95rem", color: "#fff" }}>{t.name}</span>
+                  <span style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.85)" }}>
+                    {t.seats}-Seat{t.section ? ` · ${t.section}` : ""}
+                  </span>
+                  <span style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.95)", fontWeight: 500 }}>
+                    {derived.label}{derived.time ? ` (${derived.time})` : ""}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+            {[
+              { label: "Free", color: "#16a34a" },
+              { label: "Booked Later", color: "#ca8a04" },
+              { label: "Reserved Now", color: "#b91c1c" },
+            ].map((s) => (
+              <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: s.color }} />
+                <span style={{ fontSize: "0.78rem", fontWeight: 400, color: "var(--color-text-secondary)" }}>{s.label}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-/* ══════════════════════════════════════════
-   WAITLIST TAB
-══════════════════════════════════════════ */
+/* ══════════════════════════ WAITLIST TAB ══════════════════════════ */
 function WaitlistTab() {
-  const [waitlist, setWaitlist] = useState<WaitlistEntry[]>(INIT_WAITLIST);
+  const { waitlist, waitlistLoading, waitlistError, fetchWaitlist, notifyWaitlistEntry, seatWaitlistEntry } = useReservationsStore();
 
-  const notify = (id: number) => {
-    const entry = waitlist.find((w) => w.id === id);
-    if (!entry) return;
-    toast.success(`${entry.name} has been notified`, {
-      description: `SMS sent to ${entry.phone}`,
-      duration: 4000,
-    });
-  };
-
-  const seat = (id: number) => {
-    const entry = waitlist.find((w) => w.id === id);
-    if (!entry) return;
-    setWaitlist((p) => p.filter((w) => w.id !== id));
-    toast.success(`${entry.name} has been seated`, {
-      description: `Party of ${entry.party} — ${entry.branch}`,
-      duration: 4000,
-    });
-  };
+  useEffect(() => {
+    fetchWaitlist();
+  }, [fetchWaitlist]);
 
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 0, padding: 0, overflow: "hidden" }}>
       <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--color-border)" }}>
         <span style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--color-heading)" }}>
-          Waitlist ({waitlist.length})
+          Waitlist {waitlist ? `(${waitlist.length})` : ""}
         </span>
       </div>
 
-      {waitlist.length === 0 ? (
+      {waitlistLoading && (
+        <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <SkeletonText width="50%" height={14} />
+              <SkeletonText width="70%" height={12} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!waitlistLoading && (waitlistError || !waitlist?.length) && (
         <div style={{ padding: 40, textAlign: "center" }}>
           <p style={{ margin: 0, fontSize: "0.83rem", color: "var(--color-text-muted)" }}>
+            {/* TODO(BACKEND): GET /admin/reservations/waitlist not implemented */}
             No one on the waitlist right now.
           </p>
         </div>
-      ) : (
+      )}
+
+      {!waitlistLoading && !waitlistError && waitlist && waitlist.length > 0 && (
         waitlist.map((w, i) => (
           <div
             key={w.id}
@@ -632,18 +658,18 @@ function WaitlistTab() {
                 {w.phone} · {w.branch} · {w.time}
               </p>
               <p style={{ margin: "3px 0 0", fontWeight: 400, fontSize: "0.75rem", color: "var(--color-primary)" }}>
-                {w.addedAgo}
+                {timeAgo(w.addedAt)}
               </p>
             </div>
             <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
               <button
-                onClick={() => notify(w.id)}
+                onClick={() => notifyWaitlistEntry(w.id)}
                 style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid var(--color-border)", background: "none", cursor: "pointer", fontSize: "0.825rem", fontWeight: 500, color: "var(--color-text)", fontFamily: "var(--font-sans)" }}
               >
                 Notify
               </button>
               <button
-                onClick={() => seat(w.id)}
+                onClick={() => seatWaitlistEntry(w.id)}
                 className="btn btn-primary"
                 style={{ padding: "8px 18px" }}
               >
@@ -657,14 +683,13 @@ function WaitlistTab() {
   );
 }
 
-/* ══════════════════════════════════════════
-   REMINDERS TAB
-══════════════════════════════════════════ */
+/* ══════════════════════════ REMINDERS TAB ══════════════════════════ */
 function RemindersTab() {
-  const [reminders, setReminders] = useState<ReminderRule[]>(INIT_REMINDERS);
+  const { reminders, remindersLoading, remindersError, fetchReminders, toggleReminder, saveReminders, isSavingReminders } = useReservationsStore();
 
-  const toggle = (id: number) =>
-    setReminders((p) => p.map((r) => r.id === id ? { ...r, enabled: !r.enabled } : r));
+  useEffect(() => {
+    fetchReminders();
+  }, [fetchReminders]);
 
   return (
     <>
@@ -673,7 +698,25 @@ function RemindersTab() {
           <span style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--color-heading)" }}>Automated Reminders</span>
         </div>
 
-        {reminders.map((r, i) => (
+        {remindersLoading && (
+          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <SkeletonText width="45%" height={14} />
+                <Skeleton width={40} height={22} radius={11} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!remindersLoading && (remindersError || !reminders?.length) && (
+          <p style={{ padding: 20, margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            {/* TODO(BACKEND): GET /admin/reservations/reminders not implemented */}
+            No reminder rules available
+          </p>
+        )}
+
+        {!remindersLoading && !remindersError && reminders?.map((r, i) => (
           <div
             key={r.id}
             style={{
@@ -688,30 +731,29 @@ function RemindersTab() {
                 {r.description}
               </p>
             </div>
-            <Toggle on={r.enabled} onToggle={() => toggle(r.id)} />
+            <Toggle on={r.enabled} onToggle={() => toggleReminder(r.id)} />
           </div>
         ))}
       </div>
 
       <button
         className="btn btn-primary"
-        onClick={() => toast.success("Reminder settings saved")}
-        style={{ width: "100%", justifyContent: "center", padding: "13px", fontSize: "0.875rem", marginTop: 16 }}
+        onClick={saveReminders}
+        disabled={isSavingReminders || !reminders?.length}
+        style={{ width: "100%", justifyContent: "center", padding: "13px", fontSize: "0.875rem", marginTop: 16, opacity: isSavingReminders || !reminders?.length ? 0.6 : 1 }}
       >
-        Save
+        {isSavingReminders ? "Saving…" : "Save"}
       </button>
     </>
   );
 }
 
-/* ══════════════════════════════════════════
-   MAIN PAGE
-══════════════════════════════════════════ */
+/* ══════════════════════════ MAIN PAGE ══════════════════════════ */
 const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
-  { key: "policies",     label: "Policies",     icon: Settings     },
+  { key: "policies", label: "Policies", icon: Settings },
   { key: "availability", label: "Availability", icon: CalendarDays },
-  { key: "waitlist",     label: "Waitlist",     icon: List         },
-  { key: "reminders",    label: "Reminders",    icon: Bell         },
+  { key: "waitlist", label: "Waitlist", icon: List },
+  { key: "reminders", label: "Reminders", icon: Bell },
 ];
 
 export default function ReservationsPage() {
@@ -731,7 +773,6 @@ export default function ReservationsPage() {
         </p>
       </div>
 
-      {/* Tab bar */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         {TABS.map(({ key, label, icon: Icon }) => {
           const active = tab === key;
@@ -757,11 +798,10 @@ export default function ReservationsPage() {
         })}
       </div>
 
-      {/* Tab content */}
-      {tab === "policies"     && <PoliciesTab     />}
+      {tab === "policies" && <PoliciesTab />}
       {tab === "availability" && <AvailabilityTab />}
-      {tab === "waitlist"     && <WaitlistTab      />}
-      {tab === "reminders"    && <RemindersTab     />}
+      {tab === "waitlist" && <WaitlistTab />}
+      {tab === "reminders" && <RemindersTab />}
     </div>
   );
 }

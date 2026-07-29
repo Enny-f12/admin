@@ -9,6 +9,8 @@ import {
   VerifyOtpPayload,
   GoogleAuthPayload,
   AppleAuthPayload,
+  RefreshPayload,
+  RefreshResponse,
 } from '@/types/auth.types';
 
 export const authService = {
@@ -29,6 +31,11 @@ export const authService = {
 
   appleSignIn: (payload: AppleAuthPayload) =>
     apiClient.get<AuthResponse>('/auth/apple', { data: payload }).then((r) => r.data),
+
+  // NOT YET CONFIRMED — access tokens expire after 15 minutes with no way
+  // to silently renew without this. See backend request doc, Auth #1.
+  refresh: (payload: RefreshPayload) =>
+    apiClient.post<RefreshResponse>('/auth/refresh', payload).then((r) => r.data),
 
   logout: (refreshToken: string) =>
     apiClient.post<{ success: boolean }>('/auth/logout', { refreshToken }).then((r) => r.data),

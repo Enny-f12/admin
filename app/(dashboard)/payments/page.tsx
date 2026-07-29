@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CalendarDays,
   DollarSign,
@@ -12,29 +12,17 @@ import {
   X,
   Check,
 } from "lucide-react";
+import { usePaymentsAdminStore } from "@/store/usePaymentStore";
+import { PaymentMethod, ManualSaleLineItem } from "@/types/payment-admin.types";
+import { SkeletonText } from "@/components/ui/Skeleton";
 
 type Tab = "payments" | "pos" | "manual";
-type PayMethod = "Cash" | "POS" | "Bank Transfer";
 
-type LineItem = { name: string; qty: number; type: "Food" | "Drink"; unitPrice: number };
-
-const ORDER_SUMMARY_ITEMS = [
-  { name: "Jollof Rice x2",    price: 5000 },
-  { name: "Grilled Chicken x1", price: 6000 },
-  { name: "Can Coke x2",       price: 2000 },
-];
-
-const INITIAL_SALE_ITEMS: LineItem[] = [
-  { name: "Jollof Rice", qty: 2, type: "Food",  unitPrice: 3000 },
-  { name: "Beef",        qty: 2, type: "Food",  unitPrice: 2500 },
-  { name: "Can Coke",    qty: 2, type: "Drink", unitPrice: 800  },
-];
-
-const POS_ORDERS = [
-  { time: "10:15 AM", terminal: "T1", items: "Jollof x2", total: 6000, deducted: true,  verified: true  },
-  { time: "10:00 AM", terminal: "T2", items: "Egusi x1",  total: 3500, deducted: true,  verified: false },
-  { time: "09:45 AM", terminal: "T1", items: "Amala x1",  total: 1500, deducted: true,  verified: false },
-];
+function formatMoney(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return "–";
+  const n = Number(value);
+  return Number.isFinite(n) ? `₦${n.toLocaleString()}` : "–";
+}
 
 export default function PaymentsPage() {
   const [tab, setTab] = useState<Tab>("payments");
@@ -136,68 +124,124 @@ const outlineBtn: React.CSSProperties = {
 
 /* ══════════════════════════ Record Payments ══════════════════════════ */
 function RecordPaymentsView() {
-  const [orderNum, setOrderNum] = useState("1234.............................");
-  const [loaded, setLoaded] = useState(true);
-  const [method, setMethod] = useState<PayMethod>("Cash");
-  const [amountReceived, setAmountReceived] = useState(15000);
-  const [reference, setReference] = useState("Trx 1234..............");
+  const {
+    loadedOrder, orderLookupLoading, orderLookupError, lookupOrder,
+    recordPayment, isRecordingPayment,
+  } = usePaymentsAdminStore();
 
-  const total = ORDER_SUMMARY_ITEMS.reduce((s, i) => s + i.price, 0);
+  const [orderNum, setOrderNum] = useState("");
+  const [method, setMethod] = useState<PaymentMethod>("CASH");
+  const [amountReceived, setAmountReceived] = useState(0);
+  const [reference, setReference] = useState("");
+
+  const total = loadedOrder ? Number(loadedOrder.totalAmount) : 0;
   const change = Math.max(0, amountReceived - total);
+  const methodLabel = method === "POS" ? "POS (Moniepoint)" : method === "BANK_TRANSFER" ? "Bank Transfer" : "Cash";
+
+  const submit = async () => {
+    if (!loadedOrder) return;
+    const ok = await recordPayment({
+      orderId: loadedOrder.id,
+      method,
+      amountReceived,
+      reference: method === "BANK_TRANSFER" ? reference || null : null,
+    });
+    if (ok) {
+      setOrderNum("");
+      setAmountReceived(0);
+      setReference("");
+      setMethod("CASH");
+    }
+  };
 
   return (
     <>
       <div style={{ padding: "14px 18px", borderRadius: 10, background: "rgba(225,11,28,0.06)", fontSize: "0.85rem", color: "var(--color-text)" }}>
-        <strong>Last Updated:</strong> Today, 8:35 AM by Sarah Johnson (Cashier)
+        {/* TODO(BACKEND): no "last updated" signal on this screen yet — showing static label until an endpoint exists */}
+        <strong>Last Updated:</strong> —
       </div>
 
       <div className="card">
         <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
           <Field label="Order #">
-            <input className="input" value={orderNum} onChange={(e) => setOrderNum(e.target.value)} style={{ minWidth: 260 }} />
+            <input className="input" placeholder="e.g. FHS-1778856693602-000" value={orderNum} onChange={(e) => setOrderNum(e.target.value)} style={{ minWidth: 260 }} />
           </Field>
-          <button onClick={() => setLoaded(true)} style={{ ...outlineBtn, marginBottom: 14 }}>Load Order</button>
+          <button
+            onClick={() => orderNum.trim() && lookupOrder(orderNum.trim())}
+            disabled={!orderNum.trim() || orderLookupLoading}
+            style={{ ...outlineBtn, marginBottom: 14, opacity: !orderNum.trim() || orderLookupLoading ? 0.6 : 1 }}
+          >
+            {orderLookupLoading ? "Loading…" : "Load Order"}
+          </button>
         </div>
       </div>
 
-      {loaded && (
+      {orderLookupLoading && (
+        <div className="card">
+          <SkeletonText width="30%" height={14} />
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            <SkeletonText width="60%" height={13} />
+            <SkeletonText width="45%" height={13} />
+            <SkeletonText width="50%" height={13} />
+          </div>
+        </div>
+      )}
+
+      {!orderLookupLoading && orderLookupError && (
+        <div className="card">
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            {/* TODO(BACKEND): order lookup relies on GET /admin/orders?search — see Orders request doc #2 */}
+            Could not look up order.
+          </p>
+        </div>
+      )}
+
+      {!orderLookupLoading && loadedOrder && (
         <>
           <div className="card">
             <p style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 14px", fontSize: "0.85rem", fontWeight: 700, letterSpacing: "0.03em", color: "var(--color-heading)" }}>
               <Package size={15} strokeWidth={1.8} color="var(--color-primary)" />
               ORDER SUMMARY
             </p>
-            <p style={{ margin: "0 0 10px", fontSize: "0.9rem", color: "var(--color-text)" }}>Customer: Sarah James</p>
+            <p style={{ margin: "0 0 10px", fontSize: "0.9rem", color: "var(--color-text)" }}>
+              Customer: {loadedOrder.customer?.fullName ?? loadedOrder.guestName ?? "–"}
+            </p>
             <p style={{ margin: "0 0 6px", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)" }}>Items</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
-              {ORDER_SUMMARY_ITEMS.map((i) => (
-                <div key={i.name} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.9rem", color: "var(--color-text)" }}>
-                  <span>{i.name}</span>
-                  <span>₦{i.price.toLocaleString()}</span>
+              {loadedOrder.items.map((i) => (
+                <div key={i.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.9rem", color: "var(--color-text)" }}>
+                  <span>{i.nameSnapshot} x{i.quantity}</span>
+                  <span>{formatMoney(i.totalPrice)}</span>
                 </div>
               ))}
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: "1px solid var(--color-border)", fontWeight: 700, color: "var(--color-heading)", marginBottom: 8 }}>
               <span>Total</span>
-              <span>₦{total.toLocaleString()}</span>
+              <span>{formatMoney(loadedOrder.totalAmount)}</span>
             </div>
-            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-primary)", fontWeight: 600 }}>Status: Pending Payment</p>
+            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-primary)", fontWeight: 600 }}>
+              Status: {loadedOrder.paymentStatus === "PENDING" ? "Pending Payment" : loadedOrder.paymentStatus}
+            </p>
           </div>
 
           <div className="card">
             <p style={{ margin: "0 0 12px", fontSize: "0.9rem", fontWeight: 700, color: "var(--color-heading)" }}>Payment Method:</p>
-            <RadioRow options={["Cash", "POS (Moniepoint)", "Bank Transfer"]} value={method === "POS" ? "POS (Moniepoint)" : method} onChange={(v) => setMethod(v.startsWith("POS") ? "POS" : (v as PayMethod))} />
+            <RadioRow
+              options={["Cash", "POS (Moniepoint)", "Bank Transfer"]}
+              value={methodLabel}
+              onChange={(v) => setMethod(v.startsWith("POS") ? "POS" : v === "Bank Transfer" ? "BANK_TRANSFER" : "CASH")}
+            />
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
               <Field label="Amount Received">
                 <input className="input" type="number" value={amountReceived} onChange={(e) => setAmountReceived(Number(e.target.value) || 0)} />
               </Field>
               <Field label="Change">
-                <input className="input" value={`₦${change.toLocaleString()}`} readOnly />
+                <input className="input" value={formatMoney(change)} readOnly />
               </Field>
             </div>
 
-            {method === "Bank Transfer" && (
+            {method === "BANK_TRANSFER" && (
               <Field label="Payment Reference (if transfer)">
                 <input className="input" value={reference} onChange={(e) => setReference(e.target.value)} />
               </Field>
@@ -221,12 +265,20 @@ function RecordPaymentsView() {
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
-              <button style={{ ...outlineBtn, display: "flex", alignItems: "center", gap: 6 }}>
+              <button
+                onClick={() => { setOrderNum(""); setAmountReceived(0); setReference(""); }}
+                style={{ ...outlineBtn, display: "flex", alignItems: "center", gap: 6 }}
+              >
                 <X size={14} strokeWidth={2} />
                 Cancel
               </button>
-              <button className="btn btn-primary" style={{ padding: "10px 20px", fontSize: "0.85rem" }}>
-                Confirm Payment &amp; Close Order
+              <button
+                className="btn btn-primary"
+                style={{ padding: "10px 20px", fontSize: "0.85rem", opacity: isRecordingPayment ? 0.6 : 1 }}
+                disabled={isRecordingPayment || amountReceived <= 0}
+                onClick={submit}
+              >
+                {isRecordingPayment ? "Recording…" : "Confirm Payment & Close Order"}
               </button>
             </div>
           </div>
@@ -238,26 +290,53 @@ function RecordPaymentsView() {
 
 /* ══════════════════════════ POS Integration ══════════════════════════ */
 function POSIntegrationView() {
-  const [orders, setOrders] = useState(POS_ORDERS);
+  const {
+    posStatus, posStatusLoading, posStatusError, fetchPOSStatus,
+    posOrders, posOrdersLoading, posOrdersError, fetchPOSOrders,
+    toggleVerified, testConnection, isTestingConnection,
+  } = usePaymentsAdminStore();
 
-  const toggleVerified = (i: number) =>
-    setOrders((prev) => prev.map((o, idx) => (idx === i ? { ...o, verified: !o.verified } : o)));
+  useEffect(() => {
+    fetchPOSStatus();
+    fetchPOSOrders();
+  }, [fetchPOSStatus, fetchPOSOrders]);
 
   return (
     <>
       <div>
-        <p style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 6px", fontSize: "0.9rem", color: "var(--color-text)" }}>
-          <strong>Status:</strong>
-          <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#16A34A", display: "inline-block" }} />
-          Connected
-        </p>
-        <p style={{ margin: "0 0 10px", fontSize: "0.9rem", color: "var(--color-text)" }}>
-          <strong>Last sync:</strong> Today 10:23 AM - 12 orders synced
-        </p>
-        <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-primary)" }}>
-          <AlertTriangle size={14} strokeWidth={1.8} />
-          If API is offline, use manual POS entry form below.
-        </p>
+        {posStatusLoading && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <SkeletonText width="30%" height={14} />
+            <SkeletonText width="45%" height={13} />
+          </div>
+        )}
+
+        {!posStatusLoading && (posStatusError || !posStatus) && (
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            {/* TODO(BACKEND): GET /admin/pos-integration/status not implemented — see Payments request doc #2 */}
+            POS status unavailable
+          </p>
+        )}
+
+        {!posStatusLoading && posStatus && (
+          <>
+            <p style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 6px", fontSize: "0.9rem", color: "var(--color-text)" }}>
+              <strong>Status:</strong>
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: posStatus.connected ? "#16A34A" : "#E10B1C", display: "inline-block" }} />
+              {posStatus.connected ? "Connected" : "Disconnected"}
+            </p>
+            <p style={{ margin: "0 0 10px", fontSize: "0.9rem", color: "var(--color-text)" }}>
+              <strong>Last sync:</strong>{" "}
+              {posStatus.lastSyncAt
+                ? `${new Date(posStatus.lastSyncAt).toLocaleString()} - ${posStatus.syncedOrdersCount} orders synced`
+                : "–"}
+            </p>
+            <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-primary)" }}>
+              <AlertTriangle size={14} strokeWidth={1.8} />
+              If API is offline, use manual POS entry form below.
+            </p>
+          </>
+        )}
       </div>
 
       <div className="card">
@@ -272,15 +351,32 @@ function POSIntegrationView() {
               </tr>
             </thead>
             <tbody>
-              {orders.map((o, i) => (
+              {posOrdersLoading && Array.from({ length: 3 }).map((_, i) => (
                 <tr key={i}>
+                  {Array.from({ length: 5 }).map((_, j) => (
+                    <td key={j}><SkeletonText width="60%" height={12} /></td>
+                  ))}
+                </tr>
+              ))}
+
+              {!posOrdersLoading && (posOrdersError || !posOrders?.length) && (
+                <tr>
+                  <td colSpan={5} style={{ textAlign: "center", padding: 20, color: "var(--color-text-muted)" }}>
+                    {/* TODO(BACKEND): GET /admin/pos-integration/orders not implemented — see Payments request doc #3 */}
+                    No POS orders synced yet
+                  </td>
+                </tr>
+              )}
+
+              {!posOrdersLoading && !posOrdersError && posOrders?.map((o) => (
+                <tr key={o.id}>
                   <td>{o.time}</td>
                   <td>{o.terminal}</td>
                   <td>{o.items}</td>
-                  <td style={{ fontWeight: 600, color: "var(--color-text)" }}>₦{o.total.toLocaleString()}</td>
+                  <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{formatMoney(o.total)}</td>
                   <td>
                     <button
-                      onClick={() => toggleVerified(i)}
+                      onClick={() => toggleVerified(o.id, !o.verified)}
                       style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-sans)", fontSize: "0.9rem", color: "var(--color-text)" }}
                     >
                       <span
@@ -291,7 +387,7 @@ function POSIntegrationView() {
                       >
                         {o.verified && <Check size={12} strokeWidth={2.5} color="var(--color-text)" />}
                       </span>
-                      {o.deducted ? "Yes" : "No"}
+                      {o.stockDeducted ? "Yes" : "No"}
                     </button>
                   </td>
                 </tr>
@@ -302,7 +398,10 @@ function POSIntegrationView() {
       </div>
 
       <div style={{ display: "flex", gap: 10 }}>
-        <button style={outlineBtn}>Test Connection</button>
+        <button onClick={testConnection} disabled={isTestingConnection} style={{ ...outlineBtn, opacity: isTestingConnection ? 0.6 : 1 }}>
+          {isTestingConnection ? "Testing…" : "Test Connection"}
+        </button>
+        {/* TODO(BACKEND): "View POS Order History" — no dedicated history/pagination endpoint requested yet; button left unwired until scope is confirmed */}
         <button style={outlineBtn}>View POS Order History</button>
       </div>
     </>
@@ -311,28 +410,39 @@ function POSIntegrationView() {
 
 /* ══════════════════════════ Manual Sale Entry ══════════════════════════ */
 function ManualSaleEntryView() {
-  const [customer, setCustomer] = useState("Sarah James");
-  const [method, setMethod] = useState<PayMethod>("Cash");
-  const [items, setItems] = useState<LineItem[]>(INITIAL_SALE_ITEMS);
-  const [amountReceived, setAmountReceived] = useState(15000);
+  const { createManualSale, isCreatingSale, lastSaleId, emailReceipt, isEmailingReceipt } = usePaymentsAdminStore();
+
+  const [customer, setCustomer] = useState("");
+  const [method, setMethod] = useState<PaymentMethod>("CASH");
+  const [items, setItems] = useState<ManualSaleLineItem[]>([]);
+  const [amountReceived, setAmountReceived] = useState(0);
 
   const subtotal = items.reduce((s, i) => s + i.qty * i.unitPrice, 0);
   const tax = Math.round(subtotal * 0.075);
   const total = subtotal + tax;
   const change = Math.max(0, amountReceived - total);
+  const methodLabel = method === "POS" ? "POS (auto-sync)" : method === "BANK_TRANSFER" ? "Bank Transfer" : "Cash";
 
   const removeItem = (name: string) => setItems((prev) => prev.filter((i) => i.name !== name));
-  const addItem = () =>
-    setItems((prev) => [...prev, { name: "New item", qty: 1, type: "Food", unitPrice: 0 }]);
+  const addItem = () => setItems((prev) => [...prev, { name: "New item", qty: 1, type: "Food", unitPrice: 0 }]);
+
+  const submit = async () => {
+    if (!items.length) return;
+    await createManualSale({ customerName: customer, method, items, amountReceived });
+  };
 
   return (
     <>
       <div className="card">
         <Field label="Customer">
-          <input className="input" value={customer} onChange={(e) => setCustomer(e.target.value)} />
+          <input className="input" value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Walk-in customer name" />
         </Field>
         <p style={{ margin: "0 0 12px", fontSize: "0.9rem", fontWeight: 700, color: "var(--color-heading)" }}>Payment Method:</p>
-        <RadioRow options={["Cash", "POS (auto-sync)", "Bank Transfer"]} value={method === "POS" ? "POS (auto-sync)" : method} onChange={(v) => setMethod(v.startsWith("POS") ? "POS" : (v as PayMethod))} />
+        <RadioRow
+          options={["Cash", "POS (auto-sync)", "Bank Transfer"]}
+          value={methodLabel}
+          onChange={(v) => setMethod(v.startsWith("POS") ? "POS" : v === "Bank Transfer" ? "BANK_TRANSFER" : "CASH")}
+        />
       </div>
 
       <div className="card">
@@ -345,13 +455,52 @@ function ManualSaleEntryView() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
-                <tr key={item.name}>
-                  <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{item.name}</td>
-                  <td>{item.qty}</td>
-                  <td>{item.type}</td>
-                  <td>₦{item.unitPrice.toLocaleString()}</td>
-                  <td style={{ fontWeight: 600 }}>₦{(item.qty * item.unitPrice).toLocaleString()}</td>
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: 20, color: "var(--color-text-muted)" }}>
+                    No items added yet
+                  </td>
+                </tr>
+              )}
+              {items.map((item, idx) => (
+                <tr key={`${item.name}-${idx}`}>
+                  <td style={{ fontWeight: 600, color: "var(--color-text)" }}>
+                    <input
+                      className="input"
+                      value={item.name}
+                      onChange={(e) => setItems((prev) => prev.map((i, ix) => (ix === idx ? { ...i, name: e.target.value } : i)))}
+                      style={{ minWidth: 120 }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      type="number"
+                      value={item.qty}
+                      onChange={(e) => setItems((prev) => prev.map((i, ix) => (ix === idx ? { ...i, qty: Number(e.target.value) || 0 } : i)))}
+                      style={{ width: 70 }}
+                    />
+                  </td>
+                  <td>
+                    <select
+                      className="input"
+                      value={item.type}
+                      onChange={(e) => setItems((prev) => prev.map((i, ix) => (ix === idx ? { ...i, type: e.target.value as "Food" | "Drink" } : i)))}
+                    >
+                      <option>Food</option>
+                      <option>Drink</option>
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      className="input"
+                      type="number"
+                      value={item.unitPrice}
+                      onChange={(e) => setItems((prev) => prev.map((i, ix) => (ix === idx ? { ...i, unitPrice: Number(e.target.value) || 0 } : i)))}
+                      style={{ width: 90 }}
+                    />
+                  </td>
+                  <td style={{ fontWeight: 600 }}>{formatMoney(item.qty * item.unitPrice)}</td>
                   <td>
                     <button onClick={() => removeItem(item.name)} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer", fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text)", fontFamily: "var(--font-sans)" }}>
                       Remove
@@ -377,13 +526,13 @@ function ManualSaleEntryView() {
       <div className="card">
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.9rem", color: "var(--color-text)" }}>
-            <span>Sub total:</span><span>₦{subtotal.toLocaleString()}</span>
+            <span>Sub total:</span><span>{formatMoney(subtotal)}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.9rem", color: "var(--color-text)" }}>
-            <span>Tax (7.5%):</span><span>₦{tax.toLocaleString()}</span>
+            <span>Tax (7.5%):</span><span>{formatMoney(tax)}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.95rem", fontWeight: 700, color: "var(--color-heading)" }}>
-            <span>Total:</span><span>₦{total.toLocaleString()}</span>
+            <span>Total:</span><span>{formatMoney(total)}</span>
           </div>
         </div>
 
@@ -392,7 +541,7 @@ function ManualSaleEntryView() {
             <input className="input" type="number" value={amountReceived} onChange={(e) => setAmountReceived(Number(e.target.value) || 0)} />
           </Field>
           <Field label="Change">
-            <input className="input" value={`₦${change.toLocaleString()}`} readOnly />
+            <input className="input" value={formatMoney(change)} readOnly />
           </Field>
         </div>
 
@@ -414,9 +563,20 @@ function ManualSaleEntryView() {
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button style={outlineBtn}>Print Receipt</button>
-          <button style={outlineBtn}>Email Receipt</button>
-          <button style={outlineBtn}>Record Sale</button>
+          <button onClick={() => window.print()} disabled={!lastSaleId} style={{ ...outlineBtn, opacity: lastSaleId ? 1 : 0.5 }}>
+            Print Receipt
+          </button>
+          <button onClick={emailReceipt} disabled={!lastSaleId || isEmailingReceipt} style={{ ...outlineBtn, opacity: lastSaleId ? 1 : 0.5 }}>
+            {isEmailingReceipt ? "Sending…" : "Email Receipt"}
+          </button>
+          <button
+            className="btn btn-primary"
+            style={{ padding: "10px 20px", fontSize: "0.85rem", opacity: isCreatingSale || !items.length ? 0.6 : 1 }}
+            disabled={isCreatingSale || !items.length}
+            onClick={submit}
+          >
+            {isCreatingSale ? "Recording…" : "Record Sale"}
+          </button>
         </div>
       </div>
     </>
