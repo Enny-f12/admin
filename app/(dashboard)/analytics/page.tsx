@@ -1,68 +1,16 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, BarChart, Bar, Cell,
 } from "recharts";
 import type { TooltipProps } from "recharts";
 import type { ValueType, NameType } from "recharts/types/component/DefaultTooltipContent";
+import { useAnalyticsStore } from "@/store/useAnalyticsStore";
+import { AnalyticsRange, AnalyticsMetric } from "@/types/analytics.types";
+import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
 
-type Range = "7d" | "30d" | "6m" | "1y";
-type Metric = "revenue" | "orders";
-
-interface DataPoint { month: string; revenue: number; orders: number; }
-interface TopItem { rank: number; name: string; orders: number; revenue: number; }
-
-const DATA: Record<Range, DataPoint[]> = {
-  "7d": [
-    { month: "Mon", revenue: 12000, orders: 78 },
-    { month: "Tue", revenue: 9500, orders: 62 },
-    { month: "Wed", revenue: 14000, orders: 91 },
-    { month: "Thu", revenue: 11000, orders: 72 },
-    { month: "Fri", revenue: 18000, orders: 115 },
-    { month: "Sat", revenue: 22000, orders: 142 },
-    { month: "Sun", revenue: 16500, orders: 107 },
-  ],
-  "30d": [
-    { month: "Week 1", revenue: 52000, orders: 340 },
-    { month: "Week 2", revenue: 61000, orders: 390 },
-    { month: "Week 3", revenue: 58000, orders: 370 },
-    { month: "Week 4", revenue: 77000, orders: 430 },
-  ],
-  "6m": [
-    { month: "Jan", revenue: 120000, orders: 820 },
-    { month: "Feb", revenue: 150000, orders: 940 },
-    { month: "Mar", revenue: 170000, orders: 1100 },
-    { month: "Apr", revenue: 160000, orders: 1050 },
-    { month: "May", revenue: 200000, orders: 1280 },
-    { month: "Jun", revenue: 220000, orders: 1390 },
-    { month: "Jul", revenue: 248000, orders: 1530 },
-  ],
-  "1y": [
-    { month: "Aug", revenue: 90000, orders: 600 },
-    { month: "Sep", revenue: 95000, orders: 640 },
-    { month: "Oct", revenue: 108000, orders: 710 },
-    { month: "Nov", revenue: 115000, orders: 760 },
-    { month: "Dec", revenue: 140000, orders: 920 },
-    { month: "Jan", revenue: 120000, orders: 820 },
-    { month: "Feb", revenue: 150000, orders: 940 },
-    { month: "Mar", revenue: 170000, orders: 1100 },
-    { month: "Apr", revenue: 160000, orders: 1050 },
-    { month: "May", revenue: 200000, orders: 1280 },
-    { month: "Jun", revenue: 220000, orders: 1390 },
-    { month: "Jul", revenue: 248000, orders: 1530 },
-  ],
-};
-
-const TOP_ITEMS: TopItem[] = [
-  { rank: 1, name: "Inferno Burger", orders: 312, revenue: 50000 },
-  { rank: 2, name: "Jam Doughnut", orders: 245, revenue: 50000 },
-  { rank: 3, name: "Spicy Jollof Rice", orders: 189, revenue: 70000 },
-  { rank: 4, name: "Fried Rice", orders: 200, revenue: 70000 },
-  { rank: 5, name: "Peppersoup", orders: 167, revenue: 42000 },
-];
-
-const RANGE_OPTS: { key: Range; label: string }[] = [
+const RANGE_OPTS: { key: AnalyticsRange; label: string }[] = [
   { key: "7d", label: "7 days" },
   { key: "30d", label: "30 days" },
   { key: "6m", label: "6 months" },
@@ -72,15 +20,7 @@ const RANGE_OPTS: { key: Range; label: string }[] = [
 const RANK_COLORS = ["#E05C2A", "#F5A623", "#F5C842", "#D1D5DB", "#D1D5DB"];
 
 const fmt = (n: number) => "₦" + n.toLocaleString("en-NG");
-const fmtShort = (n: number) => n >= 1000 ? "₦" + Math.round(n / 1000) + "k" : "₦" + n;
-const sumField = (arr: DataPoint[], key: Metric) => arr.reduce((a, d) => a + d[key], 0);
-const calcChange = (arr: DataPoint[], key: Metric) => {
-  if (arr.length < 2) return 0;
-  const mid = Math.floor(arr.length / 2);
-  const a = arr.slice(0, mid).reduce((s, d) => s + d[key], 0);
-  const b = arr.slice(mid).reduce((s, d) => s + d[key], 0);
-  return a ? Math.round(((b - a) / a) * 100) : 0;
-};
+const fmtShort = (n: number) => (n >= 1000 ? "₦" + Math.round(n / 1000) + "k" : "₦" + n);
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 function IconRevenue() {
@@ -130,8 +70,7 @@ function TrendDown() {
 }
 
 // ── Custom Tooltip ────────────────────────────────────────────────────────────
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ChartTooltipProps = TooltipProps<ValueType, NameType> & { metric: Metric; label?: string | number; payload?: any };
+type ChartTooltipProps = TooltipProps<ValueType, NameType> & { metric: AnalyticsMetric; label?: string | number };
 
 function ChartTooltip({ active, payload, label, metric }: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
@@ -148,7 +87,9 @@ function ChartTooltip({ active, payload, label, metric }: ChartTooltipProps) {
 }
 
 // ── Stat Card ─────────────────────────────────────────────────────────────────
-function StatCard({ icon, iconBg, label, value, change }: { icon: React.ReactNode; iconBg: string; label: string; value: string; change: number }) {
+function StatCard({
+  icon, iconBg, label, value, change, loading,
+}: { icon: React.ReactNode; iconBg: string; label: string; value: string; change: number; loading?: boolean }) {
   const up = change >= 0;
   return (
     <div style={{ background: "#fff", border: "1px solid #F0F0F0", borderRadius: 16, padding: "18px 20px", display: "flex", flexDirection: "column" as const, gap: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
@@ -156,19 +97,25 @@ function StatCard({ icon, iconBg, label, value, change }: { icon: React.ReactNod
         <div style={{ width: 40, height: 40, borderRadius: 12, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center" }}>
           {icon}
         </div>
-        <span style={{
-          display: "flex", alignItems: "center", gap: 4,
-          fontSize: 11, fontWeight: 700,
-          padding: "4px 8px", borderRadius: 20,
-          background: up ? "#F0FDF4" : "#FFF1F2",
-          color: up ? "#16A34A" : "#DC2626",
-        }}>
-          {up ? <TrendUp /> : <TrendDown />}
-          {Math.abs(change)}%
-        </span>
+        {!loading && (
+          <span style={{
+            display: "flex", alignItems: "center", gap: 4,
+            fontSize: 11, fontWeight: 700,
+            padding: "4px 8px", borderRadius: 20,
+            background: up ? "#F0FDF4" : "#FFF1F2",
+            color: up ? "#16A34A" : "#DC2626",
+          }}>
+            {up ? <TrendUp /> : <TrendDown />}
+            {Math.abs(change)}%
+          </span>
+        )}
       </div>
       <div>
-        <p style={{ fontSize: 22, fontWeight: 800, color: "#111827", margin: "0 0 4px", lineHeight: 1 }}>{value}</p>
+        {loading ? (
+          <div style={{ marginBottom: 6 }}><SkeletonText width={100} height={22} /></div>
+        ) : (
+          <p style={{ fontSize: 22, fontWeight: 800, color: "#111827", margin: "0 0 4px", lineHeight: 1 }}>{value}</p>
+        )}
         <p style={{ fontSize: 12, color: "#9CA3AF", margin: 0 }}>{label}</p>
       </div>
     </div>
@@ -177,15 +124,23 @@ function StatCard({ icon, iconBg, label, value, change }: { icon: React.ReactNod
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function AnalyticsPage() {
-  const [range, setRange] = useState<Range>("6m");
-  const [metric, setMetric] = useState<Metric>("revenue");
+  const {
+    timeseries, timeseriesLoading, timeseriesError, fetchTimeseries,
+    summary, summaryLoading, summaryError, fetchSummary,
+    topItems, topItemsLoading, topItemsError, fetchTopItems,
+    exportReport, isExporting,
+  } = useAnalyticsStore();
 
-  const data = useMemo(() => DATA[range], [range]);
-  const totalRevenue = useMemo(() => sumField(data, "revenue"), [data]);
-  const totalOrders = useMemo(() => sumField(data, "orders"), [data]);
-  const avgOrder = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;
-  const revChange = useMemo(() => calcChange(data, "revenue"), [data]);
-  const ordChange = useMemo(() => calcChange(data, "orders"), [data]);
+  const [range, setRange] = useState<AnalyticsRange>("6m");
+  const [metric, setMetric] = useState<AnalyticsMetric>("revenue");
+
+  useEffect(() => {
+    fetchTimeseries({ range });
+    fetchSummary({ range });
+    fetchTopItems({ range, limit: 5 });
+  }, [range, fetchTimeseries, fetchSummary, fetchTopItems]);
+
+  const chartData = useMemo(() => timeseries ?? [], [timeseries]);
 
   return (
     <div style={{ margin: "0 auto" }}>
@@ -194,34 +149,55 @@ export default function AnalyticsPage() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
           <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-                Foodies 1 LEKKI
-            </p>
-            <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
-                ANALYTICS
-            </h1>
-          
-          <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0 }}>Every change is logged in with user, timestamp and overview</p>
+            Foodies 1 LEKKI
+          </p>
+          <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
+            ANALYTICS
+          </h1>
+          <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0 }}>Sales trends, order volume, and item performance over time</p>
         </div>
-        <button style={{ display: "flex", alignItems: "center", gap: 7, background: "#E05C2A", color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-          <IconDownload /> Export
+        <button
+          onClick={() => exportReport({ range, format: "csv" })}
+          disabled={isExporting}
+          style={{ display: "flex", alignItems: "center", gap: 7, background: "#E05C2A", color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: isExporting ? 0.6 : 1 }}
+        >
+          <IconDownload /> {isExporting ? "Exporting…" : "Export"}
         </button>
       </div>
 
       {/* Stat cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
-        <StatCard icon={<IconRevenue />} iconBg="#FFF0EB" label="Total Revenue" value={fmt(totalRevenue)} change={revChange} />
-        <StatCard icon={<IconOrders />} iconBg="#FFF7E6" label="Total Orders" value={totalOrders.toLocaleString()} change={ordChange} />
-        <StatCard icon={<IconAvg />} iconBg="#EFF6FF" label="Avg. Order Value" value={fmt(avgOrder)} change={Math.round((revChange + ordChange) / 2)} />
+        <StatCard
+          icon={<IconRevenue />} iconBg="#FFF0EB" label="Total Revenue" loading={summaryLoading}
+          value={summary ? fmt(summary.totalRevenue.amount) : "–"}
+          change={summary?.totalRevenue.changePercent ?? 0}
+        />
+        <StatCard
+          icon={<IconOrders />} iconBg="#FFF7E6" label="Total Orders" loading={summaryLoading}
+          value={summary ? summary.totalOrders.count.toLocaleString() : "–"}
+          change={summary?.totalOrders.changePercent ?? 0}
+        />
+        <StatCard
+          icon={<IconAvg />} iconBg="#EFF6FF" label="Avg. Order Value" loading={summaryLoading}
+          value={summary ? fmt(summary.avgOrderValue.amount) : "–"}
+          change={summary?.avgOrderValue.changePercent ?? 0}
+        />
       </div>
+
+      {!summaryLoading && summaryError && (
+        <p style={{ margin: "0 0 20px", fontSize: 13, color: "#9CA3AF" }}>
+          {/* TODO(BACKEND): GET /admin/analytics/summary not implemented — see request doc #2 */}
+          Summary data unavailable
+        </p>
+      )}
 
       {/* Chart card */}
       <div style={{ background: "#fff", border: "1px solid #F0F0F0", borderRadius: 16, padding: "20px", marginBottom: 20, boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
 
         {/* Chart controls */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" as const, gap: 12, marginBottom: 20 }}>
-          {/* Metric toggle */}
           <div style={{ display: "flex", gap: 6 }}>
-            {(["revenue", "orders"] as Metric[]).map((m) => (
+            {(["revenue", "orders"] as AnalyticsMetric[]).map((m) => (
               <button
                 key={m}
                 onClick={() => setMetric(m)}
@@ -239,7 +215,6 @@ export default function AnalyticsPage() {
             ))}
           </div>
 
-          {/* Range pills */}
           <div style={{ display: "flex", gap: 2, background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 10, padding: 3 }}>
             {RANGE_OPTS.map((r) => (
               <button
@@ -264,23 +239,36 @@ export default function AnalyticsPage() {
           {metric === "revenue" ? "Revenue" : "Order"} Overview
         </p>
 
-        <ResponsiveContainer width="100%" height={250}>
-          <LineChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
-            <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
-            <YAxis
-              tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false}
-              tickFormatter={metric === "revenue" ? fmtShort : (v: number) => String(v)}
-              width={52}
-            />
-            <Tooltip content={(props) => <ChartTooltip {...props} metric={metric} />} />
-            <Line
-              type="monotone" dataKey={metric} stroke="#E05C2A" strokeWidth={2.5}
-              dot={{ r: 4, fill: "#E05C2A", strokeWidth: 0 }}
-              activeDot={{ r: 6, fill: "#E05C2A", stroke: "#fff", strokeWidth: 2 }}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+        {timeseriesLoading && <Skeleton width="100%" height={250} radius={8} />}
+
+        {!timeseriesLoading && (timeseriesError || !chartData.length) && (
+          <div style={{ height: 250, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <p style={{ margin: 0, fontSize: 13, color: "#9CA3AF" }}>
+              {/* TODO(BACKEND): GET /admin/analytics/timeseries not implemented — see request doc #1 */}
+              No chart data available
+            </p>
+          </div>
+        )}
+
+        {!timeseriesLoading && !timeseriesError && chartData.length > 0 && (
+          <ResponsiveContainer width="100%" height={250}>
+            <LineChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
+              <YAxis
+                tick={{ fontSize: 11, fill: "#9CA3AF" }} axisLine={false} tickLine={false}
+                tickFormatter={metric === "revenue" ? fmtShort : (v: number) => String(v)}
+                width={52}
+              />
+              <Tooltip content={(props) => <ChartTooltip {...props} metric={metric} />} />
+              <Line
+                type="monotone" dataKey={metric} stroke="#E05C2A" strokeWidth={2.5}
+                dot={{ r: 4, fill: "#E05C2A", strokeWidth: 0 }}
+                activeDot={{ r: 6, fill: "#E05C2A", stroke: "#fff", strokeWidth: 2 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </div>
 
       {/* Bottom row */}
@@ -289,51 +277,83 @@ export default function AnalyticsPage() {
         {/* Top Selling Items */}
         <div style={{ background: "#fff", border: "1px solid #F0F0F0", borderRadius: 16, padding: "20px", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "#111827", margin: "0 0 16px" }}>Top Selling Items</p>
-          <div style={{ display: "flex", flexDirection: "column" as const, gap: 12 }}>
-            {TOP_ITEMS.map((item) => (
-              <div key={item.rank} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{
-                  width: 24, height: 24, borderRadius: "50%", flexShrink: 0,
-                  background: RANK_COLORS[item.rank - 1],
-                  color: item.rank <= 3 ? "#fff" : "#6B7280",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 11, fontWeight: 700,
-                }}>
-                  {item.rank}
+
+          {topItemsLoading && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <Skeleton width={24} height={24} radius={99} />
+                  <div style={{ flex: 1 }}><SkeletonText width="70%" height={12} /></div>
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: "#111827", margin: "0 0 1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{item.name}</p>
-                  <p style={{ fontSize: 11, color: "#9CA3AF", margin: 0 }}>{item.orders} orders</p>
+              ))}
+            </div>
+          )}
+
+          {!topItemsLoading && (topItemsError || !topItems?.length) && (
+            <p style={{ margin: 0, fontSize: 13, color: "#9CA3AF" }}>
+              {/* TODO(BACKEND): GET /admin/analytics/top-items not implemented — see request doc #3 */}
+              No item data available
+            </p>
+          )}
+
+          {!topItemsLoading && !topItemsError && topItems && topItems.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column" as const, gap: 12 }}>
+              {topItems.map((item) => (
+                <div key={item.rank} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{
+                    width: 24, height: 24, borderRadius: "50%", flexShrink: 0,
+                    background: RANK_COLORS[item.rank - 1] ?? "#D1D5DB",
+                    color: item.rank <= 3 ? "#fff" : "#6B7280",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 11, fontWeight: 700,
+                  }}>
+                    {item.rank}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: "#111827", margin: "0 0 1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{item.name}</p>
+                    <p style={{ fontSize: 11, color: "#9CA3AF", margin: 0 }}>{item.orders} orders</p>
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#E05C2A", flexShrink: 0 }}>{fmt(item.revenue)}</span>
                 </div>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "#E05C2A", flexShrink: 0 }}>{fmt(item.revenue)}</span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Revenue by Item bar chart */}
         <div style={{ background: "#fff", border: "1px solid #F0F0F0", borderRadius: 16, padding: "20px", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
           <p style={{ fontSize: 13, fontWeight: 700, color: "#111827", margin: "0 0 16px" }}>Revenue by Item</p>
-          <ResponsiveContainer width="100%" height={210}>
-            <BarChart data={TOP_ITEMS} layout="vertical" margin={{ top: 0, right: 4, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} tickFormatter={fmtShort} />
-              <YAxis
-                type="category" dataKey="name" width={88}
-                tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false}
-                tickFormatter={(v: string) => v.length > 13 ? v.slice(0, 13) + "…" : v}
-              />
-              <Tooltip
-                formatter={(value: ValueType | undefined) => [typeof value === "number" ? fmt(value) : value ?? "", "Revenue"]}
-                contentStyle={{ background: "#fff", border: "1px solid #F0F0F0", borderRadius: 12, fontSize: 12 }}
-              />
-              <Bar dataKey="revenue" radius={[0, 6, 6, 0] as [number, number, number, number]} maxBarSize={20}>
-                {TOP_ITEMS.map((_, i) => (
-                  <Cell key={i} fill={i === 0 ? "#E05C2A" : i === 1 ? "#F5A623" : i === 2 ? "#F5C842" : "#E5E7EB"} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+
+          {topItemsLoading && <Skeleton width="100%" height={210} radius={8} />}
+
+          {!topItemsLoading && (topItemsError || !topItems?.length) && (
+            <div style={{ height: 210, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <p style={{ margin: 0, fontSize: 13, color: "#9CA3AF" }}>No item data available</p>
+            </div>
+          )}
+
+          {!topItemsLoading && !topItemsError && topItems && topItems.length > 0 && (
+            <ResponsiveContainer width="100%" height={210}>
+              <BarChart data={topItems} layout="vertical" margin={{ top: 0, right: 4, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} tickFormatter={fmtShort} />
+                <YAxis
+                  type="category" dataKey="name" width={88}
+                  tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false}
+                  tickFormatter={(v: string) => (v.length > 13 ? v.slice(0, 13) + "…" : v)}
+                />
+                <Tooltip
+                  formatter={(value: ValueType | undefined) => [typeof value === "number" ? fmt(value) : value ?? "", "Revenue"]}
+                  contentStyle={{ background: "#fff", border: "1px solid #F0F0F0", borderRadius: 12, fontSize: 12 }}
+                />
+                <Bar dataKey="revenue" radius={[0, 6, 6, 0] as [number, number, number, number]} maxBarSize={20}>
+                  {topItems.map((_, i) => (
+                    <Cell key={i} fill={i === 0 ? "#E05C2A" : i === 1 ? "#F5A623" : i === 2 ? "#F5C842" : "#E5E7EB"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
     </div>

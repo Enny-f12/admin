@@ -1,43 +1,15 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAccountingStore } from "@/store/useAccountingStore";
+import { MarginItem } from "@/types/accounting.types";
+import {  SkeletonText } from "@/components/ui/Skeleton";
 
-interface MarginItem {
-  id: number;
-  item: string;
-  sellingPrice: number;
-  costPrice: number;
-  margin: number;
-  type: "Food" | "Drink";
-}
-
-interface SaleRow {
-  id: number;
-  time: string;
-  source: string;
-  items: string;
-  total: number;
-  recordedBy: string;
-}
-
-const MARGIN_ITEMS: MarginItem[] = [
-  { id: 1, item: "Jollof Rice", sellingPrice: 3000, costPrice: 1200, margin: 60, type: "Food" },
-  { id: 2, item: "Beef", sellingPrice: 2000, costPrice: 1000, margin: 50, type: "Food" },
-  { id: 3, item: "Can Coke", sellingPrice: 1000, costPrice: 800, margin: 20, type: "Drink" },
-];
-
-const RECENT_SALES: SaleRow[] = [
-  { id: 1, time: "10:15 AM", source: "Manual Sale", items: "Jollof x2, Coke x2", total: 7600, recordedBy: "Sarah J." },
-  { id: 2, time: "10:00 AM", source: "POS (Auto)", items: "Egusi x1", total: 3500, recordedBy: "Moniepoint" },
-  { id: 3, time: "9:45 AM", source: "Mobile App", items: "Fried Rice x1", total: 3200, recordedBy: "System" },
-];
-
-const fmt = (n: number) => "₦" + n.toLocaleString("en-NG");
+const fmt = (n: number | null | undefined) =>
+  n === null || n === undefined || !Number.isFinite(n) ? "–" : "₦" + n.toLocaleString("en-NG");
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 function IconDollar() {
-  return (
-    <span style={{ fontWeight: 800, fontSize: 18, lineHeight: 1, color: "#fff" }}>₦</span>
-  );
+  return <span style={{ fontWeight: 800, fontSize: 18, lineHeight: 1, color: "#fff" }}>₦</span>;
 }
 function IconArrowUp() {
   return (
@@ -50,20 +22,6 @@ function IconArrowDown() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-function IconChevronDown({ color = "#9CA3AF" }: { color?: string }) {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-function IconPlus() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5 12h14M12 5v14" />
     </svg>
   );
 }
@@ -110,7 +68,7 @@ const TD_STYLE: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-function ReadonlyField({ label, value }: { label: string; value: string }) {
+function ReadonlyField({ label, value, loading }: { label: string; value: string; loading?: boolean }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{label}</label>
@@ -121,34 +79,15 @@ function ReadonlyField({ label, value }: { label: string; value: string }) {
           fontSize: 14, color: "#374151",
         }}
       >
-        {value}
+        {loading ? <SkeletonText width="50%" height={13} /> : value}
       </div>
     </div>
   );
 }
 
-function DropdownField({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{label}</label>
-      <button
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          height: 42, padding: "0 14px", width: "100%",
-          background: "#FAFAFA", border: "1px solid #EBEBEB", borderRadius: 8,
-          fontSize: 14, color: "#374151", cursor: "pointer",
-        }}
-      >
-        {value}
-        <IconChevronDown />
-      </button>
-    </div>
-  );
-}
-
 function MetricCard({
-  label, value, change, positive,
-}: { label: string; value: string; change: string; positive: boolean }) {
+  label, value, change, positive, loading,
+}: { label: string; value: string; change: string; positive: boolean; loading?: boolean }) {
   return (
     <div style={{ ...CARD, padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -160,18 +99,24 @@ function MetricCard({
         >
           <IconDollar />
         </div>
-        <span
-          style={{
-            display: "flex", alignItems: "center", gap: 3,
-            fontSize: 12.5, fontWeight: 700, color: positive ? "#16A34A" : "#DC2626",
-          }}
-        >
-          {change} {positive ? <IconArrowUp /> : <IconArrowDown />}
-        </span>
+        {!loading && (
+          <span
+            style={{
+              display: "flex", alignItems: "center", gap: 3,
+              fontSize: 12.5, fontWeight: 700, color: positive ? "#16A34A" : "#DC2626",
+            }}
+          >
+            {change} {positive ? <IconArrowUp /> : <IconArrowDown />}
+          </span>
+        )}
       </div>
       <div>
         <p style={{ fontSize: 13, color: "#9CA3AF", margin: "0 0 4px" }}>{label}</p>
-        <p style={{ fontSize: "1.4rem", fontWeight: 700, color: "#111827", margin: 0 }}>{value}</p>
+        {loading ? (
+          <div style={{ marginTop: 4 }}><SkeletonText width={90} height={22} /></div>
+        ) : (
+          <p style={{ fontSize: "1.4rem", fontWeight: 700, color: "#111827", margin: 0 }}>{value}</p>
+        )}
         <p style={{ fontSize: 11.5, color: "#B0B0B0", margin: "4px 0 0" }}>vs last period</p>
       </div>
     </div>
@@ -196,8 +141,11 @@ function SectionCard({
 
 // ── Cost & Profit Margin Configuration view ─────────────────────────────────
 function ItemConfigView({
-  item, onCancel, onSave,
-}: { item: MarginItem; onCancel: () => void; onSave: () => void }) {
+  item, onCancel, onSave, isSaving,
+}: { item: MarginItem; onCancel: () => void; onSave: (costPrice: number) => void; isSaving: boolean }) {
+  const [costPrice, setCostPrice] = useState(item.costPrice);
+  const margin = item.sellingPrice > 0 ? Math.round(((item.sellingPrice - costPrice) / item.sellingPrice) * 100) : 0;
+
   return (
     <div style={{ margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24 }}>
@@ -212,25 +160,29 @@ function ItemConfigView({
             Financials, profit analysis and VAT
           </p>
         </div>
-        <button
-          style={{
-            display: "flex", alignItems: "center", gap: 8,
-            background: "#E05C2A", color: "#fff", border: "none",
-            borderRadius: 10, padding: "11px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer",
-            whiteSpace: "nowrap",
-          }}
-        >
-          <IconPlus /> Add Item
-        </button>
       </div>
 
       <div style={{ ...CARD, padding: 24, maxWidth: 560 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          <DropdownField label="Item" value={item.item} />
-          <DropdownField label="Type" value={item.type} />
+          <ReadonlyField label="Item" value={item.itemName} />
+          <ReadonlyField label="Type" value={item.type} />
           <ReadonlyField label="Selling Price" value={fmt(item.sellingPrice)} />
-          <ReadonlyField label="Cost Price" value={fmt(item.costPrice)} />
-          <ReadonlyField label="Profit Margin" value={`${item.margin}%`} />
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Cost Price</label>
+            <input
+              type="number"
+              value={costPrice}
+              onChange={(e) => setCostPrice(Number(e.target.value) || 0)}
+              style={{
+                height: 42, padding: "0 14px",
+                background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8,
+                fontSize: 14, color: "#374151",
+              }}
+            />
+          </div>
+
+          <ReadonlyField label="Profit Margin" value={`${margin}%`} />
 
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <IconAlert />
@@ -249,13 +201,15 @@ function ItemConfigView({
               Cancel
             </button>
             <button
-              onClick={onSave}
+              onClick={() => onSave(costPrice)}
+              disabled={isSaving}
               style={{
                 background: "#E10B1C", color: "#fff", border: "none",
-                borderRadius: 10, padding: "11px 22px", fontSize: 14, fontWeight: 600, cursor: "pointer",
+                borderRadius: 10, padding: "11px 22px", fontSize: 14, fontWeight: 600,
+                cursor: isSaving ? "default" : "pointer", opacity: isSaving ? 0.6 : 1,
               }}
             >
-              Save
+              {isSaving ? "Saving…" : "Save"}
             </button>
           </div>
         </div>
@@ -276,21 +230,45 @@ function ItemConfigView({
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
+const START_DATE = "2026-05-01";
+const END_DATE = "2026-05-15";
+
 export default function AccountingPage() {
+  const {
+    summary, summaryLoading, summaryError, fetchSummary,
+    marginItems, marginItemsLoading, marginItemsError, fetchMarginItems,
+    updateItemCostPrice, isSavingCostPrice,
+    recentSales, recentSalesLoading, recentSalesError, fetchRecentSales,
+  } = useAccountingStore();
+
   const [view, setView] = useState<"dashboard" | "edit">("dashboard");
-  const [activeItem, setActiveItem] = useState<MarginItem>(MARGIN_ITEMS[0]);
+  const [activeItem, setActiveItem] = useState<MarginItem | null>(null);
+
+  useEffect(() => {
+    const filters = { startDate: START_DATE, endDate: END_DATE };
+    fetchSummary(filters);
+    fetchMarginItems({ ...filters, limit: 5 });
+    fetchRecentSales({ ...filters, limit: 5 });
+  }, [fetchSummary, fetchMarginItems, fetchRecentSales]);
 
   const openItem = (item: MarginItem) => {
     setActiveItem(item);
     setView("edit");
   };
 
-  if (view === "edit") {
+  const handleSave = async (costPrice: number) => {
+    if (!activeItem) return;
+    const ok = await updateItemCostPrice(activeItem.id, costPrice);
+    if (ok) setView("dashboard");
+  };
+
+  if (view === "edit" && activeItem) {
     return (
       <ItemConfigView
         item={activeItem}
+        isSaving={isSavingCostPrice}
         onCancel={() => setView("dashboard")}
-        onSave={() => setView("dashboard")}
+        onSave={handleSave}
       />
     );
   }
@@ -311,8 +289,8 @@ export default function AccountingPage() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 16 }}>
-          <DropdownField label="Period" value="May 1, 2026" />
-          <DropdownField label="To" value="May 15, 2026" />
+          <ReadonlyField label="Period" value={START_DATE} />
+          <ReadonlyField label="To" value={END_DATE} />
         </div>
       </div>
 
@@ -323,18 +301,46 @@ export default function AccountingPage() {
           gap: 16, marginBottom: 20,
         }}
       >
-        <MetricCard label="Total Sales" value={fmt(1245000)} change="+15%" positive />
-        <MetricCard label="COGS" value={fmt(490000)} change="+8%" positive />
-        <MetricCard label="Gross Profit" value={fmt(755000)} change="+18%" positive />
-        <MetricCard label="Wastage" value={fmt(12500)} change="-5%" positive={false} />
+        <MetricCard
+          label="Total Sales" loading={summaryLoading}
+          value={fmt(summary?.totalSales.amount)}
+          change={summary ? `${summary.totalSales.changePercent > 0 ? "+" : ""}${summary.totalSales.changePercent}%` : "–"}
+          positive={(summary?.totalSales.changePercent ?? 0) >= 0}
+        />
+        <MetricCard
+          label="COGS" loading={summaryLoading}
+          value={fmt(summary?.cogs.amount)}
+          change={summary ? `${summary.cogs.changePercent > 0 ? "+" : ""}${summary.cogs.changePercent}%` : "–"}
+          positive={(summary?.cogs.changePercent ?? 0) >= 0}
+        />
+        <MetricCard
+          label="Gross Profit" loading={summaryLoading}
+          value={fmt(summary?.grossProfit.amount)}
+          change={summary ? `${summary.grossProfit.changePercent > 0 ? "+" : ""}${summary.grossProfit.changePercent}%` : "–"}
+          positive={(summary?.grossProfit.changePercent ?? 0) >= 0}
+        />
+        <MetricCard
+          label="Wastage" loading={summaryLoading}
+          value={fmt(summary?.wastage.amount)}
+          change={summary ? `${summary.wastage.changePercent > 0 ? "+" : ""}${summary.wastage.changePercent}%` : "–"}
+          positive={(summary?.wastage.changePercent ?? 0) < 0}
+        />
       </div>
+
+      {!summaryLoading && summaryError && (
+        <div style={{ ...CARD, padding: 16, marginBottom: 20 }}>
+          <p style={{ margin: 0, fontSize: 13, color: "#9CA3AF" }}>
+            {/* TODO(BACKEND): GET /admin/accounting/summary not implemented — see request doc #1 */}
+            Summary data unavailable
+          </p>
+        </div>
+      )}
 
       {/* Profit margin by item */}
       <SectionCard
         title="PROFIT MARGIN BY ITEM"
         action={
           <button
-            onClick={() => setView("edit")}
             style={{ background: "none", border: "none", cursor: "pointer", color: "#E10B1C", fontSize: 12.5, fontWeight: 700 }}
           >
             VIEW ALL
@@ -354,16 +360,33 @@ export default function AccountingPage() {
               </tr>
             </thead>
             <tbody>
-              {MARGIN_ITEMS.map((m) => (
+              {marginItemsLoading && Array.from({ length: 3 }).map((_, i) => (
+                <tr key={i}>
+                  {Array.from({ length: 6 }).map((_, j) => (
+                    <td key={j} style={TD_STYLE}><SkeletonText width="70%" height={12} /></td>
+                  ))}
+                </tr>
+              ))}
+
+              {!marginItemsLoading && (marginItemsError || !marginItems?.length) && (
+                <tr>
+                  <td colSpan={6} style={{ ...TD_STYLE, textAlign: "center", color: "#9CA3AF" }}>
+                    {/* TODO(BACKEND): GET /admin/accounting/item-margins not implemented — see request doc #2 */}
+                    No margin data available
+                  </td>
+                </tr>
+              )}
+
+              {!marginItemsLoading && !marginItemsError && marginItems?.map((m) => (
                 <tr
                   key={m.id}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#FAFAFA")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
-                  <td style={{ ...TD_STYLE, fontWeight: 700, color: "#111827" }}>{m.item}</td>
+                  <td style={{ ...TD_STYLE, fontWeight: 700, color: "#111827" }}>{m.itemName}</td>
                   <td style={TD_STYLE}>{fmt(m.sellingPrice)}</td>
                   <td style={TD_STYLE}>{fmt(m.costPrice)}</td>
-                  <td style={TD_STYLE}>{m.margin}%</td>
+                  <td style={TD_STYLE}>{m.marginPercent}%</td>
                   <td style={{ ...TD_STYLE, fontWeight: 600 }}>{fmt(m.sellingPrice - m.costPrice)}</td>
                   <td style={{ ...TD_STYLE, textAlign: "center" }}>
                     <button
@@ -387,17 +410,17 @@ export default function AccountingPage() {
           <div>
             <p style={{ fontSize: 13, fontWeight: 600, color: "#111827", margin: "0 0 12px" }}>Food Items (Prepared in-house)</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <ReadonlyField label="Revenue" value={fmt(1000000)} />
-              <ReadonlyField label="COGS" value={fmt(420000)} />
-              <ReadonlyField label="Margin %" value="62" />
+              <ReadonlyField label="Revenue" loading={summaryLoading} value={fmt(summary?.cogsBreakdown.food.revenue)} />
+              <ReadonlyField label="COGS" loading={summaryLoading} value={fmt(summary?.cogsBreakdown.food.cogs)} />
+              <ReadonlyField label="Margin %" loading={summaryLoading} value={summary ? `${summary.cogsBreakdown.food.marginPercent}` : "–"} />
             </div>
           </div>
           <div>
             <p style={{ fontSize: 13, fontWeight: 600, color: "#111827", margin: "0 0 12px" }}>Drinks (Sold as received)</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <ReadonlyField label="Revenue" value={fmt(145000)} />
-              <ReadonlyField label="COGS" value={fmt(70000)} />
-              <ReadonlyField label="Margin %" value="52" />
+              <ReadonlyField label="Revenue" loading={summaryLoading} value={fmt(summary?.cogsBreakdown.drinks.revenue)} />
+              <ReadonlyField label="COGS" loading={summaryLoading} value={fmt(summary?.cogsBreakdown.drinks.cogs)} />
+              <ReadonlyField label="Margin %" loading={summaryLoading} value={summary ? `${summary.cogsBreakdown.drinks.marginPercent}` : "–"} />
             </div>
           </div>
         </div>
@@ -406,39 +429,45 @@ export default function AccountingPage() {
       {/* Daily stock movement */}
       <SectionCard title="DAILY STOCK MOVEMENT">
         <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 360 }}>
-          <ReadonlyField label="Opening Stock (May 1)" value={fmt(380000)} />
-          <ReadonlyField label="+ Purchases/ Deliveries" value={fmt(120000)} />
-          <ReadonlyField label="- COGS" value={fmt(450000)} />
-          <ReadonlyField label="- Wastage" value={fmt(12500)} />
-          <ReadonlyField label="Closing Stock (May 15)" value={fmt(37500)} />
+          <ReadonlyField label={`Opening Stock (${START_DATE})`} loading={summaryLoading} value={fmt(summary?.stockMovement.openingStock)} />
+          <ReadonlyField label="+ Purchases/ Deliveries" loading={summaryLoading} value={fmt(summary?.stockMovement.purchases)} />
+          <ReadonlyField label="- COGS" loading={summaryLoading} value={fmt(summary?.stockMovement.cogs)} />
+          <ReadonlyField label="- Wastage" loading={summaryLoading} value={fmt(summary?.stockMovement.wastage)} />
+          <ReadonlyField label={`Closing Stock (${END_DATE})`} loading={summaryLoading} value={fmt(summary?.stockMovement.closingStock)} />
         </div>
       </SectionCard>
 
       {/* VAT collected */}
       <SectionCard title="VAT COLLECTED REPORT">
         <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 360 }}>
-          <ReadonlyField label="Total Sales" value={fmt(1245000)} />
-          <ReadonlyField label="VAT (7.5%)" value={fmt(93375)} />
-          <DropdownField label="Remittance Due" value="May 16, 2026" />
+          <ReadonlyField label="Total Sales" loading={summaryLoading} value={fmt(summary?.vat.totalSales)} />
+          <ReadonlyField label={`VAT (${summary?.vat.vatRate ?? "–"}%)`} loading={summaryLoading} value={fmt(summary?.vat.vatAmount)} />
+          <ReadonlyField label="Remittance Due" loading={summaryLoading} value={summary?.vat.remittanceDueDate ?? "–"} />
         </div>
       </SectionCard>
 
       {/* Sales by payment method */}
       <SectionCard title="SALES BY PAYMENT METHOD">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16 }}>
-          <ReadonlyField label="Mobile App (%)" value="45" />
-          <ReadonlyField label="POS (%)" value="35" />
-          <ReadonlyField label="Cash (%)" value="15" />
-          <ReadonlyField label="Bank Transfer (%)" value="5" />
+          <ReadonlyField label="Mobile App (%)" loading={summaryLoading} value={summary ? `${summary.paymentMethodBreakdown.mobileApp}` : "–"} />
+          <ReadonlyField label="POS (%)" loading={summaryLoading} value={summary ? `${summary.paymentMethodBreakdown.pos}` : "–"} />
+          <ReadonlyField label="Cash (%)" loading={summaryLoading} value={summary ? `${summary.paymentMethodBreakdown.cash}` : "–"} />
+          <ReadonlyField label="Bank Transfer (%)" loading={summaryLoading} value={summary ? `${summary.paymentMethodBreakdown.bankTransfer}` : "–"} />
         </div>
       </SectionCard>
 
       {/* Wastage breakdown */}
       <SectionCard title="WASTAGE BREAKDOWN">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
-          <ReadonlyField label="Spoiled/Expired" value={`${fmt(75000)}  (60%)`} />
-          <ReadonlyField label="Damaged" value={`${fmt(3000)}  (24%)`} />
-          <ReadonlyField label="Other" value={fmt(2000)} />
+          <ReadonlyField
+            label="Spoiled/Expired" loading={summaryLoading}
+            value={summary ? `${fmt(summary.wastageBreakdown.spoiledExpired.amount)}  (${summary.wastageBreakdown.spoiledExpired.percent}%)` : "–"}
+          />
+          <ReadonlyField
+            label="Damaged" loading={summaryLoading}
+            value={summary ? `${fmt(summary.wastageBreakdown.damaged.amount)}  (${summary.wastageBreakdown.damaged.percent}%)` : "–"}
+          />
+          <ReadonlyField label="Other" loading={summaryLoading} value={fmt(summary?.wastageBreakdown.other.amount)} />
         </div>
       </SectionCard>
 
@@ -463,7 +492,24 @@ export default function AccountingPage() {
               </tr>
             </thead>
             <tbody>
-              {RECENT_SALES.map((s) => (
+              {recentSalesLoading && Array.from({ length: 3 }).map((_, i) => (
+                <tr key={i}>
+                  {Array.from({ length: 5 }).map((_, j) => (
+                    <td key={j} style={TD_STYLE}><SkeletonText width="70%" height={12} /></td>
+                  ))}
+                </tr>
+              ))}
+
+              {!recentSalesLoading && (recentSalesError || !recentSales?.length) && (
+                <tr>
+                  <td colSpan={5} style={{ ...TD_STYLE, textAlign: "center", color: "#9CA3AF" }}>
+                    {/* TODO(BACKEND): GET /admin/accounting/recent-sales not implemented — see request doc #4 */}
+                    No recent sales available
+                  </td>
+                </tr>
+              )}
+
+              {!recentSalesLoading && !recentSalesError && recentSales?.map((s) => (
                 <tr
                   key={s.id}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "#FAFAFA")}

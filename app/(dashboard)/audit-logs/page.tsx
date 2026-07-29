@@ -1,44 +1,24 @@
 "use client";
-import { useState } from "react";
-
-interface LogEntry {
-  id: number;
-  timestamp: string;
-  user: string;
-  branch: string;
-  action: string;
-  item: string;
-}
-
-const LOGS: LogEntry[] = [
-  { id: 1, timestamp: "May 15, 08:35", user: "Sarah Johnson", branch: "Lekki 1", action: "Morning Count", item: "All Dish" },
-  { id: 2, timestamp: "May 14, 14:30", user: "John Manager", branch: "Lekki 1", action: "Delivery Add", item: "Egusi" },
-  { id: 3, timestamp: "May 14, 12:00", user: "Moniepoint API", branch: "Lekki 1", action: "POS Sale", item: "Jollof rice, Chicken" },
-  { id: 4, timestamp: "May 14, 11:30", user: "Micheal Emmanuel", branch: "Lekki 2", action: "Order Taker", item: "Jollof rice, Chicken" },
-];
+import { useEffect, useState } from "react";
+import { useAuditLogStore } from "@/store/useAuditLogsStore";
+import { AuditLogExportFormat } from "@/types/audit-log.types";
+import { SkeletonText } from "@/components/ui/Skeleton";
 
 const ACTION_STYLES: Record<string, { bg: string; text: string }> = {
   "Morning Count": { bg: "#EFF6FF", text: "#2563EB" },
   "Delivery Add": { bg: "#F0FDF4", text: "#16A34A" },
   "POS Sale": { bg: "#FFF7ED", text: "#E05C2A" },
   "Order Taker": { bg: "#FAF5FF", text: "#7C3AED" },
+  "Stock Adjustment": { bg: "#FEF3C7", text: "#B45309" },
+  "Reservation Update": { bg: "#ECFEFF", text: "#0891B2" },
 };
 
-// ── Icons ─────────────────────────────────────────────────────────────────────
 function IconFilter() {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#374151" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <line x1="4" x2="14" y1="6" y2="6" /><line x1="4" x2="21" y1="12" y2="12" /><line x1="4" x2="10" y1="18" y2="18" />
       <circle cx="17" cy="6" r="2" fill="#374151" stroke="none" />
-      <circle cx="17" cy="12" r="0" />
       <circle cx="14" cy="18" r="2" fill="#374151" stroke="none" />
-    </svg>
-  );
-}
-function IconChevronDown() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m6 9 6 6 6-6" />
     </svg>
   );
 }
@@ -57,59 +37,70 @@ function IconPrinter() {
   );
 }
 
-// ── Select ────────────────────────────────────────────────────────────────────
-function FilterSelect({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
-      <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{label}</label>
-      <button
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          gap: 8, height: 42, padding: "0 12px",
-          background: "#FAFAFA", border: "1px solid #EBEBEB", borderRadius: 8,
-          fontSize: 13.5, color: "#374151", cursor: "pointer", width: "100%",
-        }}
-      >
-        {value}
-        <IconChevronDown />
-      </button>
-    </div>
-  );
-}
+const TH_STYLE: React.CSSProperties = {
+  padding: "14px 20px",
+  fontSize: 13,
+  fontWeight: 600,
+  color: "#6B7280",
+  textAlign: "left",
+  whiteSpace: "nowrap",
+  borderBottom: "1px solid #F0F0F0",
+  background: "#fff",
+};
 
-const EXPORTS = [
-  { label: "Export to CSV", icon: true },
-  { label: "Export to Excel", icon: true },
-  { label: "Export to PDF", icon: true },
-  { label: "Print Audit Report", icon: false },
-];
+const TD_STYLE: React.CSSProperties = {
+  padding: "18px 20px",
+  fontSize: 14,
+  color: "#374151",
+  borderBottom: "1px solid #F5F5F5",
+  whiteSpace: "nowrap",
+};
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
 export default function AuditLogsPage() {
-  const [logs] = useState<LogEntry[]>(LOGS);
+  const {
+    logs, logsTotal, logsLoading, logsError, fetchLogs,
+    actionTypes, fetchActionTypes,
+    users, fetchUsers,
+    exportLogs, isExporting,
+  } = useAuditLogStore();
 
-  const TH_STYLE: React.CSSProperties = {
-    padding: "14px 20px",
-    fontSize: 13,
-    fontWeight: 600,
-    color: "#6B7280",
-    textAlign: "left",
-    whiteSpace: "nowrap",
-    borderBottom: "1px solid #F0F0F0",
-    background: "#fff",
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [actionType, setActionType] = useState("");
+  const [userId, setUserId] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
+
+  useEffect(() => {
+    fetchActionTypes();
+    fetchUsers();
+  }, [fetchActionTypes, fetchUsers]);
+
+  useEffect(() => {
+    fetchLogs({
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+      actionType: actionType || undefined,
+      userId: userId || undefined,
+      page,
+      limit: PAGE_SIZE,
+    });
+  }, [startDate, endDate, actionType, userId, page, fetchLogs]);
+
+  const runExport = (format: AuditLogExportFormat) => {
+    exportLogs({
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+      actionType: actionType || undefined,
+      userId: userId || undefined,
+      format,
+    });
   };
 
-  const TD_STYLE: React.CSSProperties = {
-    padding: "18px 20px",
-    fontSize: 14,
-    color: "#374151",
-    borderBottom: "1px solid #F5F5F5",
-    whiteSpace: "nowrap",
-  };
+  const totalPages = Math.max(1, Math.ceil(logsTotal / PAGE_SIZE));
 
   return (
     <div style={{ margin: "0 auto" }}>
-      {/* Page title */}
       <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
         Foodies 1 LEKKI
       </p>
@@ -120,7 +111,6 @@ export default function AuditLogsPage() {
         Every change is logged with user, timestamp and target
       </p>
 
-      {/* Filter card */}
       <div
         style={{
           background: "#fff", borderRadius: 16, border: "1px solid #EBEBEB",
@@ -138,14 +128,53 @@ export default function AuditLogsPage() {
             gap: 16,
           }}
         >
-          <FilterSelect label="Date Range" value="May" />
-          <FilterSelect label="Branch" value="All" />
-          <FilterSelect label="Action Type" value="All" />
-          <FilterSelect label="User" value="All" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>From</label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => { setStartDate(e.target.value); setPage(1); }}
+              style={{ height: 42, padding: "0 12px", background: "#FAFAFA", border: "1px solid #EBEBEB", borderRadius: 8, fontSize: 13.5, color: "#374151" }}
+            />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>To</label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => { setEndDate(e.target.value); setPage(1); }}
+              style={{ height: 42, padding: "0 12px", background: "#FAFAFA", border: "1px solid #EBEBEB", borderRadius: 8, fontSize: 13.5, color: "#374151" }}
+            />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Action Type</label>
+            <select
+              value={actionType}
+              onChange={(e) => { setActionType(e.target.value); setPage(1); }}
+              style={{ height: 42, padding: "0 12px", background: "#FAFAFA", border: "1px solid #EBEBEB", borderRadius: 8, fontSize: 13.5, color: "#374151" }}
+            >
+              <option value="">All</option>
+              {actionTypes?.map((a) => (
+                <option key={a.value} value={a.value}>{a.label}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>User</label>
+            <select
+              value={userId}
+              onChange={(e) => { setUserId(e.target.value); setPage(1); }}
+              style={{ height: 42, padding: "0 12px", background: "#FAFAFA", border: "1px solid #EBEBEB", borderRadius: 8, fontSize: 13.5, color: "#374151" }}
+            >
+              <option value="">All</option>
+              {users?.map((u) => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
-      {/* Table card */}
       <div
         style={{
           background: "#fff", borderRadius: 16, border: "1px solid #EBEBEB",
@@ -164,62 +193,102 @@ export default function AuditLogsPage() {
               </tr>
             </thead>
             <tbody>
-              {logs.length === 0 ? (
+              {logsLoading && Array.from({ length: 6 }).map((_, i) => (
+                <tr key={i}>
+                  {Array.from({ length: 5 }).map((_, j) => (
+                    <td key={j} style={TD_STYLE}><SkeletonText width="75%" height={12} /></td>
+                  ))}
+                </tr>
+              ))}
+
+              {!logsLoading && (logsError || !logs?.length) && (
                 <tr>
                   <td colSpan={5} style={{ ...TD_STYLE, textAlign: "center", padding: "48px 0", color: "#9CA3AF" }}>
                     No audit entries found.
                   </td>
                 </tr>
-              ) : (
-                logs.map((l) => {
-                  const chip = ACTION_STYLES[l.action] ?? { bg: "#F3F4F6", text: "#374151" };
-                  return (
-                    <tr
-                      key={l.id}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "#FAFAFA")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                    >
-                      <td style={{ ...TD_STYLE, fontWeight: 600, color: "#111827" }}>{l.timestamp}</td>
-                      <td style={TD_STYLE}>{l.user}</td>
-                      <td style={TD_STYLE}>{l.branch}</td>
-                      <td style={TD_STYLE}>
-                        <span
-                          style={{
-                            display: "inline-block", padding: "4px 10px", borderRadius: 999,
-                            fontSize: 12.5, fontWeight: 600, background: chip.bg, color: chip.text,
-                          }}
-                        >
-                          {l.action}
-                        </span>
-                      </td>
-                      <td style={TD_STYLE}>{l.item}</td>
-                    </tr>
-                  );
-                })
               )}
+
+              {!logsLoading && !logsError && logs?.map((l) => {
+                const chip = ACTION_STYLES[l.action] ?? { bg: "#F3F4F6", text: "#374151" };
+                return (
+                  <tr
+                    key={l.id}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#FAFAFA")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <td style={{ ...TD_STYLE, fontWeight: 600, color: "#111827" }}>{l.timestamp}</td>
+                    <td style={TD_STYLE}>{l.userName}</td>
+                    <td style={TD_STYLE}>{l.branch}</td>
+                    <td style={TD_STYLE}>
+                      <span
+                        style={{
+                          display: "inline-block", padding: "4px 10px", borderRadius: 999,
+                          fontSize: 12.5, fontWeight: 600, background: chip.bg, color: chip.text,
+                        }}
+                      >
+                        {l.action}
+                      </span>
+                    </td>
+                    <td style={TD_STYLE}>{l.item}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
+
+        {!logsLoading && !logsError && logs && logs.length > 0 && (
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 14, padding: "14px 20px", fontSize: 13 }}>
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} style={{ background: "none", border: "none", cursor: page === 1 ? "default" : "pointer", color: page === 1 ? "#D1D5DB" : "#E05C2A", fontWeight: 600 }}>
+              Previous
+            </button>
+            <span style={{ color: "#9CA3AF" }}>Page {page} of {totalPages}</span>
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} style={{ background: "none", border: "none", cursor: page === totalPages ? "default" : "pointer", color: page === totalPages ? "#D1D5DB" : "#E05C2A", fontWeight: 600 }}>
+              Next
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Export actions */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        {EXPORTS.map((e) => (
+        {([
+          { label: "Export to CSV", format: "csv" as AuditLogExportFormat },
+          { label: "Export to Excel", format: "xlsx" as AuditLogExportFormat },
+          { label: "Export to PDF", format: "pdf" as AuditLogExportFormat },
+        ]).map((e) => (
           <button
             key={e.label}
+            onClick={() => runExport(e.format)}
+            disabled={isExporting}
             style={{
               display: "flex", alignItems: "center", gap: 8,
               padding: "10px 16px", borderRadius: 8,
               border: "1px solid #E5E7EB", background: "#fff",
-              fontSize: 13.5, fontWeight: 500, color: "#374151", cursor: "pointer",
+              fontSize: 13.5, fontWeight: 500, color: "#374151", cursor: isExporting ? "default" : "pointer",
+              opacity: isExporting ? 0.6 : 1,
             }}
-            onMouseEnter={(ev) => (ev.currentTarget.style.background = "#FAFAFA")}
+            onMouseEnter={(ev) => !isExporting && (ev.currentTarget.style.background = "#FAFAFA")}
             onMouseLeave={(ev) => (ev.currentTarget.style.background = "#fff")}
           >
-            {e.icon ? <IconDownload /> : <IconPrinter />}
+            <IconDownload />
             {e.label}
           </button>
         ))}
+        <button
+          onClick={() => window.print()}
+          style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "10px 16px", borderRadius: 8,
+            border: "1px solid #E5E7EB", background: "#fff",
+            fontSize: 13.5, fontWeight: 500, color: "#374151", cursor: "pointer",
+          }}
+          onMouseEnter={(ev) => (ev.currentTarget.style.background = "#FAFAFA")}
+          onMouseLeave={(ev) => (ev.currentTarget.style.background = "#fff")}
+        >
+          <IconPrinter />
+          Print Audit Report
+        </button>
       </div>
     </div>
   );
