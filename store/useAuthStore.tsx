@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { toast } from 'sonner';
 import { authService } from '@/services/auth.service';
-import { User } from '@/types/auth.types';
+import { User, Branch } from '@/types/auth.types';
 import {
   RegisterPayload,
   LoginPayload,
@@ -21,6 +21,13 @@ interface AuthState {
   isLoading: boolean;
   error: string | null;
 
+  // NEW — branch dropdown for the login screen. Kept separate from the
+  // auth-loading state since branches load before/independently of any
+  // login attempt.
+  branches: Branch[] | null;
+  branchesLoading: boolean;
+  branchesError: boolean;
+
   setAuth: (data: { user: User; accessToken: string; refreshToken: string }) => void;
   // Lighter-weight than setAuth — used by the api-client interceptor after a
   // silent token refresh, where we only get back new tokens, not a fresh
@@ -37,6 +44,9 @@ interface AuthState {
   appleSignIn: (payload: AppleAuthPayload) => Promise<boolean>;
   logout: () => Promise<void>;
   fetchMe: () => Promise<void>;
+
+  // NEW
+  fetchBranches: () => Promise<void>;
 }
 
 function extractErrorMessage(error: unknown, fallback: string) {
@@ -53,6 +63,10 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
       isLoading: false,
       error: null,
+
+      branches: null,
+      branchesLoading: false,
+      branchesError: false,
 
       setAuth: ({ user, accessToken, refreshToken }) =>
         set({ user, accessToken, refreshToken, isAuthenticated: true }),
@@ -80,6 +94,8 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
+      // payload now optionally carries branchId straight through to the
+      // backend — see LoginPayload in auth.types.ts.
       login: async (payload) => {
         set({ isLoading: true, error: null });
         try {
@@ -179,6 +195,19 @@ export const useAuthStore = create<AuthState>()(
         } catch (error) {
           get().clearAuth();
           set({ isLoading: false });
+        }
+      },
+
+      // NEW — powers the branch dropdown on the login screen. Separate
+      // loading/error flags from isLoading so a branches-fetch failure
+      // doesn't block or disguise itself as a login error.
+      fetchBranches: async () => {
+        set({ branchesLoading: true, branchesError: false });
+        try {
+          const branches = await authService.getBranches();
+          set({ branches, branchesLoading: false });
+        } catch {
+          set({ branchesLoading: false, branchesError: true });
         }
       },
     }),

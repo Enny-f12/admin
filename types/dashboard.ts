@@ -54,15 +54,31 @@ export interface LowStockAlert {
   reorderThreshold: number;
 }
 
-/* ── Audit log / recent activity ── */
-// TODO(BACKEND): GET /admin/audit-logs not implemented yet — see request doc #2
+/**
+ * CONFIRMED — matches the real GET /admin/audit-logs response body exactly.
+ * Previous version (actorName/actorInitial/entityType/createdAt) was a
+ * guess and didn't match — corrected below. `action` values seen so far:
+ * "CREATE", "UPDATE", "STATUS_CHANGE". Treat as a growing enum; confirm
+ * the full set with backend before mapping to display labels.
+ */
 export interface AuditLogEntry {
   id: string;
-  actorName: string;
-  actorInitial: string;
+  timestamp: string;
+  userName: string;
+  branch: string;
   action: string;
-  entityType: string; // "Inventory" | "Orders" | "Payments" | etc.
-  createdAt: string;
+  item: string;
+}
+
+/**
+ * CONFIRMED — GET /admin/audit-logs returns { items, total }, not a bare
+ * array. dashboardService.getRecentAuditLogs() unwraps `.items` before
+ * returning, so the store/page still work with AuditLogEntry[] directly —
+ * this wrapper type exists only at the service boundary.
+ */
+export interface AuditLogsResponse {
+  items: AuditLogEntry[];
+  total: number;
 }
 
 /* ── Admin orders (for Recent Orders table) ── */
@@ -95,5 +111,10 @@ export interface AdminOrdersFilters {
   dateTo?: string;
   branchId?: string;
   page?: number;
-  limit?: number;
+  // `limit` is NOT accepted by GET /admin/orders — confirmed via live 400:
+  // { "message": ["property limit should not exist"], "error": "Bad Request" }
+  // (ValidationPipe forbidNonWhitelisted rejects it). Do not re-add without
+  // confirming with backend whether pagination via `page` is the intended
+  // mechanism for capping "Recent Orders" to a small preview count, or
+  // whether a differently-named field should be added.
 }

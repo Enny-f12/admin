@@ -3,16 +3,14 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Bell, MapPin, Settings, Shield, Download, Megaphone, CheckCircle } from "lucide-react";
+import { ChevronRight, Bell, MapPin, Megaphone, CheckCircle } from "lucide-react";
 import { useSettingsStore } from "@/store/useSettingsStore";
 
 const MENU_ITEMS = [
   { path: "/settings/banners", label: "Promotions & Banners", description: "Manage carousel, schedule campaigns", icon: Megaphone },
   { path: "/settings/notifications", label: "Notification", description: "Order alerts, marketing emails", icon: Bell },
   { path: "/settings/branches", label: "Branches", description: "Manage restaurant locations", icon: MapPin },
-  { path: "/settings/general", label: "General", description: "Business info, hours, currency, tax", icon: Settings },
-  { path: "/settings/security", label: "Security", description: "2FA, password policies", icon: Shield },
-  { path: "/settings/export", label: "Data Export", description: "Export orders, customers, analytics", icon: Download },
+ 
 ];
 
 export default function SettingsPage() {

@@ -35,14 +35,14 @@ export const useMorningCountStore = create<MorningCountState>()((set, get) => ({
   selectedCategoryId: null,
   isSavingDraft: false,
 
-  // NOT YET BUILT — fail silently, no toast, no retry loop
   fetchSheet: async (outletId, date) => {
     set({ sheetLoading: true, sheetError: false });
     try {
       const sheet = await morningCountService.getSheet(outletId, date);
       set({ sheet, selectedCategoryId: sheet.categories[0]?.id ?? null, sheetLoading: false });
-    } catch {
+    } catch (error) {
       set({ sheetLoading: false, sheetError: true });
+      toast.error(extractErrorMessage(error, 'Could not load count sheet.'));
     }
   },
 

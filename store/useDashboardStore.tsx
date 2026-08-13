@@ -50,7 +50,7 @@ interface DashboardState {
   lowStockLoading: boolean;
   lowStockError: boolean;
 
-  // Audit logs (not yet built — silent errors)
+  // Audit logs (confirmed live — service unwraps { items, total } to AuditLogEntry[])
   auditLogs: AuditLogEntry[] | null;
   auditLogsLoading: boolean;
   auditLogsError: boolean;
@@ -172,7 +172,8 @@ export const useDashboardStore = create<DashboardState>((set) => ({
     }
   },
 
-  // NOT YET BUILT — fail silently
+  // CONFIRMED LIVE — service unwraps { items, total } before this resolves,
+  // so `auditLogs` here is always AuditLogEntry[] | null, never the wrapper.
   fetchRecentAuditLogs: async (limit = 10, branchId) => {
     set({ auditLogsLoading: true, auditLogsError: false });
     try {
@@ -194,11 +195,18 @@ export const useDashboardStore = create<DashboardState>((set) => ({
     }
   },
 
+  // CHANGED — fetchAdminOrders no longer called with { limit: 4 }.
+  // Confirmed live: GET /admin/orders rejects `limit` outright (400,
+  // "property limit should not exist" — forbidNonWhitelisted). This was
+  // silently failing the whole Recent Orders table. If capping to a
+  // small preview count is still wanted, that needs a backend answer on
+  // the correct mechanism (page size? different field name?) before
+  // re-adding — see note in AdminOrdersFilters.
   fetchAll: (vendorId) => {
     const state = useDashboardStore.getState();
     state.fetchSummary(vendorId);
     state.fetchLowStockAlerts();
     state.fetchRecentAuditLogs(5);
-    state.fetchAdminOrders({ limit: 4 });
+    state.fetchAdminOrders();
   },
 }));

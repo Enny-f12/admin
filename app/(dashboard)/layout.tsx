@@ -1,7 +1,7 @@
 // app/(admin)/layout.tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -35,6 +35,7 @@ import {
   ClipboardList,
 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
+import { useAuthStore } from "@/store/useAuthStore";
 
 /* ── Nav structure ── */
 const NAV_SECTIONS = [
@@ -83,14 +84,28 @@ const NAV_SECTIONS = [
   },
 ];
 
-// TODO(BACKEND): branch scoping doesn't exist anywhere in the backend yet
-// (no branchId on JWT, no branch filtering in any service). This selector
-// is currently cosmetic/local-state only — see backend request doc,
-// "ARCHITECTURE — Branch scoping" item.
-const BRANCHES = ["Lekki 1", "Lekki 2", "Maitama"];
+/**
+ * Branch names are used exactly as returned by GET /auth/branches — no
+ * relabeling. If the backend's branch names ever need to change, that's
+ * a backend-side edit, not a frontend override.
+ */
 
-/* ── Shared branch context so page content can react to the selector ── */
-const BranchContext = createContext<string>(BRANCHES[0]);
+/**
+ * CHANGED — branch scoping now has a real backend to talk to: GET
+ * /auth/branches (confirmed live, same endpoint the login screen uses).
+ * BranchContext now carries { id, name } instead of a bare display
+ * string, since `id` is what any branch-scoped API call actually needs
+ * (e.g. the delivery zones / reservations endpoints that take a
+ * `branchId` query param). `name` is already display-mapped via
+ * displayBranchName() before it reaches context, so consumers can render
+ * it directly.
+ */
+export interface SelectedBranch {
+  id: string;
+  name: string;
+}
+
+const BranchContext = createContext<SelectedBranch>({ id: "", name: "" });
 export const useBranch = () => useContext(BranchContext);
 
 /* ── Light sidebar tokens ── */
@@ -113,9 +128,33 @@ export default function DashboardLayout({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
-  const [branch, setBranch] = useState(BRANCHES[0]);
   const pathname = usePathname();
   const sidebarW = collapsed ? 72 : 240;
+
+  // NEW — real branch list, shared with the login screen via the same
+  // auth store slice (one fetch source, no duplicate hardcoded lists).
+  const { branches, branchesLoading, fetchBranches } = useAuthStore();
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchBranches();
+  }, [fetchBranches]);
+
+  // Default to the first branch once the list loads, if nothing's been
+  // explicitly picked yet.
+  useEffect(() => {
+    if (branches && branches.length > 0 && selectedBranchId === null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedBranchId(branches[0].id);
+    }
+  }, [branches, selectedBranchId]);
+
+  const selectedBranch =
+    branches?.find((b) => b.id === selectedBranchId) ?? branches?.[0] ?? null;
+
+  const branchContextValue: SelectedBranch = selectedBranch
+    ? { id: selectedBranch.id, name: selectedBranch.name }
+    : { id: "", name: branchesLoading ? "Loading…" : "Select branch" };
 
   const pageTitle =
     NAV_SECTIONS.flatMap((s) => s.items).find((n) => n.href === pathname)
@@ -427,10 +466,13 @@ export default function DashboardLayout({
           </h1>
 
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            {/* Branch selector */}
+            {/* Branch selector — CHANGED: now backed by GET /auth/branches
+                via useAuthStore instead of a hardcoded array. Names shown
+                exactly as returned by the backend. */}
             <div style={{ position: "relative" }}>
               <button
                 onClick={() => setBranchOpen((v) => !v)}
+                disabled={branchesLoading}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -439,15 +481,16 @@ export default function DashboardLayout({
                   borderRadius: 8,
                   border: "1px solid var(--color-border)",
                   background: "#fff",
-                  cursor: "pointer",
+                  cursor: branchesLoading ? "default" : "pointer",
                   fontSize: "0.85rem",
                   fontWeight: 500,
                   color: "var(--color-text)",
                   fontFamily: "var(--font-sans)",
+                  opacity: branchesLoading ? 0.7 : 1,
                 }}
               >
                 <Store size={15} strokeWidth={1.8} color="var(--color-primary)" />
-                {branch}
+                {branchContextValue.name}
                 <ChevronDown size={15} strokeWidth={1.8} color="var(--color-text-muted)" />
               </button>
 
@@ -466,13 +509,13 @@ export default function DashboardLayout({
                     zIndex: 60,
                   }}
                 >
-                  {BRANCHES.map((b) => {
-                    const selected = b === branch;
+                  {(branches ?? []).map((b) => {
+                    const selected = b.id === selectedBranch?.id;
                     return (
                       <button
-                        key={b}
+                        key={b.id}
                         onClick={() => {
-                          setBranch(b);
+                          setSelectedBranchId(b.id);
                           setBranchOpen(false);
                         }}
                         style={{
@@ -498,7 +541,7 @@ export default function DashboardLayout({
                             selected ? "var(--color-bg-soft)" : "#fff")
                         }
                       >
-                        {b}
+                        {b.name}
                         {selected && (
                           <Check size={14} strokeWidth={2} color="var(--color-primary)" />
                         )}
@@ -532,7 +575,7 @@ export default function DashboardLayout({
           style={{ flex: 1, overflowY: "auto", padding: "28px" }}
           className="no-scrollbar"
         >
-          <BranchContext.Provider value={branch}>
+          <BranchContext.Provider value={branchContextValue}>
             {children}
           </BranchContext.Provider>
         </main>

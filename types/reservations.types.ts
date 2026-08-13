@@ -67,10 +67,10 @@ export interface CreateTablePayload {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Everything below is still SPECULATIVE — no matching backend
-   controller/service has been shared for any of it. Kept so the
-   Policies/Waitlist/Reminders tabs still compile against a real
-   shape, but none of these endpoints are confirmed to exist.
+   Everything below is still SPECULATIVE — endpoints are confirmed
+   to exist in Swagger, but full response shapes haven't been hit
+   live. Request shapes below ARE confirmed against real Swagger
+   examples (see reservations.service.ts comments for which).
    ───────────────────────────────────────────────────────────── */
 
 export interface TableType {
@@ -108,7 +108,14 @@ export interface ReservationPolicies {
 
 export type UpdateReservationPoliciesPayload = Omit<ReservationPolicies, 'branchId' | 'specialDates'>;
 
+/**
+ * CONFIRMED — matches the real POST /admin/reservations/special-dates
+ * request body exactly (branchId lives in the BODY here, not a query
+ * param — unlike most other reservations endpoints). Previously missing
+ * branchId entirely, which would have 400'd or silently failed.
+ */
 export interface AddSpecialDatePayload {
+  branchId: string;
   date: string;
   type: string;
   note: string | null;
@@ -128,6 +135,28 @@ export interface WaitlistEntry {
   addedAt: string; // ISO — frontend derives "Added X min ago"
 }
 
+/**
+ * CONFIRMED — matches POST /admin/reservations/waitlist request body
+ * exactly. There was previously no service method for this endpoint at
+ * all — the Waitlist tab could only read/notify/seat, never add anyone.
+ */
+export interface CreateWaitlistEntryPayload {
+  branchId: string;
+  name: string;
+  phone: string;
+  partySize: number;
+}
+
+/**
+ * CONFIRMED — matches PATCH /admin/reservations/waitlist/:id/seat's
+ * request body exactly. Seating someone requires picking which table
+ * they're being seated at — the previous implementation sent no body at
+ * all, which the backend requires (see Swagger: Request body required).
+ */
+export interface SeatWaitlistPayload {
+  tableId: string;
+}
+
 export interface ReminderRule {
   id: string;
   label: string;
@@ -135,4 +164,12 @@ export interface ReminderRule {
   enabled: boolean;
 }
 
-export type UpdateRemindersPayload = { id: string; enabled: boolean }[];
+/**
+ * CORRECTED — the real PUT /admin/reservations/reminders body is a bare
+ * array of strings (Swagger example: ["string"]), NOT {id, enabled}[]
+ * like the previous guess assumed. Semantics of what the strings
+ * represent (ids of enabled rules? rule type keys?) are NOT confirmed —
+ * see the comment on saveReminders() in the store for the current
+ * best-guess interpretation pending backend confirmation.
+ */
+export type UpdateRemindersPayload = string[];

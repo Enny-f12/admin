@@ -11,12 +11,17 @@ import {
   AppleAuthPayload,
   RefreshPayload,
   RefreshResponse,
+  Branch,
 } from '@/types/auth.types';
 
 export const authService = {
   register: (payload: RegisterPayload) =>
     apiClient.post<RegisterResponse>('/auth/register', payload).then((r) => r.data),
 
+  // branchId is optional per Swagger ("Login with email/password and
+  // optional branchId") — omit it from the payload entirely when not
+  // selected rather than sending an empty string, since the DTO expects
+  // either a real UUID or the field absent.
   login: (payload: LoginPayload) =>
     apiClient.post<AuthResponse>('/auth/login', payload).then((r) => r.data),
 
@@ -41,4 +46,6 @@ export const authService = {
     apiClient.post<{ success: boolean }>('/auth/logout', { refreshToken }).then((r) => r.data),
 
   me: () => apiClient.get('/auth/me').then((r) => r.data),
+
+  getBranches: () => apiClient.get<Branch[]>('/auth/branches').then((r) => r.data),
 };

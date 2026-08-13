@@ -107,13 +107,18 @@ export const useWalkInStore = create<WalkInState>((set) => ({
     }
   },
 
+  // NOTE: backend currently returns 500 here — request payload has been verified
+  // against Swagger (no params) so this is a server-side bug. Surfacing the
+  // real error message via toast (instead of failing silently) until the
+  // response schema/fix is confirmed.
   fetchBlacklist: async () => {
     set({ blacklistLoading: true, blacklistError: false });
     try {
       const blacklist = await walkInService.getBlacklist();
       set({ blacklist, blacklistLoading: false });
-    } catch {
+    } catch (error) {
       set({ blacklistLoading: false, blacklistError: true });
+      toast.error(extractErrorMessage(error, 'Could not load blacklist.'));
     }
   },
 

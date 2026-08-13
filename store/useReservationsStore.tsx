@@ -11,6 +11,7 @@ import {
   AdminReservation,
   ReservationStatus,
   WaitlistEntry,
+  CreateWaitlistEntryPayload,
   ReminderRule,
 } from '@/types/reservations.types';
 
@@ -20,38 +21,35 @@ function extractErrorMessage(error: unknown, fallback: string) {
 }
 
 interface ReservationsState {
-  // Policies (speculative)
   policies: ReservationPolicies | null;
   policiesLoading: boolean;
   policiesError: boolean;
   isSavingPolicies: boolean;
   isSavingSpecialDate: boolean;
 
-  // Tables (confirmed live)
   tables: DiningTable[] | null;
   tablesLoading: boolean;
   tablesError: boolean;
   isCreatingTable: boolean;
 
-  // Reservations (confirmed live)
   reservations: AdminReservation[] | null;
   reservationsLoading: boolean;
   reservationsError: boolean;
   isUpdatingReservationStatus: boolean;
 
-  // Waitlist (speculative)
   waitlist: WaitlistEntry[] | null;
   waitlistLoading: boolean;
   waitlistError: boolean;
+  isAddingWaitlistEntry: boolean;
+  isSeatingWaitlistEntry: boolean;
 
-  // Reminders (speculative)
   reminders: ReminderRule[] | null;
   remindersLoading: boolean;
   remindersError: boolean;
   isSavingReminders: boolean;
 
   fetchPolicies: (branchId?: string) => Promise<void>;
-  savePolicies: (payload: UpdateReservationPoliciesPayload) => Promise<boolean>;
+  savePolicies: (branchId: string | undefined, payload: UpdateReservationPoliciesPayload) => Promise<boolean>;
   addSpecialDate: (payload: AddSpecialDatePayload) => Promise<boolean>;
   removeSpecialDate: (id: string) => Promise<void>;
 
@@ -61,13 +59,15 @@ interface ReservationsState {
   fetchReservations: (branchId?: string, status?: ReservationStatus) => Promise<void>;
   updateReservationStatus: (id: string, status: ReservationStatus) => Promise<boolean>;
 
-  fetchWaitlist: () => Promise<void>;
+  fetchWaitlist: (branchId?: string) => Promise<void>;
+  addWaitlistEntry: (payload: CreateWaitlistEntryPayload) => Promise<boolean>;
   notifyWaitlistEntry: (id: string) => Promise<void>;
-  seatWaitlistEntry: (id: string) => Promise<void>;
+  seatWaitlistEntry: (id: string, tableId: string) => Promise<void>;
+  removeWaitlistEntry: (id: string) => Promise<void>;
 
-  fetchReminders: () => Promise<void>;
+  fetchReminders: (branchId?: string) => Promise<void>;
   toggleReminder: (id: string) => void;
-  saveReminders: () => Promise<void>;
+  saveReminders: (branchId?: string) => Promise<void>;
 }
 
 export const useReservationsStore = create<ReservationsState>((set, get) => ({
@@ -90,13 +90,13 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
   waitlist: null,
   waitlistLoading: false,
   waitlistError: false,
+  isAddingWaitlistEntry: false,
+  isSeatingWaitlistEntry: false,
 
   reminders: null,
   remindersLoading: false,
   remindersError: false,
   isSavingReminders: false,
-
-  // ── Policies (speculative) ─────────────────────────────────────────
 
   fetchPolicies: async (branchId) => {
     set({ policiesLoading: true, policiesError: false });
@@ -108,10 +108,10 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
     }
   },
 
-  savePolicies: async (payload) => {
+  savePolicies: async (branchId, payload) => {
     set({ isSavingPolicies: true });
     try {
-      const policies = await reservationsService.updatePolicies(payload);
+      const policies = await reservationsService.updatePolicies(branchId, payload);
       set({ policies, isSavingPolicies: false });
       toast.success('Policies saved', { description: 'Changes pushed to the customer app.' });
       return true;
@@ -157,8 +157,6 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
     }
   },
 
-  // ── Tables (confirmed live) ────────────────────────────────────────
-
   fetchTables: async (branchId) => {
     set({ tablesLoading: true, tablesError: false });
     try {
@@ -185,8 +183,6 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
       return false;
     }
   },
-
-  // ── Reservations (confirmed live) ──────────────────────────────────
 
   fetchReservations: async (branchId, status) => {
     set({ reservationsLoading: true, reservationsError: false });
@@ -222,15 +218,30 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
     }
   },
 
-  // ── Waitlist (speculative) ─────────────────────────────────────────
-
-  fetchWaitlist: async () => {
+  fetchWaitlist: async (branchId) => {
     set({ waitlistLoading: true, waitlistError: false });
     try {
-      const waitlist = await reservationsService.getWaitlist();
+      const waitlist = await reservationsService.getWaitlist(branchId);
       set({ waitlist, waitlistLoading: false });
     } catch {
       set({ waitlistLoading: false, waitlistError: true });
+    }
+  },
+
+  addWaitlistEntry: async (payload) => {
+    set({ isAddingWaitlistEntry: true });
+    try {
+      const entry = await reservationsService.createWaitlistEntry(payload);
+      set((state) => ({
+        isAddingWaitlistEntry: false,
+        waitlist: state.waitlist ? [...state.waitlist, entry] : [entry],
+      }));
+      toast.success(`${entry.name} added to the waitlist.`);
+      return true;
+    } catch (error) {
+      set({ isAddingWaitlistEntry: false });
+      toast.error(extractErrorMessage(error, 'Could not add to waitlist.'));
+      return false;
     }
   },
 
@@ -248,12 +259,14 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
     }
   },
 
-  seatWaitlistEntry: async (id) => {
+  seatWaitlistEntry: async (id, tableId) => {
     const { waitlist } = get();
     const entry = waitlist?.find((w) => w.id === id);
+    set({ isSeatingWaitlistEntry: true });
     try {
-      await reservationsService.seatWaitlistEntry(id);
+      await reservationsService.seatWaitlistEntry(id, { tableId });
       set((state) => ({
+        isSeatingWaitlistEntry: false,
         waitlist: state.waitlist ? state.waitlist.filter((w) => w.id !== id) : state.waitlist,
       }));
       toast.success(entry ? `${entry.name} has been seated` : 'Seated', {
@@ -261,16 +274,28 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
         duration: 4000,
       });
     } catch (error) {
+      set({ isSeatingWaitlistEntry: false });
       toast.error(extractErrorMessage(error, 'Could not seat this party.'));
     }
   },
 
-  // ── Reminders (speculative) ────────────────────────────────────────
+  removeWaitlistEntry: async (id) => {
+    const { waitlist } = get();
+    const previous = waitlist;
+    set({ waitlist: waitlist ? waitlist.filter((w) => w.id !== id) : waitlist });
+    try {
+      await reservationsService.removeWaitlistEntry(id);
+      toast.success('Removed from waitlist.');
+    } catch (error) {
+      set({ waitlist: previous });
+      toast.error(extractErrorMessage(error, 'Could not remove from waitlist.'));
+    }
+  },
 
-  fetchReminders: async () => {
+  fetchReminders: async (branchId) => {
     set({ remindersLoading: true, remindersError: false });
     try {
-      const reminders = await reservationsService.getReminders();
+      const reminders = await reservationsService.getReminders(branchId);
       set({ reminders, remindersLoading: false });
     } catch {
       set({ remindersLoading: false, remindersError: true });
@@ -285,14 +310,13 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
     }));
   },
 
-  saveReminders: async () => {
+  saveReminders: async (branchId) => {
     const { reminders } = get();
     if (!reminders) return;
     set({ isSavingReminders: true });
     try {
-      const updated = await reservationsService.updateReminders(
-        reminders.map((r) => ({ id: r.id, enabled: r.enabled })),
-      );
+      const enabledIds = reminders.filter((r) => r.enabled).map((r) => r.id);
+      const updated = await reservationsService.updateReminders(branchId, enabledIds);
       set({ reminders: updated, isSavingReminders: false });
       toast.success('Reminder settings saved');
     } catch (error) {

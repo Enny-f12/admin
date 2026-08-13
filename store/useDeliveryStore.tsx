@@ -14,6 +14,9 @@ import {
   DeliveryZone,
   CreateDeliveryZonePayload,
   UpdateDeliveryZonePayload,
+  DeliveryPartner,
+  UpdateDeliveryPartnerPayload,
+  DeliveryPartnersSummary,
 } from '@/types/delivery.types';
 
 function extractErrorMessage(error: unknown, fallback: string) {
@@ -45,11 +48,22 @@ interface DeliveryState {
   isTrackingChowdeck: boolean;
   isCancellingChowdeck: boolean;
 
-  // Delivery Zones (speculative)
+  // Delivery Zones (confirmed live)
   zones: DeliveryZone[] | null;
   zonesLoading: boolean;
   zonesError: boolean;
   isSavingZone: boolean;
+
+  // Delivery Partners (confirmed live)
+  partners: DeliveryPartner[] | null;
+  partnersLoading: boolean;
+  partnersError: boolean;
+  isSavingPartner: boolean;
+
+  // Delivery Partners summary (new — endpoint confirmed live, response shape provisional)
+  partnersSummary: DeliveryPartnersSummary | null;
+  partnersSummaryLoading: boolean;
+  partnersSummaryError: boolean;
 
   fetchDrivers: (status?: DriverStatus) => Promise<void>;
   createDriver: (payload: CreateDriverPayload) => Promise<boolean>;
@@ -69,6 +83,11 @@ interface DeliveryState {
   createZone: (payload: CreateDeliveryZonePayload) => Promise<boolean>;
   updateZone: (id: string, payload: UpdateDeliveryZonePayload) => Promise<boolean>;
   deleteZone: (id: string) => Promise<void>;
+
+  fetchPartners: () => Promise<void>;
+  fetchPartnersSummary: () => Promise<void>;
+  updatePartner: (id: string, payload: UpdateDeliveryPartnerPayload) => Promise<boolean>;
+  togglePartner: (id: string) => Promise<void>;
 }
 
 export const useDeliveryStore = create<DeliveryState>((set, get) => ({
@@ -96,6 +115,15 @@ export const useDeliveryStore = create<DeliveryState>((set, get) => ({
   zonesLoading: false,
   zonesError: false,
   isSavingZone: false,
+
+  partners: null,
+  partnersLoading: false,
+  partnersError: false,
+  isSavingPartner: false,
+
+  partnersSummary: null,
+  partnersSummaryLoading: false,
+  partnersSummaryError: false,
 
   // ── Drivers ─────────────────────────────────────────────────────
 
@@ -151,16 +179,16 @@ export const useDeliveryStore = create<DeliveryState>((set, get) => ({
     }
   },
 
+  // The assign response is flat (RawDeliveryAssignment) and doesn't
+  // include driver.fullName/order.orderNumber the way the active-list
+  // rows need — so instead of trying to splice a mismatched shape in,
+  // just refetch the active list. One extra request, correct data.
   assignDelivery: async (orderId, payload) => {
     set({ isAssigningDelivery: true });
     try {
-      const updated = await deliveryService.assignDelivery(orderId, payload);
-      set((state) => ({
-        isAssigningDelivery: false,
-        activeDeliveries: state.activeDeliveries
-          ? [...state.activeDeliveries.filter((d) => d.orderId !== orderId), updated]
-          : [updated],
-      }));
+      await deliveryService.assignDelivery(orderId, payload);
+      const activeDeliveries = await deliveryService.getActiveDeliveries();
+      set({ isAssigningDelivery: false, activeDeliveries });
       toast.success('Delivery assigned.');
       return true;
     } catch (error) {
@@ -187,17 +215,20 @@ export const useDeliveryStore = create<DeliveryState>((set, get) => ({
 
   clearChowdeckEstimate: () => set({ chowdeckEstimate: null }),
 
+  // IMPORTANT: dispatchViaChowdeck() in the real service never creates a
+  // DeliveryAssignment row — it only updates the order's status/provider.
+  // GET /admin/deliveries/active queries the DeliveryAssignment table only,
+  // so a Chowdeck-dispatched order will NEVER appear there — it's tracked
+  // separately via GET /admin/deliveries/chowdeck/:reference instead.
+  // Refetching here just keeps the internal-driver list accurate; it will
+  // not reflect this Chowdeck dispatch in any way. See backend request
+  // doc note on this — the two delivery paths don't share a table.
   dispatchViaChowdeck: async (orderId, feeId) => {
     set({ isDispatchingChowdeck: true });
     try {
-      const updated = await deliveryService.dispatchViaChowdeck(orderId, { feeId });
-      set((state) => ({
-        isDispatchingChowdeck: false,
-        chowdeckEstimate: null,
-        activeDeliveries: state.activeDeliveries
-          ? [...state.activeDeliveries.filter((d) => d.orderId !== orderId), updated]
-          : [updated],
-      }));
+      await deliveryService.dispatchViaChowdeck(orderId, { feeId });
+      const activeDeliveries = await deliveryService.getActiveDeliveries();
+      set({ isDispatchingChowdeck: false, chowdeckEstimate: null, activeDeliveries });
       toast.success('Dispatched via Chowdeck.');
       return true;
     } catch (error) {
@@ -232,7 +263,7 @@ export const useDeliveryStore = create<DeliveryState>((set, get) => ({
     }
   },
 
-  // ── Delivery Zones (speculative) ───────────────────────────────
+  // ── Delivery Zones ──────────────────────────────────────────────
 
   fetchZones: async (branchId) => {
     set({ zonesLoading: true, zonesError: false });
@@ -285,6 +316,67 @@ export const useDeliveryStore = create<DeliveryState>((set, get) => ({
     } catch (error) {
       set({ zones: previous });
       toast.error(extractErrorMessage(error, 'Could not remove zone.'));
+    }
+  },
+
+  // ── Delivery Partners ───────────────────────────────────────────
+
+  fetchPartners: async () => {
+    set({ partnersLoading: true, partnersError: false });
+    try {
+      const partners = await deliveryService.getDeliveryPartners();
+      set({ partners, partnersLoading: false });
+    } catch {
+      set({ partnersLoading: false, partnersError: true });
+    }
+  },
+
+  // NEW — separate loading/error state so the summary stat cards can
+  // resolve independently of the partner cards list below them.
+  fetchPartnersSummary: async () => {
+    set({ partnersSummaryLoading: true, partnersSummaryError: false });
+    try {
+      const partnersSummary = await deliveryService.getDeliveryPartnersSummary();
+      set({ partnersSummary, partnersSummaryLoading: false });
+    } catch {
+      set({ partnersSummaryLoading: false, partnersSummaryError: true });
+    }
+  },
+
+  updatePartner: async (id, payload) => {
+    set({ isSavingPartner: true });
+    try {
+      const partner = await deliveryService.updateDeliveryPartner(id, payload);
+      set((state) => ({
+        isSavingPartner: false,
+        partners: state.partners ? state.partners.map((p) => (p.id === id ? partner : p)) : state.partners,
+      }));
+      toast.success('Partner settings saved.');
+      return true;
+    } catch (error) {
+      set({ isSavingPartner: false });
+      toast.error(extractErrorMessage(error, 'Could not save partner settings.'));
+      return false;
+    }
+  },
+
+  // Optimistic toggle — mirrors deleteZone's rollback-on-failure pattern.
+  togglePartner: async (id) => {
+    const { partners } = get();
+    const previous = partners;
+    set({
+      partners: partners
+        ? partners.map((p) => (p.id === id ? { ...p, enabled: !p.enabled } : p))
+        : partners,
+    });
+    try {
+      const partner = await deliveryService.toggleDeliveryPartner(id);
+      set((state) => ({
+        partners: state.partners ? state.partners.map((p) => (p.id === id ? partner : p)) : state.partners,
+      }));
+    } catch (error) {
+      set({ partners: previous });
+      toast.error(extractErrorMessage(error, 'Could not toggle partner.'));
     }
   },
 }));

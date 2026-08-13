@@ -6,14 +6,20 @@ import {
   DriverLocation,
   CreateDriverPayload,
   AdminDelivery,
+  RawDeliveryAssignment,
   AssignDeliveryPayload,
   ChowdeckFeeEstimate,
   DispatchChowdeckPayload,
+  ChowdeckDispatchResponse,
   ChowdeckTrackingStatus,
   CancelChowdeckPayload,
+  ChowdeckCancelResponse,
   DeliveryZone,
   CreateDeliveryZonePayload,
   UpdateDeliveryZonePayload,
+  DeliveryPartner,
+  UpdateDeliveryPartnerPayload,
+  DeliveryPartnersSummary,
 } from '@/types/delivery.types';
 
 export const deliveryService = {
@@ -28,8 +34,8 @@ export const deliveryService = {
   getDriverByUserId: (userId: string) =>
     apiClient.get<Driver>(`/admin/drivers/${userId}`).then((r) => r.data),
 
-  getDriverLocation: (id: string) =>
-    apiClient.get<DriverLocation>(`/admin/drivers/${id}/location`).then((r) => r.data),
+  getDriverLocation: (userId: string) =>
+    apiClient.get<DriverLocation>(`/admin/drivers/${userId}/location`).then((r) => r.data),
 
   // ── CONFIRMED LIVE — Admin Deliveries ──────────────────────────────
 
@@ -37,16 +43,19 @@ export const deliveryService = {
     apiClient.get<AdminDelivery[]>('/admin/deliveries/active').then((r) => r.data),
 
   assignDelivery: (orderId: string, payload: AssignDeliveryPayload) =>
-    apiClient.post<AdminDelivery>(`/admin/deliveries/${orderId}/assign`, payload).then((r) => r.data),
+    apiClient
+      .post<RawDeliveryAssignment>(`/admin/deliveries/${orderId}/assign`, payload)
+      .then((r) => r.data),
 
   estimateChowdeckFee: (orderId: string) =>
     apiClient
       .post<ChowdeckFeeEstimate>(`/admin/deliveries/${orderId}/chowdeck/estimate`)
       .then((r) => r.data),
 
+  
   dispatchViaChowdeck: (orderId: string, payload: DispatchChowdeckPayload) =>
     apiClient
-      .post<AdminDelivery>(`/admin/deliveries/${orderId}/chowdeck/dispatch`, payload)
+      .post<ChowdeckDispatchResponse>(`/admin/deliveries/${orderId}/chowdeck/dispatch`, payload)
       .then((r) => r.data),
 
   trackChowdeckDelivery: (reference: string) =>
@@ -54,12 +63,14 @@ export const deliveryService = {
       .get<ChowdeckTrackingStatus>(`/admin/deliveries/chowdeck/${reference}`)
       .then((r) => r.data),
 
+  // FIXED — was typed as { success: boolean }, unconfirmed. chowdeckService
+  // .cancelDelivery()'s return shape isn't known; don't assume a success flag.
   cancelChowdeckDelivery: (reference: string, payload: CancelChowdeckPayload) =>
     apiClient
-      .post<{ success: boolean }>(`/admin/deliveries/chowdeck/${reference}/cancel`, payload)
+      .post<ChowdeckCancelResponse>(`/admin/deliveries/chowdeck/${reference}/cancel`, payload)
       .then((r) => r.data),
 
-  // ── STILL SPECULATIVE — Delivery Zones ─────────────────────────────
+ 
 
   getDeliveryZones: (branchId?: string) =>
     apiClient.get<DeliveryZone[]>('/admin/delivery-zones', { params: { branchId } }).then((r) => r.data),
@@ -72,4 +83,21 @@ export const deliveryService = {
 
   deleteDeliveryZone: (id: string) =>
     apiClient.delete<{ success: boolean }>(`/admin/delivery-zones/${id}`).then((r) => r.data),
+
+  // ── CONFIRMED LIVE — Delivery Partners ─────────────────────────────
+  // GET list, PATCH settings, and PATCH toggle all verified against
+  // Swagger and match exactly.
+
+  getDeliveryPartners: () =>
+    apiClient.get<DeliveryPartner[]>('/admin/delivery-partners').then((r) => r.data),
+
+  
+  getDeliveryPartnersSummary: () =>
+    apiClient.get<DeliveryPartnersSummary>('/admin/delivery-partners/summary').then((r) => r.data),
+
+  updateDeliveryPartner: (id: string, payload: UpdateDeliveryPartnerPayload) =>
+    apiClient.patch<DeliveryPartner>(`/admin/delivery-partners/${id}`, payload).then((r) => r.data),
+
+  toggleDeliveryPartner: (id: string) =>
+    apiClient.patch<DeliveryPartner>(`/admin/delivery-partners/${id}/toggle`).then((r) => r.data),
 };

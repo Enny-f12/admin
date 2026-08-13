@@ -20,6 +20,7 @@ import {
 import { useReservationsStore } from "@/store/useReservationsStore";
 import { ReservationPolicies } from "@/types/reservations.types";
 import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
+import { useBranch } from "../layout";
 
 // NOTE: Policies, Waitlist, and Reminders tabs below are UNCHANGED from the
 // previous version — they still point at speculative endpoints, since
@@ -32,9 +33,6 @@ type Tab = "policies" | "availability" | "waitlist" | "reminders";
 
 const TIME_SLOTS = ["15 min", "30 min", "45 min", "60 min"];
 const SPECIAL_DATE_TYPES = ["Closed all day", "Reduced Hours", "Holiday Seating"];
-
-// (table status colors moved into AvailabilityTab as colorsFor(), since
-// status is now derived per-render rather than a fixed lookup table)
 
 function to24Hour(t: string): string {
   const m = t.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
@@ -141,6 +139,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 /* ══════════════════════════ POLICIES TAB ══════════════════════════ */
 function PoliciesTab() {
   const { policies, policiesLoading, policiesError, fetchPolicies, savePolicies, isSavingPolicies, addSpecialDate, removeSpecialDate, isSavingSpecialDate } = useReservationsStore();
+  const branch = useBranch();
 
   const [form, setForm] = useState<ReservationPolicies | null>(null);
 
@@ -156,8 +155,8 @@ function PoliciesTab() {
   });
 
   useEffect(() => {
-    fetchPolicies();
-  }, [fetchPolicies]);
+    if (branch.id) fetchPolicies(branch.id);
+  }, [fetchPolicies, branch.id]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -191,8 +190,9 @@ function PoliciesTab() {
 
   const savePayload = () => {
     if (!form) return;
-    const { branchId, specialDates, ...rest } = form;
-    savePolicies(rest);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { branchId: _branchId, specialDates: _specialDates, ...rest } = form;
+    savePolicies(branch.id, rest);
   };
 
   return (
@@ -461,6 +461,7 @@ function PoliciesTab() {
               onClick={async () => {
                 if (!newDate.date) return;
                 const ok = await addSpecialDate({
+                  branchId: branch.id,
                   date: newDate.date,
                   type: newDate.type,
                   note: newDate.note || null,
@@ -491,19 +492,25 @@ function PoliciesTab() {
 // from live reservations overlapping "now" — it's read-only, not something
 // staff can click to change. See ReservationService.getAvailableTables for
 // the same overlap logic this mirrors.
+//
+// CHANGED — branchId was hardcoded to a literal UUID
+// ("adf6fd7a-340b-4b32-977c-76d5177f2cc3"), which is a REAL branch id
+// (Victoria Island), not a placeholder string. That's why it returned 200
+// — but it silently showed Victoria Island's tables (VI-T01…VI-T08)
+// regardless of what the header branch switcher said. Same bug class as
+// the earlier OUTLET_ID/CURRENT_BRANCH_ID hardcodes, just harder to spot
+// because it didn't error. Now sourced from useBranch(), same as
+// morning-count.
 function AvailabilityTab() {
   const { tables, tablesLoading, tablesError, fetchTables, reservations, reservationsLoading, fetchReservations } = useReservationsStore();
-
-  // TODO: replace with real branch context — GET /admin/reservations/tables
-  // requires branchId as a required query param, confirmed via the
-  // AdminReservationController. Hardcoded placeholder until branch
-  // selection is wired into this page.
-  const BRANCH_ID = "adf6fd7a-340b-4b32-977c-76d5177f2cc3";
+  const branch = useBranch();
 
   useEffect(() => {
-    fetchTables(BRANCH_ID);
-    fetchReservations(BRANCH_ID);
-  }, [fetchTables, fetchReservations]);
+    if (branch.id) {
+      fetchTables(branch.id);
+      fetchReservations(branch.id);
+    }
+  }, [fetchTables, fetchReservations, branch.id]);
 
   const loading = tablesLoading || reservationsLoading;
 
@@ -536,8 +543,11 @@ function AvailabilityTab() {
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
+        {/* CHANGED — header now reflects the actual selected branch instead
+            of a hardcoded "Foodies 1 [Lekki]" string, which was never
+            actually true while the wrong branchId was hardcoded above. */}
         <p style={{ margin: 0, fontWeight: 600, fontSize: "0.9rem", color: "var(--color-heading)" }}>
-          Foodies 1 [Lekki] — Table Availability
+          {branch.name || "—"} — Table Availability
         </p>
         <p style={{ margin: "4px 0 0", fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
           Status is computed from current reservations, not manually set.
@@ -605,12 +615,21 @@ function AvailabilityTab() {
 }
 
 /* ══════════════════════════ WAITLIST TAB ══════════════════════════ */
+// NOTE: "Seat" below calls seatWaitlistEntry(id, tableId), which the
+// backend requires (PATCH /admin/reservations/waitlist/:id/seat needs a
+// tableId in its body — confirmed via Swagger). There is currently no UI
+// for picking which table to seat this party at. Passing an empty string
+// will 400. This needs a real design decision (a table picker dropdown,
+// or defaulting to the first available table from AvailabilityTab's data)
+// before "Seat" can work end-to-end — flagging rather than guessing a
+// silent default that could seat someone at the wrong table.
 function WaitlistTab() {
-  const { waitlist, waitlistLoading, waitlistError, fetchWaitlist, notifyWaitlistEntry, seatWaitlistEntry } = useReservationsStore();
+  const { waitlist, waitlistLoading, waitlistError, fetchWaitlist, notifyWaitlistEntry } = useReservationsStore();
+  const branch = useBranch();
 
   useEffect(() => {
-    fetchWaitlist();
-  }, [fetchWaitlist]);
+    if (branch.id) fetchWaitlist(branch.id);
+  }, [fetchWaitlist, branch.id]);
 
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 0, padding: 0, overflow: "hidden" }}>
@@ -669,7 +688,14 @@ function WaitlistTab() {
                 Notify
               </button>
               <button
-                onClick={() => seatWaitlistEntry(w.id)}
+                onClick={() => {
+                  // TODO: needs a real table picker before this can call
+                  // seatWaitlistEntry(w.id, tableId) — see note above the
+                  // component. Left as a no-op rather than sending a
+                  // fake/empty tableId that would either 400 or seat the
+                  // party at the wrong table.
+                  toast.info("Table selection isn't wired up yet — see TODO in WaitlistTab.");
+                }}
                 className="btn btn-primary"
                 style={{ padding: "8px 18px" }}
               >
@@ -686,10 +712,11 @@ function WaitlistTab() {
 /* ══════════════════════════ REMINDERS TAB ══════════════════════════ */
 function RemindersTab() {
   const { reminders, remindersLoading, remindersError, fetchReminders, toggleReminder, saveReminders, isSavingReminders } = useReservationsStore();
+  const branch = useBranch();
 
   useEffect(() => {
-    fetchReminders();
-  }, [fetchReminders]);
+    if (branch.id) fetchReminders(branch.id);
+  }, [fetchReminders, branch.id]);
 
   return (
     <>
@@ -738,7 +765,7 @@ function RemindersTab() {
 
       <button
         className="btn btn-primary"
-        onClick={saveReminders}
+        onClick={() => saveReminders(branch.id)}
         disabled={isSavingReminders || !reminders?.length}
         style={{ width: "100%", justifyContent: "center", padding: "13px", fontSize: "0.875rem", marginTop: 16, opacity: isSavingReminders || !reminders?.length ? 0.6 : 1 }}
       >

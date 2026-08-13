@@ -59,6 +59,21 @@ const STATUS_CLASS: Record<string, string> = {
   CANCELLED: "badge badge-red",
 };
 
+// Machine-y action values from the real audit-log response ("CREATE",
+// "UPDATE", "STATUS_CHANGE") mapped to a human-readable verb. Extend this
+// as new action values show up — anything not in the map falls back to a
+// lowercased version of the raw value so nothing renders blank.
+const ACTION_LABEL: Record<string, string> = {
+  CREATE: "created",
+  UPDATE: "updated",
+  STATUS_CHANGE: "changed the status of",
+  DELETE: "deleted",
+};
+
+function actionLabel(action: string) {
+  return ACTION_LABEL[action] ?? action.toLowerCase().replace(/_/g, " ");
+}
+
 function formatOrderType(type?: string) {
   if (!type) return "–";
   return type === "DINE_IN" ? "Dine In" : type === "TAKEAWAY" ? "Takeaway" : "Delivery";
@@ -157,7 +172,7 @@ export default function DashboardPage() {
               textTransform: "uppercase",
             }}
           >
-            {branch} Branch
+            {branch.name} Branch
           </p>
           <h1
             style={{
@@ -349,9 +364,15 @@ export default function DashboardPage() {
               </p>
             )}
             {!lowStockLoading &&
-              lowStock?.map((item) => (
+              // CHANGED — key now includes index. LowStockAlert has no
+              // stable id, and the backend can legitimately return the
+              // same itemName twice (e.g. tracked separately across food
+              // stock vs drink fridge), which was throwing duplicate-key
+              // console errors. Ask backend for a stable itemId if this
+              // list grows more complex than a dashboard preview.
+              lowStock?.map((item, i) => (
                 <div
-                  key={item.itemName}
+                  key={`${item.itemName}-${i}`}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -454,14 +475,20 @@ export default function DashboardPage() {
               Loading…
             </p>
           )}
-          {!activityLoading && (activityError || !activity?.length) && (
+          {/* CHANGED — guard now checks Array.isArray instead of trusting
+              the type. GET /admin/audit-logs actually returns { items,
+              total }, not a bare array; dashboardService now unwraps
+              .items, but this guard is kept defensive in case that ever
+              regresses — it's what was crashing the page (.map on a
+              non-array) before the service-level fix. */}
+          {!activityLoading && (activityError || !Array.isArray(activity) || activity.length === 0) && (
             <p style={{ padding: "14px 20px", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-              {/* TODO(BACKEND): GET /admin/audit-logs not implemented — see request doc #2 */}
               No recent activity available
             </p>
           )}
           {!activityLoading &&
-            activity?.map((item, i) => (
+            Array.isArray(activity) &&
+            activity.map((item, i) => (
               <div
                 key={item.id}
                 style={{
@@ -487,14 +514,20 @@ export default function DashboardPage() {
                     flexShrink: 0,
                   }}
                 >
-                  {item.actorInitial}
+                  {/* CHANGED — actorInitial doesn't exist on the real
+                      response; derived from userName instead. */}
+                  {item.userName.charAt(0)}
                 </div>
                 <div>
+                  {/* CHANGED — field names updated to match the real
+                      response (userName/action/item instead of
+                      actorName/action/entityType), and action is now
+                      mapped to a readable verb via actionLabel(). */}
                   <p style={{ margin: 0, fontSize: "0.85rem", fontWeight: 500, color: "var(--color-text)" }}>
-                    {item.actorName} {item.action}
+                    {item.userName} {actionLabel(item.action)} {item.item}
                   </p>
                   <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                    {timeAgo(item.createdAt)} · {item.entityType}
+                    {timeAgo(item.timestamp)} · {item.branch}
                   </p>
                 </div>
               </div>
@@ -550,7 +583,11 @@ export default function DashboardPage() {
               {!ordersLoading && (ordersError || !orders?.length) && (
                 <tr>
                   <td colSpan={8} style={{ textAlign: "center", padding: 20, color: "var(--color-text-muted)" }}>
-                    {/* TODO(BACKEND): GET /admin/orders response shape unconfirmed — see request doc #5 */}
+                    {/* CHANGED — this was failing 100% of the time before:
+                        GET /admin/orders rejected the `limit` param outright
+                        (400, forbidNonWhitelisted). fetchAll() no longer
+                        sends it — see useDashboardStore.ts. Response shape
+                        itself is still otherwise unconfirmed — request doc #5. */}
                     No order data available
                   </td>
                 </tr>

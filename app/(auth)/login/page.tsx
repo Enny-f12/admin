@@ -15,17 +15,10 @@ const SLIDES = [
   { src: "/home/login-4.png", label: "Chef's pick", title: "Stir-Fry\nWok Nights" },
 ];
 
-// TODO: replace with GET /branches once backend implements it (see backend request doc)
-const BRANCHES = [
-  { id: "lekki-1", name: "Lekki Phase 1 — Lagos" },
-  { id: "lekki-2", name: "Lekki Phase 2 — Lagos" },
-  { id: "maitama", name: "Maitama — Abuja" },
-];
-
 type LoginFormValues = {
   email: string;
   password: string;
-  branch: string; // optional — not yet sent to backend, see note below
+  branchId: string; // optional — sent only when a branch is actually selected
 };
 
 export default function LoginPage() {
@@ -33,14 +26,14 @@ export default function LoginPage() {
   const [current, setCurrent] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
 
-  const { login, isLoading, error, clearError } = useAuthStore();
+  const { login, isLoading, error, clearError, branches, branchesLoading, fetchBranches } = useAuthStore();
 
   const {
     register,
     handleSubmit,
     formState: { errors },
   } = useForm<LoginFormValues>({
-    defaultValues: { email: "", password: "", branch: "" },
+    defaultValues: { email: "", password: "", branchId: "" },
   });
 
   useEffect(() => {
@@ -52,12 +45,25 @@ export default function LoginPage() {
     return () => clearError();
   }, [clearError]);
 
+  // CHANGED — was a hardcoded BRANCHES array with a TODO to replace once
+  // GET /auth/branches shipped. That endpoint is confirmed live in Swagger
+  // now ("List all active branches for the login dropdown"), so fetch for
+  // real instead.
+  useEffect(() => {
+    fetchBranches();
+  }, [fetchBranches]);
+
   const onSubmit = async (data: LoginFormValues) => {
-    // NOTE: `branch` is intentionally NOT sent — the backend's LoginDto
-    // only accepts { email, password } right now, and the ValidationPipe
-    // has forbidNonWhitelisted: true, so sending an extra field would 400.
-    // Once the backend request below is implemented, add branchId here.
-    const success = await login({ email: data.email, password: data.password });
+    // CHANGED — branchId is now sent when selected. Swagger confirms
+    // POST /auth/login documents branchId as an optional field ("Login
+    // with email/password and optional branchId"), so this no longer
+    // risks a 400 from forbidNonWhitelisted. Omit the key entirely when
+    // no branch was chosen rather than sending an empty string.
+    const success = await login({
+      email: data.email,
+      password: data.password,
+      ...(data.branchId ? { branchId: data.branchId } : {}),
+    });
     if (success) {
       router.push("/dashboard");
     }
@@ -197,20 +203,24 @@ export default function LoginPage() {
                   )}
                 </div>
 
-                {/* Branch — optional for now, not sent to backend yet */}
+                {/* Branch — optional, now sourced from GET /auth/branches
+                    instead of a hardcoded list, and actually sent on submit. */}
                 <div className="flex flex-col gap-1.5">
-                  <label htmlFor="branch" className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>
+                  <label htmlFor="branchId" className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>
                     Branch <span style={{ color: "var(--color-text-muted)", fontWeight: 400 }}>(optional)</span>
                   </label>
                   <div className="relative">
                     <select
-                      id="branch"
+                      id="branchId"
                       className="input appearance-none"
                       style={{ paddingRight: "2.5rem", color: "var(--color-text)" }}
-                      {...register("branch")}
+                      disabled={branchesLoading}
+                      {...register("branchId")}
                     >
-                      <option value="">Select branch</option>
-                      {BRANCHES.map((b) => (
+                      <option value="">
+                        {branchesLoading ? "Loading branches…" : "Select branch"}
+                      </option>
+                      {(branches ?? []).map((b) => (
                         <option key={b.id} value={b.id}>
                           {b.name}
                         </option>

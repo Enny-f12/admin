@@ -8,6 +8,7 @@ import {
   DashboardCustomersResponse,
   LowStockAlert,
   AuditLogEntry,
+  AuditLogsResponse,
   AdminOrder,
   AdminOrdersFilters,
 } from '@/types/dashboard';
@@ -46,13 +47,17 @@ export const dashboardService = {
       .get<LowStockAlert[]>('/admin/inventory/alerts', { params: { branchId } })
       .then((r) => r.data),
 
-  // NOT YET BUILT — backend request doc #2
+  // CONFIRMED LIVE — real response is { items, total }, not a bare array.
+  // Unwrap here so the store/page keep working with AuditLogEntry[]
+  // directly, same pattern used for GET /admin/reservations elsewhere.
   getRecentAuditLogs: (limit = 10, branchId?: string) =>
     apiClient
-      .get<AuditLogEntry[]>('/admin/audit-logs', { params: { limit, branchId } })
-      .then((r) => r.data),
+      .get<AuditLogsResponse>('/admin/audit-logs', { params: { limit, branchId } })
+      .then((r) => r.data.items),
 
-  // LIVE route exists, response shape unconfirmed — request doc #5
+  // CONFIRMED — `limit` is rejected by this endpoint's DTO (400:
+  // "property limit should not exist"). Do not pass `limit` in filters;
+  // AdminOrdersFilters no longer has that field to prevent regressions.
   getAdminOrders: (filters: AdminOrdersFilters = {}) =>
     apiClient.get<AdminOrder[]>('/admin/orders', { params: filters }).then((r) => r.data),
 };

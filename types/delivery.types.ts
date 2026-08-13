@@ -2,11 +2,6 @@
 
 export type DriverStatus = 'ACTIVE' | 'OFFLINE' | 'UNAVAILABLE' | 'SUSPENDED';
 
-/**
- * CONFIRMED — real response from GET /admin/drivers. Note: there is no
- * separate `id` field — the driver record is keyed by `userId`, and
- * display info (name, email, phone) lives on the nested `user` object.
- */
 export interface Driver {
   userId: string;
   vehicleType: string;
@@ -96,19 +91,24 @@ export interface AdminDelivery {
   };
 }
 
-/**
- * Response shapes for the three Chowdeck endpoints below are STILL NOT
- * CONFIRMED — DriverService just proxies straight to `chowdeckService`
- * (getDeliveryFee / createDelivery / getDelivery / cancelDelivery) and
- * returns whatever that third-party client gives back, untouched. The only
- * certainty: the dispatch response has a `.reference` field (used directly
- * in DriverService for notifications/status history), and the estimate
- * response must contain something usable as `feeId` for the dispatch call.
- * Given the request DTOs to Chowdeck use snake_case (source_address,
- * destination_address), the raw response is likely snake_case too — these
- * types use camelCase as a guess and will need correcting once you either
- * hit these endpoints live or share chowdeck.service.ts.
- */
+
+export interface RawDeliveryAssignment {
+  id: string;
+  orderId: string;
+  driverId: string;
+  status: DeliveryAssignmentStatus;
+  etaMinutes: number | null;
+  deliveryFee: string;
+  assignedAt: string;
+  acceptedAt: string | null;
+  pickedUpAt: string | null;
+  deliveredAt: string | null;
+  failedAt: string | null;
+  driverNotes: string | null;
+  proofOfDeliveryUrl: string | null;
+}
+
+
 export interface ChowdeckFeeEstimate {
   feeId: number;
   fee: number;
@@ -138,8 +138,9 @@ export interface CancelChowdeckPayload {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Delivery Zones — still fully speculative. Nothing in what's
-   been shared backs radius/fee/min-order config anywhere.
+   Delivery Zones — CONFIRMED LIVE. All four endpoints
+   (GET/POST /admin/delivery-zones, PATCH/DELETE /admin/delivery-zones/:id)
+   match Swagger exactly, verified field-for-field.
    ───────────────────────────────────────────────────────────── */
 
 export interface DeliveryZone {
@@ -161,3 +162,67 @@ export interface CreateDeliveryZonePayload {
 }
 
 export type UpdateDeliveryZonePayload = Partial<CreateDeliveryZonePayload> & { enabled?: boolean };
+
+/* ─────────────────────────────────────────────────────────────
+   Delivery Partners — CONFIRMED LIVE (GET/PATCH endpoints verified
+   against Swagger). The summary endpoint below is registered but its
+   response body hasn't been hit live yet — see note on
+   DeliveryPartnersSummary.
+   ───────────────────────────────────────────────────────────── */
+
+export interface DeliveryPartner {
+  id: string;
+  key: string;              // "chowdeck" | "glovo" — maps to DeliveryProvider enum
+  name: string;
+  enabled: boolean;
+  online: boolean;          // derived server-side, not stored
+  active: number;           // derived — count of non-terminal assignments
+  today: number;            // derived — delivered count today
+  avgMin: number;           // derived — avg deliveredAt - assignedAt today
+  commission: number;
+  apiKey: string | null;
+  webhookUrl: string | null;
+}
+
+export interface UpdateDeliveryPartnerPayload {
+  commission?: number;
+  apiKey?: string;
+  webhookUrl?: string;
+  enabled?: boolean;
+}
+
+/**
+ * NOT CONFIRMED — GET /admin/delivery-partners/summary exists in Swagger
+ * (no params, 200 response) but the response body hasn't been hit live yet.
+ * Field names below are a guess based on what PartnersTab currently needs
+ * (totalCompleted, avgDelivery) — the two stats that were hardcoded to 0
+ * because no endpoint existed for them at the time this page was built.
+ *
+ * TODO: replace this comment once you've hit the endpoint — paste the real
+ * response body and correct the field names/casing to match exactly, same
+ * correction pass done earlier for AdminDelivery vs RawDeliveryAssignment.
+ */
+export interface DeliveryPartnersSummary {
+  totalCompleted: number;
+  avgDeliveryMinutes: number;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Chowdeck response types — corrected
+   ───────────────────────────────────────────────────────────── */
+
+/**
+ * NOT CONFIRMED. dispatchViaChowdeck() returns chowdeckService.createDelivery()
+ * untouched — no DeliveryAssignment row is created, so this is NOT AdminDelivery.
+ * The only certainty (from DriverService using it for notifications/history):
+ * there is a `.reference` field. Everything else is a guess pending either a
+ * live hit or chowdeck.service.ts.
+ */
+export interface ChowdeckDispatchResponse {
+  reference: string;
+  status?: string;
+  [key: string]: unknown; // unconfirmed fields — don't assume shape beyond `reference`
+}
+
+/** NOT CONFIRMED — cancelDelivery()'s return value is unknown, proxied raw. */
+export type ChowdeckCancelResponse = Record<string, unknown>;

@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { useMorningCountStore } from "@/store/useMorningCountStore";
+import { useBranch } from "../../layout";
 
 const STATUS_CLASS: Record<string, string> = {
   Updated: "badge badge-green",
@@ -17,11 +18,15 @@ const STATUS_CLASS: Record<string, string> = {
   "Out of stock": "badge badge-red",
 };
 
-// TODO: replace with real values from outlet context / auth session
-const OUTLET_ID = "outlet_1";
+// CHANGED — was a hardcoded "outlet_1" string, sent as-is to the backend
+// and causing a 500 (the backend expects a real branch UUID, same failure
+// mode as the earlier delivery-zones bug). Now sourced from the branch
+// switcher in the layout, which is backed by GET /auth/branches.
 const TODAY = new Date().toISOString().slice(0, 10);
 
 export default function MorningCountPage() {
+  const branch = useBranch();
+
   const {
     sheet,
     sheetLoading,
@@ -42,9 +47,14 @@ export default function MorningCountPage() {
   const [editUnit, setEditUnit] = useState("");
   const [editPackSize, setEditPackSize] = useState("");
 
+  // CHANGED — only fetch once a real branch id is available. branch.id is
+  // "" while GET /auth/branches is still loading (see layout.tsx), so
+  // guard against firing the request with an empty outletId.
   useEffect(() => {
-    fetchSheet(OUTLET_ID, TODAY);
-  }, [fetchSheet]);
+    if (branch.id) {
+      fetchSheet(branch.id, TODAY);
+    }
+  }, [fetchSheet, branch.id]);
 
   const category = selectedCategory();
 
@@ -281,7 +291,6 @@ export default function MorningCountPage() {
 
         {!sheetLoading && (sheetError || !sheet || !category) && (
           <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /morning-count not implemented — see request doc #1 */}
             No count sheet available
           </p>
         )}
@@ -390,7 +399,7 @@ export default function MorningCountPage() {
             color: "var(--color-text)",
             fontFamily: "var(--font-sans)",
           }}
-          onClick={() => fetchSheet(OUTLET_ID, TODAY)}
+          onClick={() => branch.id && fetchSheet(branch.id, TODAY)}
         >
           Reset
         </button>
