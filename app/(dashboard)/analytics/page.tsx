@@ -70,7 +70,7 @@ function TrendDown() {
 }
 
 // ── Custom Tooltip ────────────────────────────────────────────────────────────
-type ChartTooltipProps = TooltipProps<ValueType, NameType> & { metric: AnalyticsMetric; label?: string | number };
+type ChartTooltipProps = TooltipProps<ValueType, NameType> & { metric: AnalyticsMetric; label?: string | number; payload?: any; active?: boolean };
 
 function ChartTooltip({ active, payload, label, metric }: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
