@@ -19,6 +19,16 @@ function extractErrorMessage(error: unknown, fallback: string) {
   return anyErr?.response?.data?.message ?? anyErr?.message ?? fallback;
 }
 
+// GET /admin/inventory/alerts (and /admin/audit-logs) 400 if `branchId` is
+// sent but isn't a real UUID — confirmed via live "branchId must be a
+// UUID" response. Only forward it if it actually looks like one, so an
+// unresolved/undefined branch id degrades to "no filter" (the previous,
+// working behavior) instead of a 400.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function asBranchId(branchId?: string | null): string | undefined {
+  return branchId && UUID_RE.test(branchId) ? branchId : undefined;
+}
+
 interface DashboardState {
   // Summary
   summary: DashboardSummary | null;
@@ -45,7 +55,7 @@ interface DashboardState {
   customersLoading: boolean;
   customersError: boolean;
 
-  // Low stock (not yet built — silent errors)
+  // Low stock (confirmed live)
   lowStock: LowStockAlert[] | null;
   lowStockLoading: boolean;
   lowStockError: boolean;
@@ -60,7 +70,7 @@ interface DashboardState {
   ordersLoading: boolean;
   ordersError: boolean;
 
-  fetchSummary: (vendorId?: string) => Promise<void>;
+  fetchSummary: (vendorId?: string, branchId?: string) => Promise<void>;
   fetchSalesTrends: (vendorId?: string, days?: number) => Promise<void>;
   fetchPopularItems: (vendorId?: string, limit?: number) => Promise<void>;
   fetchDistribution: (vendorId?: string) => Promise<void>;
@@ -70,7 +80,7 @@ interface DashboardState {
   fetchAdminOrders: (filters?: AdminOrdersFilters) => Promise<void>;
 
   // Convenience: fires everything the dashboard page needs on mount
-  fetchAll: (vendorId?: string) => void;
+  fetchAll: (vendorId?: string, branchId?: string) => void;
 }
 
 export const useDashboardStore = create<DashboardState>((set) => ({
@@ -106,10 +116,10 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   ordersLoading: false,
   ordersError: false,
 
-  fetchSummary: async (vendorId) => {
+  fetchSummary: async (vendorId, branchId) => {
     set({ summaryLoading: true, summaryError: false });
     try {
-      const summary = await dashboardService.getSummary(vendorId);
+      const summary = await dashboardService.getSummary(vendorId, asBranchId(branchId));
       set({ summary, summaryLoading: false });
     } catch (error) {
       set({ summaryLoading: false, summaryError: true });
@@ -161,14 +171,16 @@ export const useDashboardStore = create<DashboardState>((set) => ({
     }
   },
 
-  // NOT YET BUILT — fail silently, no toast, no retry loop
+  // CONFIRMED LIVE — errors now surface via toast like the other cards,
+  // matching the rest of the dashboard now that the endpoint exists.
   fetchLowStockAlerts: async (branchId) => {
     set({ lowStockLoading: true, lowStockError: false });
     try {
-      const lowStock = await dashboardService.getLowStockAlerts(branchId);
+      const lowStock = await dashboardService.getLowStockAlerts(asBranchId(branchId));
       set({ lowStock, lowStockLoading: false });
-    } catch {
+    } catch (error) {
       set({ lowStockLoading: false, lowStockError: true });
+      toast.error(extractErrorMessage(error, 'Could not load low stock alerts'));
     }
   },
 
@@ -177,36 +189,40 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   fetchRecentAuditLogs: async (limit = 10, branchId) => {
     set({ auditLogsLoading: true, auditLogsError: false });
     try {
-      const auditLogs = await dashboardService.getRecentAuditLogs(limit, branchId);
+      const auditLogs = await dashboardService.getRecentAuditLogs(limit, asBranchId(branchId));
       set({ auditLogs, auditLogsLoading: false });
-    } catch {
+    } catch (error) {
       set({ auditLogsLoading: false, auditLogsError: true });
+      toast.error(extractErrorMessage(error, 'Could not load recent activity'));
     }
   },
 
-  // Shape unconfirmed — fail silently for now, per request doc #5
   fetchAdminOrders: async (filters = {}) => {
     set({ ordersLoading: true, ordersError: false });
     try {
       const orders = await dashboardService.getAdminOrders(filters);
       set({ orders, ordersLoading: false });
-    } catch {
+    } catch (error) {
       set({ ordersLoading: false, ordersError: true });
+      toast.error(extractErrorMessage(error, 'Could not load recent orders'));
     }
   },
 
-  // CHANGED — fetchAdminOrders no longer called with { limit: 4 }.
-  // Confirmed live: GET /admin/orders rejects `limit` outright (400,
-  // "property limit should not exist" — forbidNonWhitelisted). This was
-  // silently failing the whole Recent Orders table. If capping to a
-  // small preview count is still wanted, that needs a backend answer on
-  // the correct mechanism (page size? different field name?) before
-  // re-adding — see note in AdminOrdersFilters.
-  fetchAll: (vendorId) => {
+  // `limit` is no longer passed to fetchAdminOrders — GET /admin/orders
+  // rejects it outright (400, "property limit should not exist"). The
+  // dashboard preview fetches the list and caps display to 5 rows
+  // client-side — see page.tsx.
+  //
+  // CONFIRMED — GET /admin/orders does filter by `branchId` correctly:
+  // a request with branchId set returns only orders whose `branchId`/
+  // `branch.id` match it. (Earlier note here claiming it didn't filter
+  // was wrong — retracted.)
+  fetchAll: (vendorId, branchId) => {
     const state = useDashboardStore.getState();
-    state.fetchSummary(vendorId);
-    state.fetchLowStockAlerts();
-    state.fetchRecentAuditLogs(5);
-    state.fetchAdminOrders();
+    const validBranchId = asBranchId(branchId);
+    state.fetchSummary(vendorId, validBranchId);
+    state.fetchLowStockAlerts(validBranchId);
+    state.fetchRecentAuditLogs(5, validBranchId);
+    state.fetchAdminOrders({ branchId: validBranchId });
   },
 }));

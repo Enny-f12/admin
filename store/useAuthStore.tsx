@@ -21,17 +21,19 @@ interface AuthState {
   isLoading: boolean;
   error: string | null;
 
-  // NEW — branch dropdown for the login screen. Kept separate from the
-  // auth-loading state since branches load before/independently of any
-  // login attempt.
   branches: Branch[] | null;
   branchesLoading: boolean;
   branchesError: boolean;
 
+  // NEW — the branchId (if any) the user picked on the login screen.
+  // Only meaningful for roles that can pick a branch at all (i.e.
+  // SUPER_ADMIN with no assignedBranchId) — the admin layout reads this
+  // to default the branch switcher to whatever was chosen at login,
+  // instead of "All Branches" or an arbitrary first branch. Persisted so
+  // it survives a refresh; cleared on logout.
+  loginBranchId: string | null;
+
   setAuth: (data: { user: User; accessToken: string; refreshToken: string }) => void;
-  // Lighter-weight than setAuth — used by the api-client interceptor after a
-  // silent token refresh, where we only get back new tokens, not a fresh
-  // user object. Leaves `user` and `isAuthenticated` untouched.
   setTokens: (data: { accessToken: string; refreshToken: string }) => void;
   clearAuth: () => void;
   clearError: () => void;
@@ -45,7 +47,6 @@ interface AuthState {
   logout: () => Promise<void>;
   fetchMe: () => Promise<void>;
 
-  // NEW
   fetchBranches: () => Promise<void>;
 }
 
@@ -68,6 +69,8 @@ export const useAuthStore = create<AuthState>()(
       branchesLoading: false,
       branchesError: false,
 
+      loginBranchId: null,
+
       setAuth: ({ user, accessToken, refreshToken }) =>
         set({ user, accessToken, refreshToken, isAuthenticated: true }),
 
@@ -75,7 +78,13 @@ export const useAuthStore = create<AuthState>()(
         set({ accessToken, refreshToken }),
 
       clearAuth: () =>
-        set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false }),
+        set({
+          user: null,
+          accessToken: null,
+          refreshToken: null,
+          isAuthenticated: false,
+          loginBranchId: null,
+        }),
 
       clearError: () => set({ error: null }),
 
@@ -94,14 +103,16 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      // payload now optionally carries branchId straight through to the
-      // backend — see LoginPayload in auth.types.ts.
+      // CHANGED — now also captures whichever branchId was passed in the
+      // login payload (if any) into loginBranchId, so the admin layout
+      // can show that branch first instead of defaulting to "All
+      // Branches" or the first branch in the list.
       login: async (payload) => {
         set({ isLoading: true, error: null });
         try {
           const res = await authService.login(payload);
           get().setAuth(res);
-          set({ isLoading: false });
+          set({ isLoading: false, loginBranchId: payload.branchId ?? null });
           toast.success('Welcome back!');
           return true;
         } catch (error) {
@@ -198,9 +209,6 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      // NEW — powers the branch dropdown on the login screen. Separate
-      // loading/error flags from isLoading so a branches-fetch failure
-      // doesn't block or disguise itself as a login error.
       fetchBranches: async () => {
         set({ branchesLoading: true, branchesError: false });
         try {
@@ -218,6 +226,7 @@ export const useAuthStore = create<AuthState>()(
         accessToken: state.accessToken,
         refreshToken: state.refreshToken,
         isAuthenticated: state.isAuthenticated,
+        loginBranchId: state.loginBranchId,
       }),
     },
   ),

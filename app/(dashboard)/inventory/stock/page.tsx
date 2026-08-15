@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Box,
   AlertTriangle,
@@ -15,6 +15,7 @@ import {
   TrendingUp,
   TrendingDown,
 } from "lucide-react";
+import { useEffect } from "react";
 import { useStockStore } from "@/store/useStockStore";
 import { StockItem, StockStatus } from "@/types/stock.types";
 
@@ -43,6 +44,81 @@ const StatusBadge = ({ status }: { status: StockStatus }) => (
 );
 
 const ALL_BRANCHES_ID = "all";
+
+/* ── Pagination hook + bar (shared by both tables) ──
+   No effect / no setState-in-effect: page is clamped at render time,
+   and only ever changed from real user actions (goToPage / changePageSize). */
+function usePagination<T>(data: T[], initialPageSize: 5 | 10 = 10) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<5 | 10>(initialPageSize);
+
+  const totalPages = Math.max(1, Math.ceil(data.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+
+  const start = (currentPage - 1) * pageSize;
+  const pageItems = data.slice(start, start + pageSize);
+
+  const goToPage = (p: number) => setPage(Math.min(Math.max(1, p), totalPages));
+  const changePageSize = (n: 5 | 10) => {
+    setPageSize(n);
+    setPage(1);
+  };
+
+  return { page: currentPage, goToPage, pageSize, changePageSize, totalPages, pageItems, start };
+}
+
+function PaginationBar({
+  page, goToPage, pageSize, changePageSize, totalPages, totalItems, start,
+}: {
+  page: number;
+  goToPage: (p: number) => void;
+  pageSize: 5 | 10;
+  changePageSize: (n: 5 | 10) => void;
+  totalPages: number;
+  totalItems: number;
+  start: number;
+}) {
+  const end = Math.min(start + pageSize, totalItems);
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "12px 16px", borderTop: "1px solid var(--color-border)", flexWrap: "wrap", gap: 10,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+        Show
+        <select
+          className="input"
+          value={pageSize}
+          onChange={(e) => changePageSize(Number(e.target.value) as 5 | 10)}
+          style={{ width: 64, padding: "4px 8px" }}
+        >
+          <option value={5}>5</option>
+          <option value={10}>10</option>
+        </select>
+        {totalItems > 0 ? `${start + 1}–${end} of ${totalItems}` : "0 of 0"}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button disabled={page <= 1} onClick={() => goToPage(page - 1)} style={pagerBtn(page <= 1)}>
+          Prev
+        </button>
+        <span style={{ fontSize: "0.8rem", color: "var(--color-text)" }}>
+          Page {page} of {totalPages}
+        </span>
+        <button disabled={page >= totalPages} onClick={() => goToPage(page + 1)} style={pagerBtn(page >= totalPages)}>
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const pagerBtn = (disabled: boolean): React.CSSProperties => ({
+  padding: "6px 12px", borderRadius: 6, border: "1px solid var(--color-border)",
+  background: disabled ? "var(--color-bg-soft)" : "#fff", color: disabled ? "var(--color-text-muted)" : "var(--color-text)",
+  fontSize: "0.8rem", cursor: disabled ? "not-allowed" : "pointer", fontFamily: "var(--font-sans)",
+});
 
 export default function StockInventoryPage() {
   const {
@@ -88,6 +164,13 @@ export default function StockInventoryPage() {
   const totalItems = items?.length ?? 0;
   const lowStockCount = items?.filter((i) => i.status === "Low Stock").length ?? 0;
   const criticalCount = items?.filter((i) => i.status === "Critical").length ?? 0;
+
+  // dedupe defends against duplicate itemIds coming back from /admin/stock/alerts
+  const dedupedLowStock = (lowStock ?? []).filter(
+    (a, i, arr) => arr.findIndex((x) => x.itemId === a.itemId) === i,
+  );
+
+  const { page, goToPage, pageSize, changePageSize, totalPages, pageItems, start } = usePagination(items ?? [], 10);
 
   const toModalItem = (item: StockItem, fallbackBranchId?: string): ModalItem => {
     const qty =
@@ -227,11 +310,11 @@ export default function StockInventoryPage() {
             {lowStockLoading && (
               <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p>
             )}
-            {!lowStockLoading && !lowStock?.length && (
+            {!lowStockLoading && !dedupedLowStock.length && (
               <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No alerts right now</p>
             )}
             {!lowStockLoading &&
-              lowStock?.map((a) => (
+              dedupedLowStock.map((a) => (
                 <div key={a.itemId} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", padding: "3px 0" }}>
                   <span style={{ color: "var(--color-text)" }}>{a.itemName}</span>
                   <span style={{ color: "#E10B1C", fontWeight: 600 }}>{a.currentQuantity} {a.unit} left</span>
@@ -246,55 +329,60 @@ export default function StockInventoryPage() {
             )}
             {!itemsLoading && (itemsError || !items?.length) && (
               <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-                {/* TODO(BACKEND): GET /admin/inventory/items not implemented — see request doc #1 */}
                 No inventory data available
               </p>
             )}
             {!itemsLoading && items && items.length > 0 && (
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Item</th>
-                      {(branches ?? []).map((b) => (
-                        <th key={b.id}>{b.name}</th>
-                      ))}
-                      <th>Total</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((item) => (
-                      <tr key={item.id}>
-                        <td>
-                          <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{item.name}</p>
-                          <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{item.unit}</p>
-                        </td>
+              <>
+                <div className="table-wrapper">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Item</th>
                         {(branches ?? []).map((b) => (
-                          <td key={b.id}>
-                            {item.quantities.find((q) => q.branchId === b.id)?.quantity ?? "-"}
-                          </td>
+                          <th key={b.id}>{b.name}</th>
                         ))}
-                        <td style={{ fontWeight: 600 }}>{item.total}</td>
-                        <td><StatusBadge status={item.status} /></td>
-                        <td>
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <IconButton
-                              icon={<Plus size={14} strokeWidth={2} />}
-                              onClick={() => setAdjustItem(toModalItem(item, branchId === ALL_BRANCHES_ID ? undefined : branchId))}
-                            />
-                            <IconButton
-                              icon={<ArrowLeftRight size={14} strokeWidth={1.8} />}
-                              onClick={() => setTransferItem(toModalItem(item, branchId === ALL_BRANCHES_ID ? undefined : branchId))}
-                            />
-                          </div>
-                        </td>
+                        <th>Total</th>
+                        <th>Status</th>
+                        <th>Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {pageItems.map((item) => (
+                        <tr key={item.id}>
+                          <td>
+                            <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{item.name}</p>
+                            <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{item.unit}</p>
+                          </td>
+                          {(branches ?? []).map((b) => (
+                            <td key={b.id}>
+                              {item.quantities.find((q) => q.branchId === b.id)?.quantity ?? "-"}
+                            </td>
+                          ))}
+                          <td style={{ fontWeight: 600 }}>{item.total}</td>
+                          <td><StatusBadge status={item.status} /></td>
+                          <td>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <IconButton
+                                icon={<Plus size={14} strokeWidth={2} />}
+                                onClick={() => setAdjustItem(toModalItem(item, branchId === ALL_BRANCHES_ID ? undefined : branchId))}
+                              />
+                              <IconButton
+                                icon={<ArrowLeftRight size={14} strokeWidth={1.8} />}
+                                onClick={() => setTransferItem(toModalItem(item, branchId === ALL_BRANCHES_ID ? undefined : branchId))}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <PaginationBar
+                  page={page} goToPage={goToPage} pageSize={pageSize} changePageSize={changePageSize}
+                  totalPages={totalPages} totalItems={items.length} start={start}
+                />
+              </>
             )}
           </div>
         </>
@@ -751,14 +839,22 @@ function AddSupplierModal({
 }
 
 /* ── Threshold Configuration view ── */
+
+type ThresholdRow = {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  threshold: number;
+  notify: boolean;
+  autoReorder: boolean;
+};
+
 function ThresholdView({ onBack }: { onBack: () => void }) {
   const { thresholds, thresholdsLoading, thresholdsError, savingThresholds, fetchThresholds, saveThresholds } =
     useStockStore();
   const [search, setSearch] = useState("");
   const [defaultThreshold, setDefaultThreshold] = useState(10);
-  const [rows, setRows] = useState<
-    { itemId: string; itemName: string; unit: string; threshold: number; notify: boolean; autoReorder: boolean }[]
-  >([]);
+  const [rows, setRows] = useState<ThresholdRow[]>([]);
 
   useEffect(() => {
     fetchThresholds();
@@ -772,10 +868,15 @@ function ThresholdView({ onBack }: { onBack: () => void }) {
     }
   }, [thresholds]);
 
-  const updateRow = (i: number, patch: Partial<(typeof rows)[number]>) =>
-    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const updateRow = (itemId: string, patch: Partial<ThresholdRow>) =>
+    setRows((prev) => prev.map((r) => (r.itemId === itemId ? { ...r, ...patch } : r)));
 
-  const filtered = rows.filter((r) => r.itemName.toLowerCase().includes(search.toLowerCase()));
+  // defensive de-dupe: guards the UI even if the API sends a duplicate itemId
+  const filtered = rows
+    .filter((r) => r.itemName.toLowerCase().includes(search.toLowerCase()))
+    .filter((r, i, arr) => arr.findIndex((x) => x.itemId === r.itemId) === i);
+
+  const { page, goToPage, pageSize, changePageSize, totalPages, pageItems, start } = usePagination(filtered, 10);
 
   return (
     <>
@@ -828,45 +929,50 @@ function ThresholdView({ onBack }: { onBack: () => void }) {
         )}
         {!thresholdsLoading && (thresholdsError || !rows.length) && (
           <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/inventory/thresholds not implemented — see request doc #7 */}
             No threshold data available
           </p>
         )}
         {!thresholdsLoading && rows.length > 0 && (
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  {["Item", "Threshold", "Notify?", "Auto-reorder"].map((c) => <th key={c}>{c}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((row, i) => (
-                  <tr key={row.itemId}>
-                    <td>
-                      <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{row.itemName}</p>
-                      <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{row.unit}</p>
-                    </td>
-                    <td>
-                      <input
-                        className="input"
-                        type="number"
-                        value={row.threshold}
-                        onChange={(e) => updateRow(i, { threshold: Number(e.target.value) || 0 })}
-                        style={{ width: 90 }}
-                      />
-                    </td>
-                    <td>
-                      <Radio checked={row.notify} onClick={() => updateRow(i, { notify: !row.notify })} label="Yes" />
-                    </td>
-                    <td>
-                      <Radio checked={row.autoReorder} onClick={() => updateRow(i, { autoReorder: !row.autoReorder })} label="Yes" />
-                    </td>
+          <>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    {["Item", "Threshold", "Notify?", "Auto-reorder"].map((c) => <th key={c}>{c}</th>)}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {pageItems.map((row) => (
+                    <tr key={row.itemId}>
+                      <td>
+                        <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{row.itemName}</p>
+                        <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{row.unit}</p>
+                      </td>
+                      <td>
+                        <input
+                          className="input"
+                          type="number"
+                          value={row.threshold}
+                          onChange={(e) => updateRow(row.itemId, { threshold: Number(e.target.value) || 0 })}
+                          style={{ width: 90 }}
+                        />
+                      </td>
+                      <td>
+                        <Radio checked={row.notify} onClick={() => updateRow(row.itemId, { notify: !row.notify })} label="Yes" />
+                      </td>
+                      <td>
+                        <Radio checked={row.autoReorder} onClick={() => updateRow(row.itemId, { autoReorder: !row.autoReorder })} label="Yes" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <PaginationBar
+              page={page} goToPage={goToPage} pageSize={pageSize} changePageSize={changePageSize}
+              totalPages={totalPages} totalItems={filtered.length} start={start}
+            />
+          </>
         )}
       </div>
 
