@@ -1,11 +1,10 @@
-
-@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
+
 /* ============================================================
    ADMIN DESIGN SYSTEM
    ============================================================ */
 :root {
-  /* ── Brand (inherited from marketing) ── */
+  /* ── Brand ── */
   --color-primary:         #E10B1C;
   --color-primary-hover:   #c40917;
   --color-secondary:       #FCD063;
@@ -16,12 +15,12 @@
   --color-error:   #ef4444;
   --color-info:    #3b82f6;
 
-  /* ── Typography — Figtree for everything in admin ── */
-  --font-sans: 'Figtree', sans-serif;
+  /* ── Typography ── */
+  --font-sans: var(--font-figtree), 'Figtree', sans-serif;
 
   /* ── Spacing ── */
-  --sidebar-width:  240px;
-  --navbar-height:  64px;
+  --sidebar-width: 240px;
+  --navbar-height: 64px;
 
   --transition-theme: background-color 0.3s ease, color 0.3s ease,
                       border-color 0.3s ease, box-shadow 0.3s ease;
@@ -32,29 +31,29 @@
    ============================================================ */
 :root,
 [data-theme="light"] {
-  --color-bg:             #F7F5F0;
-  --color-bg-soft:        #EFECE4;
+  --color-bg:             #Ffffff;
+  --color-bg-soft:        #F1F5F9;
   --color-bg-card:        #FFFFFF;
   --color-bg-input:       #FFFFFF;
   --color-bg-hover:       #FFF5D6;
-  --color-bg-sidebar:     #1C1C1E;
+  --color-bg-sidebar:     #FFFFFF;
 
-  --color-text:           #1A1A1A;
-  --color-text-secondary: #6B6B6B;
-  --color-text-muted:     #A0A0A0;
-  --color-heading:        #111111;
+  --color-text:           #374151;
+  --color-text-secondary: #6B7280;
+  --color-text-muted:     #9CA3AF;
+  --color-heading:        #111827;
 
-  --color-border:         #E4E0D8;
+  --color-border:         #E5E7EB;
   --color-border-focus:   var(--color-primary);
-  --color-shadow:         rgba(0,0,0,0.06);
+  --color-shadow:         rgba(0,0,0,0.05);
 
-  /* Sidebar stays dark in both themes */
-  --color-sidebar-bg:          #181818;
-  --color-sidebar-border:      rgba(255,255,255,0.06);
-  --color-sidebar-text:        rgba(255,255,255,0.55);
-  --color-sidebar-text-hover:  rgba(255,255,255,0.9);
-  --color-sidebar-hover-bg:    rgba(255,255,255,0.06);
-  --color-sidebar-active-bg:   rgba(225, 11, 28, 0.15);
+  /* Sidebar (light) */
+  --color-sidebar-bg:          #FFFFFF;
+  --color-sidebar-border:      #E5E7EB;
+  --color-sidebar-text:        #6B7280;
+  --color-sidebar-text-hover:  #111827;
+  --color-sidebar-hover-bg:    #F8FAFC;
+  --color-sidebar-active-bg:   rgba(225, 11, 28, 0.08);
   --color-sidebar-active-text: #E10B1C;
 }
 
@@ -62,26 +61,26 @@
    DARK THEME
    ============================================================ */
 [data-theme="dark"] {
-  --color-bg:             #141210;
-  --color-bg-soft:        #1a1714;
-  --color-bg-card:        #1f1c18;
-  --color-bg-input:       #2a2620;
-  --color-bg-hover:       #2a2620;
+  --color-bg:             #0F172A;
+  --color-bg-soft:        #1E293B;
+  --color-bg-card:        #1E293B;
+  --color-bg-input:       #334155;
+  --color-bg-hover:       #334155;
 
-  --color-text:           #E8E4DC;
-  --color-text-secondary: #9A9690;
-  --color-text-muted:     #605C58;
-  --color-heading:        #F5F0E8;
+  --color-text:           #E2E8F0;
+  --color-text-secondary: #94A3B8;
+  --color-text-muted:     #64748B;
+  --color-heading:        #F8FAFC;
 
-  --color-border:         #2e2a24;
+  --color-border:         #334155;
   --color-border-focus:   var(--color-primary);
   --color-shadow:         rgba(0,0,0,0.40);
 
-  --color-sidebar-bg:          #0e0c0a;
-  --color-sidebar-border:      rgba(255,255,255,0.05);
-  --color-sidebar-text:        rgba(255,255,255,0.45);
-  --color-sidebar-text-hover:  rgba(255,255,255,0.85);
-  --color-sidebar-hover-bg:    rgba(255,255,255,0.05);
+  --color-sidebar-bg:          #0F172A;
+  --color-sidebar-border:      #1E293B;
+  --color-sidebar-text:        #94A3B8;
+  --color-sidebar-text-hover:  #F8FAFC;
+  --color-sidebar-hover-bg:    #1E293B;
   --color-sidebar-active-bg:   rgba(225, 11, 28, 0.18);
   --color-sidebar-active-text: #f4404e;
 }
@@ -90,7 +89,7 @@
    TAILWIND BRIDGE
    ============================================================ */
 @theme inline {
-  --font-sans:     'Figtree', sans-serif;
+  --font-sans:     var(--font-figtree), 'Figtree', sans-serif;
   --color-primary: var(--color-primary);
   --color-border:  var(--color-border);
 }
@@ -103,9 +102,7 @@
   margin: 0;
   padding: 0;
 }
-
 html {
-  scroll-behavior: smooth;
   overflow-x: hidden;
 }
 
@@ -125,18 +122,6 @@ h1, h2, h3, h4, h5, h6 {
   color:       var(--color-heading);
   line-height: 1.2;
   font-weight: 700;
-}
-
-/* ============================================================
-   LAYOUT SHELL
-   ============================================================ */
-.main-wrapper {
-  margin-left: var(--sidebar-width);
-  min-height: 100vh;
-}
-
-.main-content {
-  padding: calc(var(--navbar-height) + 28px) 28px 40px;
 }
 
 /* ============================================================
@@ -162,7 +147,7 @@ h1, h2, h3, h4, h5, h6 {
   border:        1px solid var(--color-border);
   border-radius: 12px;
   padding:       20px;
-  box-shadow:    0 1px 4px var(--color-shadow);
+  box-shadow:    0 1px 3px var(--color-shadow);
 }
 
 /* Stat card */
@@ -174,7 +159,7 @@ h1, h2, h3, h4, h5, h6 {
   display:       flex;
   flex-direction: column;
   gap:           6px;
-  box-shadow:    0 1px 4px var(--color-shadow);
+  box-shadow:    0 1px 3px var(--color-shadow);
 }
 
 .stat-label {
@@ -192,21 +177,21 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: -0.5px;
 }
 
-.stat-change       { font-size: 0.75rem; color: var(--color-success); }
-.stat-change.down  { color: var(--color-error); }
+.stat-change      { font-size: 0.75rem; color: var(--color-success); }
+.stat-change.down { color: var(--color-error); }
 
 /* Badge */
 .badge {
-  display:        inline-flex;
-  align-items:    center;
-  padding:        3px 8px;
-  border-radius:  20px;
-  font-size:      0.7rem;
-  font-weight:    600;
+  display:     inline-flex;
+  align-items: center;
+  padding:     3px 10px;
+  border-radius: 20px;
+  font-size:   0.7rem;
+  font-weight: 600;
 }
 
-.badge-red    { background: rgba(225,11,28,0.1);   color: #E10B1C; }
-.badge-gold   { background: rgba(252,208,99,0.2);  color: #a07a00; }
+.badge-red    { background: rgba(225,11,28,0.10);  color: #E10B1C; }
+.badge-gold   { background: rgba(252,208,99,0.20); color: #a07a00; }
 .badge-green  { background: rgba(34,197,94,0.12);  color: #16a34a; }
 .badge-yellow { background: rgba(245,158,11,0.12); color: #b45309; }
 .badge-blue   { background: rgba(59,130,246,0.12); color: #2563eb; }
@@ -214,30 +199,24 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Button */
 .btn {
-  display:     inline-flex;
-  align-items: center;
-  gap:         6px;
-  padding:     8px 16px;
+  display:       inline-flex;
+  align-items:   center;
+  gap:           6px;
+  padding:       8px 16px;
   border-radius: 8px;
-  font-family: var(--font-sans);
-  font-size:   0.825rem;
-  font-weight: 600;
-  cursor:      pointer;
-  transition:  all 0.15s ease;
-  border:      none;
+  font-family:   var(--font-sans);
+  font-size:     0.825rem;
+  font-weight:   600;
+  cursor:        pointer;
+  transition:    all 0.15s ease;
+  border:        none;
   text-decoration: none;
 }
 
-.btn-primary {
-  background: var(--color-primary);
-  color: #fff;
-}
+.btn-primary { background: var(--color-primary); color: #fff; }
 .btn-primary:hover { background: var(--color-primary-hover); }
 
-.btn-secondary {
-  background: var(--color-secondary);
-  color: #1A1A1A;
-}
+.btn-secondary { background: var(--color-secondary); color: #1A1A1A; }
 .btn-secondary:hover { background: var(--color-secondary-hover); }
 
 .btn-ghost {
