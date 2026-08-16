@@ -8,9 +8,10 @@ import {
   CheckCircle2,
   SquarePen,
   X,
+  Loader2,
 } from "lucide-react";
 import { useMorningCountStore } from "@/store/useMorningCountStore";
-import { useBranch } from "../../layout";
+import { useBranch, ALL_BRANCHES_ID } from "../../layout";
 
 const STATUS_CLASS: Record<string, string> = {
   Updated: "badge badge-green",
@@ -18,11 +19,16 @@ const STATUS_CLASS: Record<string, string> = {
   "Out of stock": "badge badge-red",
 };
 
-// CHANGED — was a hardcoded "outlet_1" string, sent as-is to the backend
-// and causing a 500 (the backend expects a real branch UUID, same failure
-// mode as the earlier delivery-zones bug). Now sourced from the branch
-// switcher in the layout, which is backed by GET /auth/branches.
 const TODAY = new Date().toISOString().slice(0, 10);
+
+// Backend sends sheet.date as a raw ISO string (e.g.
+// "2026-08-14T00:00:00.000Z") — display it as "14 August 2026" instead.
+function formatDayMonthYear(iso?: string | null) {
+  if (!iso) return "–";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+}
 
 export default function MorningCountPage() {
   const branch = useBranch();
@@ -33,6 +39,7 @@ export default function MorningCountPage() {
     sheetError,
     selectedCategoryId,
     isSavingDraft,
+    updatingItemIds,
     fetchSheet,
     selectCategory,
     selectedCategory,
@@ -42,21 +49,34 @@ export default function MorningCountPage() {
     submitSelectedCategory,
   } = useMorningCountStore();
 
+
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [editing, setEditing] = useState<{ itemId: string } | null>(null);
   const [editUnit, setEditUnit] = useState("");
   const [editPackSize, setEditPackSize] = useState("");
 
-  // CHANGED — only fetch once a real branch id is available. branch.id is
-  // "" while GET /auth/branches is still loading (see layout.tsx), so
-  // guard against firing the request with an empty outletId.
+  // Morning Count is inherently single-branch — you physically count
+  // stock at one location, so "All Branches" isn't a valid context here
+  // the way it is for the dashboard's aggregate cards.
+  const isAllBranches = branch.id === ALL_BRANCHES_ID;
+  const hasUsableBranch = Boolean(branch.id) && !isAllBranches;
+
   useEffect(() => {
-    if (branch.id) {
+    if (hasUsableBranch) {
       fetchSheet(branch.id, TODAY);
     }
-  }, [fetchSheet, branch.id]);
+  }, [fetchSheet, branch.id, hasUsableBranch]);
 
   const category = selectedCategory();
+
+  // CHANGED — display name now sourced from useBranch() (GET
+  // /auth/branches, same source as the sidebar/dashboard header), not
+  // sheet.outletName. Two endpoints independently returning a branch
+  // name risks them drifting out of sync; branch.id is already what
+  // fetchSheet is keyed on, so branch.name is the consistent choice for
+  // what to *display* too. sheet?.outletName kept only as a last-resort
+  // fallback in case branch.name is ever empty mid-load.
+  const outletDisplayName = branch.name || sheet?.outletName || "—";
 
   const openEdit = (itemId: string) => {
     if (!category) return;
@@ -75,6 +95,19 @@ export default function MorningCountPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, position: "relative" }}>
+      <style jsx global>{`
+        .spin {
+          animation: morning-count-spin 0.8s linear infinite;
+        }
+        @keyframes morning-count-spin {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+      `}</style>
 
       {/* Header — always renders, independent of sheet load state */}
       <div
@@ -88,7 +121,7 @@ export default function MorningCountPage() {
       >
         <div>
           <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-            {sheet?.outletName ?? "—"} <span style={{ margin: "0 4px" }}>•</span>{" "}
+            {outletDisplayName} <span style={{ margin: "0 4px" }}>•</span>{" "}
             <span style={{ fontWeight: 700 }}>(FOOD ITEMS ONLY)</span>
           </p>
           <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, letterSpacing: "0.01em", color: "var(--color-heading)" }}>
@@ -126,7 +159,7 @@ export default function MorningCountPage() {
       {/* Meta rows */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: -8 }}>
         {[
-          ["Date:", sheet?.date ?? "–"],
+          ["Date:", formatDayMonthYear(sheet?.date)],
           ["Counter Staff:", sheet?.counterStaffName ?? "–"],
           ["Time:", sheet?.time ?? "–"],
         ].map(([label, value]) => (
@@ -138,7 +171,7 @@ export default function MorningCountPage() {
       </div>
 
       {/* Instructions */}
-      <div className="card" style={{ border: "1px solid rgba(225,11,28,0.35)" }}>
+      <div className="card" style={{ background: "rgba(225,11,28,0.08)", border: "1px solid rgba(225,11,28,0.35)" }}>
         <p style={{ margin: "0 0 8px", fontSize: "0.9rem", fontWeight: 700, color: "var(--color-text)" }}>
           INSTRUCTIONS:
         </p>
@@ -289,7 +322,13 @@ export default function MorningCountPage() {
           <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p>
         )}
 
-        {!sheetLoading && (sheetError || !sheet || !category) && (
+        {!sheetLoading && isAllBranches && (
+          <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            Morning count is per-branch — pick a specific branch from the switcher above to view or start a count sheet.
+          </p>
+        )}
+
+        {!sheetLoading && !isAllBranches && (sheetError || !sheet || !category) && (
           <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
             No count sheet available
           </p>
@@ -330,10 +369,30 @@ export default function MorningCountPage() {
                           onChange={(e) =>
                             updateItemCurrent(item.id, e.target.value === "" ? null : Number(e.target.value))
                           }
-                          style={{ width: 90, opacity: category.submitted ? 0.6 : 1 }}
+                          style={{
+                            width: 90,
+                            opacity: category.submitted ? 0.6 : updatingItemIds[item.id] ? 0.85 : 1,
+                          }}
                         />
                       </td>
-                      <td>{item.status && <span className={STATUS_CLASS[item.status]}>{item.status}</span>}</td>
+                      <td>
+                        {updatingItemIds[item.id] ? (
+                          <span
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              fontSize: "0.78rem",
+                              color: "var(--color-text-muted)",
+                            }}
+                          >
+                            <Loader2 size={13} strokeWidth={2} className="spin" />
+                            Saving…
+                          </span>
+                        ) : (
+                          item.status && <span className={STATUS_CLASS[item.status]}>{item.status}</span>
+                        )}
+                      </td>
                       <td>
                         <button
                           onClick={() => openEdit(item.id)}
@@ -399,7 +458,7 @@ export default function MorningCountPage() {
             color: "var(--color-text)",
             fontFamily: "var(--font-sans)",
           }}
-          onClick={() => branch.id && fetchSheet(branch.id, TODAY)}
+          onClick={() => hasUsableBranch && fetchSheet(branch.id, TODAY)}
         >
           Reset
         </button>

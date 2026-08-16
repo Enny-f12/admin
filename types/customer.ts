@@ -1,4 +1,3 @@
-// types/customer.ts
 export interface AdminCustomer {
   id: string;
   fullName: string;
@@ -14,6 +13,10 @@ export interface AdminCustomersFilters {
   search?: string;
   page?: number;
   limit?: number;
+  // NOT confirmed via Swagger — added defensively, same pattern as the
+  // confirmed branch-filtered endpoints. Verify backend actually applies
+  // this filter before relying on it.
+  branchId?: string;
 }
 
 export interface AdminCustomersResponse {

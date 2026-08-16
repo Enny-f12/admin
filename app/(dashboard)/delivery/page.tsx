@@ -25,7 +25,7 @@ import {
     DeliveryAssignmentStatus,
     DeliveryZone,
 } from "@/types/delivery.types";
-import { useBranch } from "../layout";
+import { useBranch, ALL_BRANCHES_ID } from "../layout";
 
 /* ══════════════════════════════════════════
    TYPES
@@ -226,6 +226,15 @@ function ErrorState({ label, onRetry }: { label: string; onRetry: () => void }) 
 /* ══════════════════════════════════════════
    PARTNERS TAB
 ══════════════════════════════════════════ */
+// CHANGED — branchId now threaded through both fetchPartners and
+// fetchPartnersSummary, sourced from useBranch() same as every other
+// branch-scoped tab this session. "All Branches" is sent through as-is
+// (undefined branchId, i.e. unfiltered) rather than blocked, since an
+// aggregate view across every branch's partner stats is a reasonable
+// thing to want here — unlike Morning Count/Reservation Policies, there's
+// no physical reason a partner overview can't span branches. Flag if
+// that assumption is wrong and this should be added to
+// BRANCH_REQUIRED_PREFIXES instead.
 function PartnersTab() {
     const partners = useDeliveryStore((s) => s.partners);
     const partnersLoading = useDeliveryStore((s) => s.partnersLoading);
@@ -241,23 +250,35 @@ function PartnersTab() {
     const partnersSummary = useDeliveryStore((s) => s.partnersSummary);
     const fetchPartnersSummary = useDeliveryStore((s) => s.fetchPartnersSummary);
 
+    const branch = useBranch();
+    // Sentinel never a real UUID — same convention as the dashboard's
+    // asBranchId guard, sent through as undefined so the backend gets
+    // no filter (aggregate) instead of a 400 on an invalid UUID.
+    const effectiveBranchId = branch.id && branch.id !== ALL_BRANCHES_ID ? branch.id : undefined;
+
     const [settingsTarget, setSettingsTarget] = useState<DeliveryPartner | null>(null);
     const [form, setForm] = useState({ commission: "", apiKey: "", webhookUrl: "", enabled: false, showKey: false });
 
     useEffect(() => {
-        fetchPartners();
-        fetchPartnersSummary();
-    }, [fetchPartners, fetchPartnersSummary]);
+        fetchPartners(effectiveBranchId);
+        fetchPartnersSummary(effectiveBranchId);
+    }, [fetchPartners, fetchPartnersSummary, effectiveBranchId]);
 
     const list = partners ?? [];
-    const totalActive = list.reduce((s, p) => s + (p.enabled ? p.active : 0), 0);
-    const totalToday = list.reduce((s, p) => s + p.today, 0);
 
-    // Sourced from GET /admin/delivery-partners/summary. Field names on
-    // DeliveryPartnersSummary are still provisional — see the note in
-    // delivery.types.ts.
-    const totalCompleted = partnersSummary?.totalCompleted ?? 0;
-    const avgDelivery = partnersSummary?.avgDeliveryMinutes ?? 0;
+    // All four stat cards now source directly from
+    // GET /admin/delivery-partners/summary — confirmed live response:
+    // { activePartners, liveOrders, completedToday, avgDeliveryMin }.
+    // Previously "Active Partners"/"Live Orders" were derived locally by
+    // summing the partners list, and "Completed Today"/"Avg Delivery"
+    // read field names (totalCompleted/avgDeliveryMinutes) that didn't
+    // exist on the real payload — so half the row was a local guess and
+    // half was silently reading undefined. Using the backend's own
+    // numbers for all four keeps them consistent with each other.
+    const totalActive = partnersSummary?.activePartners ?? 0;
+    const totalToday = partnersSummary?.liveOrders ?? 0;
+    const totalCompleted = partnersSummary?.completedToday ?? 0;
+    const avgDelivery = partnersSummary?.avgDeliveryMin ?? 0;
 
     const openSettings = (p: DeliveryPartner) => {
         setSettingsTarget(p);
@@ -275,7 +296,7 @@ function PartnersTab() {
         if (ok) setSettingsTarget(null);
     };
 
-    if (partnersError && !partners) return <ErrorState label="Could not load delivery partners." onRetry={fetchPartners} />;
+    if (partnersError && !partners) return <ErrorState label="Could not load delivery partners." onRetry={() => fetchPartners(effectiveBranchId)} />;
 
     const showSkeleton = partnersLoading && !partners;
 
@@ -406,22 +427,30 @@ function PartnersTab() {
 /* ══════════════════════════════════════════
    LIVE ORDERS TAB
 ══════════════════════════════════════════ */
+// CHANGED — branchId now threaded through fetchActiveDeliveries, sourced
+// from useBranch(). "All Branches" sent through as undefined (no
+// filter) — same reasoning as PartnersTab above; an ops-wide live board
+// showing every branch's active deliveries at once is a legitimate view,
+// not a per-branch-only operation like Morning Count.
 function LiveOrdersTab() {
     const activeDeliveries = useDeliveryStore((s) => s.activeDeliveries);
     const activeDeliveriesLoading = useDeliveryStore((s) => s.activeDeliveriesLoading);
     const activeDeliveriesError = useDeliveryStore((s) => s.activeDeliveriesError);
     const fetchActiveDeliveries = useDeliveryStore((s) => s.fetchActiveDeliveries);
 
+    const branch = useBranch();
+    const effectiveBranchId = branch.id && branch.id !== ALL_BRANCHES_ID ? branch.id : undefined;
+
     const [detail, setDetail] = useState<AdminDelivery | null>(null);
 
     useEffect(() => {
-        fetchActiveDeliveries();
-    }, [fetchActiveDeliveries]);
+        fetchActiveDeliveries(effectiveBranchId);
+    }, [fetchActiveDeliveries, effectiveBranchId]);
 
     const orders = activeDeliveries ?? [];
     const stepIndex = (status: DeliveryAssignmentStatus) => DELIVERY_STEPS.indexOf(STATUS_DISPLAY[status]);
 
-    if (activeDeliveriesError && !activeDeliveries) return <ErrorState label="Could not load active deliveries." onRetry={fetchActiveDeliveries} />;
+    if (activeDeliveriesError && !activeDeliveries) return <ErrorState label="Could not load active deliveries." onRetry={() => fetchActiveDeliveries(effectiveBranchId)} />;
 
     const showSkeleton = activeDeliveriesLoading && !activeDeliveries;
 
@@ -732,6 +761,10 @@ const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
 
 export default function DeliveryPage() {
     const [tab, setTab] = useState<Tab>("partners");
+    // CHANGED — header previously hardcoded "Foodies 1 LEKKI" regardless
+    // of the actual selected branch, same class of bug fixed on the
+    // Reservations page. Now reflects the real branch context.
+    const branch = useBranch();
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -753,7 +786,7 @@ export default function DeliveryPage() {
             `}</style>
             <div>
                 <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-                    Foodies 1 LEKKI
+                    {branch.name ? branch.name.toUpperCase() : "—"}
                 </p>
                 <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
                     DELIVERY PARTNERS

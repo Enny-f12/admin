@@ -39,7 +39,8 @@ interface MenuState {
   updateItem: (id: string, payload: UpdateMenuItemPayload) => Promise<boolean>;
   deleteItem: (id: string) => Promise<boolean>;
   toggleAvailability: (id: string) => Promise<boolean>;
-  updateItemImage: (id: string, file: File) => Promise<boolean>;
+  updateItemImage: (id: string, files: File[]) => Promise<boolean>;
+  deleteItemImage: (itemId: string, imageId: string) => Promise<boolean>;
 }
 
 export const useMenuStore = create<MenuState>((set, get) => ({
@@ -80,10 +81,26 @@ export const useMenuStore = create<MenuState>((set, get) => ({
     }
   },
 
+  // Two real API calls under the hood: create (JSON) then, if files were
+  // provided, a follow-up image upload. If the item is created but the
+  // image upload fails, we still treat it as a success (the dish exists)
+  // but surface a distinct message rather than a generic failure toast.
   createItem: async (payload, files) => {
     set({ isCreating: true });
     try {
-      await menuService.createItem(payload, files);
+      const created = await menuService.createItem(payload);
+
+      if (files.length > 0) {
+        try {
+          await menuService.uploadItemImages(created.id, files);
+        } catch (imgError) {
+          set({ isCreating: false });
+          toast.error(extractErrorMessage(imgError, 'Dish added, but image upload failed'));
+          await get().fetchItems(get().lastFilters);
+          return true;
+        }
+      }
+
       set({ isCreating: false });
       toast.success('Dish added');
       await get().fetchItems(get().lastFilters);
@@ -140,13 +157,30 @@ export const useMenuStore = create<MenuState>((set, get) => ({
     }
   },
 
-  // NOT YET LIVE on backend — silent failure, no toast (see backend request, Menu #3)
-  updateItemImage: async (id, file) => {
+  // Used for adding images to an item that already exists (edit flow) —
+  // same endpoint createItem's follow-up call uses.
+  updateItemImage: async (id, files) => {
     try {
-      await menuService.updateItemImage(id, file);
+      await menuService.uploadItemImages(id, files);
       await get().fetchItems(get().lastFilters);
       return true;
-    } catch {
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Could not upload image'));
+      return false;
+    }
+  },
+
+  // Endpoint is unconfirmed (see menu.service.ts) — if this 404s, that's
+  // the backend gap, not a frontend bug. Kept as a normal store action so
+  // the failure surfaces as a toast like everything else, rather than
+  // silently no-op-ing.
+  deleteItemImage: async (itemId, imageId) => {
+    try {
+      await menuService.deleteItemImage(itemId, imageId);
+      await get().fetchItems(get().lastFilters);
+      return true;
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Could not remove image'));
       return false;
     }
   },

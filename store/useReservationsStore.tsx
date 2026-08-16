@@ -70,6 +70,24 @@ interface ReservationsState {
   saveReminders: (branchId?: string) => Promise<void>;
 }
 
+// Defensive dedupe for reminder rules. The backend has occasionally
+// returned duplicate rows for a branch — same label/description, two
+// different UUIDs (root cause looks like a non-idempotent seed step,
+// same bug class as the find-then-create races found elsewhere this
+// session; flagged to backend separately). Keeping the first occurrence
+// of each label means staff never see two toggles for "24-Hour SMS
+// Reminder" that could silently disagree with each other. This is a
+// stopgap, not a fix — the real fix is the backend cleaning up the
+// duplicate rows and making the seed step idempotent.
+function dedupeReminders(rules: ReminderRule[]): ReminderRule[] {
+  const seen = new Set<string>();
+  return rules.filter((r) => {
+    if (seen.has(r.label)) return false;
+    seen.add(r.label);
+    return true;
+  });
+}
+
 export const useReservationsStore = create<ReservationsState>((set, get) => ({
   policies: null,
   policiesLoading: false,
@@ -295,8 +313,15 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
   fetchReminders: async (branchId) => {
     set({ remindersLoading: true, remindersError: false });
     try {
-      const reminders = await reservationsService.getReminders(branchId);
-      set({ reminders, remindersLoading: false });
+      const raw = await reservationsService.getReminders(branchId);
+      // See dedupeReminders() above — backend has occasionally sent
+      // duplicate rows (same label/description, different id) for a
+      // branch. Only the first occurrence of each label is kept for
+      // display; the hidden duplicate's id is intentionally left out of
+      // whatever gets saved (see saveReminders below), since there's no
+      // reliable way to know which of the two duplicate ids the
+      // backend actually treats as canonical.
+      set({ reminders: dedupeReminders(raw), remindersLoading: false });
     } catch {
       set({ remindersLoading: false, remindersError: true });
     }
@@ -315,9 +340,15 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
     if (!reminders) return;
     set({ isSavingReminders: true });
     try {
+      // `reminders` here is already deduped (see fetchReminders), so
+      // this only ever sends ids for the rules actually shown to staff
+      // — a hidden duplicate row's id is never included, and its
+      // enabled state on the backend is left untouched by Save. That's
+      // a known gap until the backend cleans up the duplicate rows;
+      // flagged to backend separately.
       const enabledIds = reminders.filter((r) => r.enabled).map((r) => r.id);
       const updated = await reservationsService.updateReminders(branchId, enabledIds);
-      set({ reminders: updated, isSavingReminders: false });
+      set({ reminders: dedupeReminders(updated), isSavingReminders: false });
       toast.success('Reminder settings saved');
     } catch (error) {
       set({ isSavingReminders: false });

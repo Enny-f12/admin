@@ -9,20 +9,17 @@ import {
   Search,
   SlidersHorizontal,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   X,
   SquarePen,
   Trash2,
   UploadCloud,
 } from "lucide-react";
+import { useBranch } from "../layout";
+import { useAuthStore } from "@/store/useAuthStore";
 import { useMenuStore } from "@/store/useMenuStore";
-import { MenuItem } from "@/types/menu";
-
-// TODO(BACKEND): vendorId isn't returned anywhere on login or available via
-// any endpoint the frontend can currently call. CreateMenuItemDto/
-// CreateCategoryDto both require it. Hardcoding a placeholder so the UI
-// doesn't crash — MUST be replaced once backend confirms where this comes
-// from (e.g. on the User record, or a GET /vendors/me endpoint).
-const PLACEHOLDER_VENDOR_ID = "REPLACE_ME_VENDOR_ID";
+import { MenuItem, MenuItemImage } from "@/types/menu";
 
 function slugify(name: string) {
   return name
@@ -34,16 +31,28 @@ function slugify(name: string) {
 
 const EMPTY_FORM = { name: "", description: "", price: "", categoryId: "", dietary: "" };
 
+// Client-side only — /menu/items has no page/limit params on the backend
+// yet, so we're paginating the already-fetched list, not the request.
+const PAGE_SIZE = 10;
+
 export default function MenuPage() {
+  const branch = useBranch();
+  const vendorId = useAuthStore((s) => s.user?.vendorId);
+
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
   const [catOpen, setCatOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editItem, setEditItem] = useState<MenuItem | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [dragOver, setDragOver] = useState(false);
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string>("");
+  // Files picked in this modal session, not yet uploaded.
+  const [newFiles, setNewFiles] = useState<File[]>([]);
+  const [newPreviews, setNewPreviews] = useState<string[]>([]);
+  // Images already saved on the item (edit flow only).
+  const [existingImages, setExistingImages] = useState<MenuItemImage[]>([]);
+  const [removingImageId, setRemovingImageId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ── Live data ──
@@ -60,6 +69,8 @@ export default function MenuPage() {
     fetchItems,
     createItem,
     updateItem,
+    updateItemImage,
+    deleteItemImage,
     deleteItem,
   } = useMenuStore();
 
@@ -78,11 +89,27 @@ export default function MenuPage() {
     d.name.toLowerCase().includes(search.toLowerCase())
   );
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // Search, category filter, or the underlying list itself (delete, refetch)
+  // can all shrink the result count below the current page — clamp rather
+  // than let the table render an empty page silently.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPage(1);
+  }, [search, categoryFilter]);
+
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   const openAdd = () => {
     setEditItem(null);
     setForm(EMPTY_FORM);
-    setImageFile(null);
-    setImagePreview("");
+    setNewFiles([]);
+    setNewPreviews([]);
+    setExistingImages([]);
     setModalOpen(true);
   };
 
@@ -95,8 +122,9 @@ export default function MenuPage() {
       categoryId: item.categoryId,
       dietary: item.dietaryTags?.join(", ") ?? "",
     });
-    setImageFile(null);
-    setImagePreview(item.images?.[0]?.url ?? "");
+    setNewFiles([]);
+    setNewPreviews([]);
+    setExistingImages(item.images ?? []);
     setModalOpen(true);
   };
 
@@ -120,6 +148,13 @@ export default function MenuPage() {
       .filter(Boolean);
 
     if (editItem) {
+      // updateItem's schema has no image field — new images go through the
+      // images endpoint separately. Doing it before the metadata update
+      // means we haven't committed text changes if the image upload fails.
+      if (newFiles.length > 0) {
+        const imageOk = await updateItemImage(editItem.id, newFiles);
+        if (!imageOk) return;
+      }
       const success = await updateItem(editItem.id, {
         name: form.name,
         description: form.description || undefined,
@@ -129,13 +164,13 @@ export default function MenuPage() {
       });
       if (success) setModalOpen(false);
     } else {
-      if (PLACEHOLDER_VENDOR_ID === "REPLACE_ME_VENDOR_ID") {
-        toast.error("Cannot create dish yet — vendorId not wired (see backend request)");
+      if (!vendorId) {
+        toast.error("No vendor found on this account — try logging in again");
         return;
       }
       const success = await createItem(
         {
-          vendorId: PLACEHOLDER_VENDOR_ID,
+          vendorId,
           categoryId: form.categoryId,
           name: form.name,
           slug: slugify(form.name),
@@ -144,15 +179,37 @@ export default function MenuPage() {
           dietaryTags,
           isAvailable: true,
         },
-        imageFile ? [imageFile] : []
+        newFiles
       );
       if (success) setModalOpen(false);
     }
   };
 
-  const handleFile = (file: File) => {
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
+  const handleFiles = (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    setNewFiles((prev) => [...prev, ...list]);
+    setNewPreviews((prev) => [...prev, ...list.map((f) => URL.createObjectURL(f))]);
+  };
+
+  const removeNewImage = (index: number) => {
+    setNewPreviews((prev) => {
+      URL.revokeObjectURL(prev[index]);
+      return prev.filter((_, i) => i !== index);
+    });
+    setNewFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // Only meaningful in the edit flow — removes an already-saved image via
+  // the API (see deleteItemImage note in the service re: unconfirmed endpoint).
+  const removeExistingImage = async (image: MenuItemImage) => {
+    if (!editItem) return;
+    setRemovingImageId(image.id);
+    const ok = await deleteItemImage(editItem.id, image.id);
+    setRemovingImageId(null);
+    if (ok) {
+      setExistingImages((prev) => prev.filter((img) => img.id !== image.id));
+    }
   };
 
   const isSaving = isCreating || isUpdating;
@@ -165,7 +222,7 @@ export default function MenuPage() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-              Foodies 1 LEKKI
+              {branch?.name ?? "—"}
             </p>
             <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
               MENU
@@ -292,7 +349,7 @@ export default function MenuPage() {
                 )}
                 {!itemsLoading &&
                   !itemsError &&
-                  filtered.map((dish) => (
+                  paginated.map((dish) => (
                     <tr key={dish.id}>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -357,6 +414,48 @@ export default function MenuPage() {
               </tbody>
             </table>
           </div>
+
+          {!itemsLoading && !itemsError && filtered.length > 0 && (
+            <div
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "14px 20px", borderTop: "1px solid var(--color-border)",
+              }}
+            >
+              <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  aria-label="Previous page"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30,
+                    border: "1px solid var(--color-border)", borderRadius: 6, background: "var(--color-bg-card)",
+                    color: "var(--color-text)", cursor: page === 1 ? "default" : "pointer", opacity: page === 1 ? 0.4 : 1,
+                  }}
+                >
+                  <ChevronLeft size={15} strokeWidth={1.8} />
+                </button>
+                <span style={{ fontSize: "0.82rem", color: "var(--color-text)", minWidth: 70, textAlign: "center" }}>
+                  Page {page} of {totalPages}
+                </span>
+                <button
+                  aria-label="Next page"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30,
+                    border: "1px solid var(--color-border)", borderRadius: 6, background: "var(--color-bg-card)",
+                    color: "var(--color-text)", cursor: page === totalPages ? "default" : "pointer", opacity: page === totalPages ? 0.4 : 1,
+                  }}
+                >
+                  <ChevronRight size={15} strokeWidth={1.8} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -462,8 +561,62 @@ export default function MenuPage() {
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
-                Dish Image
+                Dish Images
               </label>
+
+              {(existingImages.length > 0 || newPreviews.length > 0) && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  {existingImages.map((img) => (
+                    <div key={img.id} style={{ position: "relative", width: 72, height: 72 }}>
+                      <Image
+                        src={img.url}
+                        alt="Dish"
+                        width={72}
+                        height={72}
+                        style={{ borderRadius: 8, objectFit: "cover", width: "100%", height: "100%", border: "1px solid var(--color-border)" }}
+                      />
+                      <button
+                        type="button"
+                        aria-label="Remove image"
+                        onClick={() => removeExistingImage(img)}
+                        disabled={removingImageId === img.id}
+                        style={{
+                          position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%",
+                          background: "var(--color-primary)", border: "2px solid var(--color-bg-card)", color: "#fff",
+                          display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+                          opacity: removingImageId === img.id ? 0.5 : 1,
+                        }}
+                      >
+                        <X size={11} strokeWidth={2.5} />
+                      </button>
+                    </div>
+                  ))}
+                  {newPreviews.map((src, i) => (
+                    <div key={src} style={{ position: "relative", width: 72, height: 72 }}>
+                      <Image
+                        src={src}
+                        alt="New upload preview"
+                        width={72}
+                        height={72}
+                        style={{ borderRadius: 8, objectFit: "cover", width: "100%", height: "100%", border: "1px solid var(--color-primary)" }}
+                      />
+                      <button
+                        type="button"
+                        aria-label="Remove image"
+                        onClick={() => removeNewImage(i)}
+                        style={{
+                          position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%",
+                          background: "var(--color-primary)", border: "2px solid var(--color-bg-card)", color: "#fff",
+                          display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+                        }}
+                      >
+                        <X size={11} strokeWidth={2.5} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div
                 onClick={() => fileRef.current?.click()}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -471,40 +624,32 @@ export default function MenuPage() {
                 onDrop={(e) => {
                   e.preventDefault();
                   setDragOver(false);
-                  const file = e.dataTransfer.files[0];
-                  if (file) handleFile(file);
+                  if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
                 }}
                 style={{
                   border: `1.5px dashed ${dragOver ? "var(--color-primary)" : "var(--color-border)"}`,
-                  borderRadius: 10, padding: "28px 20px", display: "flex", flexDirection: "column",
-                  alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer",
+                  borderRadius: 10, padding: "20px", display: "flex", flexDirection: "column",
+                  alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
                   background: dragOver ? "rgba(225,11,28,0.03)" : "var(--color-bg-soft)",
-                  transition: "border-color 0.15s, background 0.15s", minHeight: 120,
+                  transition: "border-color 0.15s, background 0.15s", minHeight: 90,
                 }}
               >
-                {imagePreview ? (
-                  <Image src={imagePreview} alt="Preview" width={80} height={80} style={{ borderRadius: 8, objectFit: "cover" }} />
-                ) : (
-                  <>
-                    <UploadCloud size={24} strokeWidth={1.6} color="var(--color-text-muted)" />
-                    <p style={{ margin: 0, fontSize: "0.82rem", fontWeight: 400, color: "var(--color-text-muted)" }}>
-                      Click or drag to upload image
-                    </p>
-                  </>
-                )}
+                <UploadCloud size={22} strokeWidth={1.6} color="var(--color-text-muted)" />
+                <p style={{ margin: 0, fontSize: "0.82rem", fontWeight: 400, color: "var(--color-text-muted)" }}>
+                  Click or drag to add image(s)
+                </p>
               </div>
               <input
                 ref={fileRef}
                 type="file"
                 accept="image/*"
+                multiple
                 style={{ display: "none" }}
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+                onChange={(e) => {
+                  if (e.target.files?.length) handleFiles(e.target.files);
+                  e.target.value = "";
+                }}
               />
-              {editItem && (
-                <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                  Image editing on existing dishes not wired yet — see backend request
-                </p>
-              )}
             </div>
 
             <button

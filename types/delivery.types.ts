@@ -165,9 +165,8 @@ export type UpdateDeliveryZonePayload = Partial<CreateDeliveryZonePayload> & { e
 
 /* ─────────────────────────────────────────────────────────────
    Delivery Partners — CONFIRMED LIVE (GET/PATCH endpoints verified
-   against Swagger). The summary endpoint below is registered but its
-   response body hasn't been hit live yet — see note on
-   DeliveryPartnersSummary.
+   against Swagger). The summary endpoint below is now confirmed live
+   too — see DeliveryPartnersSummary.
    ───────────────────────────────────────────────────────────── */
 
 export interface DeliveryPartner {
@@ -192,19 +191,21 @@ export interface UpdateDeliveryPartnerPayload {
 }
 
 /**
- * NOT CONFIRMED — GET /admin/delivery-partners/summary exists in Swagger
- * (no params, 200 response) but the response body hasn't been hit live yet.
- * Field names below are a guess based on what PartnersTab currently needs
- * (totalCompleted, avgDelivery) — the two stats that were hardcoded to 0
- * because no endpoint existed for them at the time this page was built.
+ * CONFIRMED — matches the real GET /admin/delivery-partners/summary
+ * response exactly:
+ * { activePartners: 2, liveOrders: 0, completedToday: 0, avgDeliveryMin: 0 }
  *
- * TODO: replace this comment once you've hit the endpoint — paste the real
- * response body and correct the field names/casing to match exactly, same
- * correction pass done earlier for AdminDelivery vs RawDeliveryAssignment.
+ * Field names were previously guessed as totalCompleted/avgDeliveryMinutes
+ * (neither exists on the real payload), which is why the stat cards in
+ * PartnersTab silently showed 0/blank even though the endpoint was
+ * working correctly — the frontend was reading fields that never existed
+ * on the response. Corrected to match live data.
  */
 export interface DeliveryPartnersSummary {
-  totalCompleted: number;
-  avgDeliveryMinutes: number;
+  activePartners: number;
+  liveOrders: number;
+  completedToday: number;
+  avgDeliveryMin: number;
 }
 
 /* ─────────────────────────────────────────────────────────────

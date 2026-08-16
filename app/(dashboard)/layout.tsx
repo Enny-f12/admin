@@ -131,24 +131,28 @@ export const useBranch = () => useContext(BranchContext);
 // useDashboardStore.ts (asBranchId) and results in no branchId being
 // sent — i.e. genuinely unfiltered, not a special value the backend has
 // to know about. Exported so branch-scoped pages that CAN'T meaningfully
-// operate across every branch at once (e.g. Morning Count) can check
-// against it and refuse to fire a request with it as the outletId.
+// operate across every branch at once (e.g. Morning Count, Reservations)
+// can check against it and refuse to fire a request with it as the
+// outletId/branchId.
 export const ALL_BRANCHES_ID = "ALL_BRANCHES";
 
 // Routes that operate on one physical branch and can't meaningfully run
 // against "All Branches" — e.g. you can't physically count stock at
-// every location simultaneously. "All Branches" is hidden from the
+// every location simultaneously, and reservation policies/tables are
+// configured per-branch, not globally. "All Branches" is hidden from the
 // picker while on any of these. This list is a UX nicety on top of the
 // real fix, which is each such page guarding against ALL_BRANCHES_ID
-// itself (see morning-count/page.tsx's hasUsableBranch) — hiding the
-// option here doesn't protect a page that arrives at this route already
-// having "All Branches" selected from elsewhere.
+// itself (see morning-count/page.tsx's hasUsableBranch, and
+// reservations/page.tsx's PoliciesTab) — hiding the option here doesn't
+// protect a page that arrives at this route already having "All
+// Branches" selected from elsewhere.
 //
 // Stock Inventory is deliberately NOT in this list — unlike Morning
 // Count, it legitimately supports an aggregate view (the table renders
 // one column per branch when "All Branches" is selected).
 const BRANCH_REQUIRED_PREFIXES = [
   "/inventory/morning-count",
+  "/reservations",
 ];
 const SB = {
   bg:          "#FFFFFF",

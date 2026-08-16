@@ -39,8 +39,15 @@ export const deliveryService = {
 
   // ── CONFIRMED LIVE — Admin Deliveries ──────────────────────────────
 
-  getActiveDeliveries: () =>
-    apiClient.get<AdminDelivery[]>('/admin/deliveries/active').then((r) => r.data),
+  // CHANGED — branchId added. GET /admin/deliveries/active previously had
+  // no branch filter at all, so every admin saw every branch's active
+  // deliveries regardless of the sidebar branch selector — same bug
+  // class as the earlier hardcoded-branchId issues, just an omission
+  // instead of a hardcode. Pending backend confirmation this query param
+  // is actually accepted/filters correctly — same open request as the
+  // other endpoints below.
+  getActiveDeliveries: (branchId?: string) =>
+    apiClient.get<AdminDelivery[]>('/admin/deliveries/active', { params: { branchId } }).then((r) => r.data),
 
   assignDelivery: (orderId: string, payload: AssignDeliveryPayload) =>
     apiClient
@@ -88,12 +95,19 @@ export const deliveryService = {
   // GET list, PATCH settings, and PATCH toggle all verified against
   // Swagger and match exactly.
 
-  getDeliveryPartners: () =>
-    apiClient.get<DeliveryPartner[]>('/admin/delivery-partners').then((r) => r.data),
+  // CHANGED — branchId added. A partner's `active`/`today`/`avgMin`
+  // stats are derived server-side per DeliveryPartner (see
+  // delivery.types.ts) — without a branch filter those numbers were
+  // silently aggregating across every branch no matter which one was
+  // selected in the sidebar. Same omission as getActiveDeliveries above.
+  // Pending backend confirmation this param is accepted and actually
+  // scopes the derived stats, not just an accepted-but-ignored param.
+  getDeliveryPartners: (branchId?: string) =>
+    apiClient.get<DeliveryPartner[]>('/admin/delivery-partners', { params: { branchId } }).then((r) => r.data),
 
   
-  getDeliveryPartnersSummary: () =>
-    apiClient.get<DeliveryPartnersSummary>('/admin/delivery-partners/summary').then((r) => r.data),
+  getDeliveryPartnersSummary: (branchId?: string) =>
+    apiClient.get<DeliveryPartnersSummary>('/admin/delivery-partners/summary', { params: { branchId } }).then((r) => r.data),
 
   updateDeliveryPartner: (id: string, payload: UpdateDeliveryPartnerPayload) =>
     apiClient.patch<DeliveryPartner>(`/admin/delivery-partners/${id}`, payload).then((r) => r.data),

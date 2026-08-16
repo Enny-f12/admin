@@ -7,6 +7,7 @@ export interface MenuCategory {
   name: string;
   slug: string;
   description: string | null;
+  imageUrl: string | null;
   sortOrder: number;
   isActive: boolean;
   children?: MenuCategory[];
@@ -32,6 +33,7 @@ export interface MenuItem {
   dietaryTags: string[];
   searchKeywords: string[];
   isAvailable: boolean;
+  isPopular: boolean;
   stockThreshold: number | null;
   prepTimeMinutes: number | null;
   images: MenuItemImage[];
@@ -43,6 +45,10 @@ export interface GetItemsFilters {
   dietaryTags?: string[];
 }
 
+// NOTE: no branchId anywhere in this file — confirmed via Swagger that
+// Menu Admin (categories + items) is scoped by vendorId, not branch.
+// A dish's isAvailable is vendor-wide, not per-branch, as of this schema.
+
 export interface CreateMenuItemPayload {
   vendorId: string;
   categoryId: string;
@@ -52,7 +58,11 @@ export interface CreateMenuItemPayload {
   basePrice: number;
   currency?: string;
   dietaryTags?: string[];
+  searchKeywords?: string[];
   isAvailable?: boolean;
+  isPopular?: boolean;
+  stockThreshold?: number;
+  prepTimeMinutes?: number;
 }
 
 export interface UpdateMenuItemPayload {
@@ -61,8 +71,13 @@ export interface UpdateMenuItemPayload {
   slug?: string;
   description?: string;
   basePrice?: number;
+  currency?: string;
   dietaryTags?: string[];
+  searchKeywords?: string[];
   isAvailable?: boolean;
+  isPopular?: boolean;
+  stockThreshold?: number;
+  prepTimeMinutes?: number;
 }
 
 export interface CreateCategoryPayload {
@@ -71,6 +86,17 @@ export interface CreateCategoryPayload {
   name: string;
   slug: string;
   description?: string;
+  imageUrl?: string;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface UpdateCategoryPayload {
+  parentId?: string;
+  name?: string;
+  slug?: string;
+  description?: string;
+  imageUrl?: string;
   sortOrder?: number;
   isActive?: boolean;
 }

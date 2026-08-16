@@ -70,12 +70,14 @@ interface DeliveryState {
   fetchDriverLocation: (id: string) => Promise<void>;
   clearDriverLocation: () => void;
 
-  fetchActiveDeliveries: () => Promise<void>;
-  assignDelivery: (orderId: string, payload: AssignDeliveryPayload) => Promise<boolean>;
+  // CHANGED — branchId added. See note in delivery.service.ts on
+  // getActiveDeliveries/getDeliveryPartners for why.
+  fetchActiveDeliveries: (branchId?: string) => Promise<void>;
+  assignDelivery: (orderId: string, payload: AssignDeliveryPayload, branchId?: string) => Promise<boolean>;
 
   estimateChowdeckFee: (orderId: string) => Promise<ChowdeckFeeEstimate | null>;
   clearChowdeckEstimate: () => void;
-  dispatchViaChowdeck: (orderId: string, feeId: number) => Promise<boolean>;
+  dispatchViaChowdeck: (orderId: string, feeId: number, branchId?: string) => Promise<boolean>;
   trackChowdeckDelivery: (reference: string) => Promise<void>;
   cancelChowdeckDelivery: (reference: string, reason: string) => Promise<boolean>;
 
@@ -84,8 +86,8 @@ interface DeliveryState {
   updateZone: (id: string, payload: UpdateDeliveryZonePayload) => Promise<boolean>;
   deleteZone: (id: string) => Promise<void>;
 
-  fetchPartners: () => Promise<void>;
-  fetchPartnersSummary: () => Promise<void>;
+  fetchPartners: (branchId?: string) => Promise<void>;
+  fetchPartnersSummary: (branchId?: string) => Promise<void>;
   updatePartner: (id: string, payload: UpdateDeliveryPartnerPayload) => Promise<boolean>;
   togglePartner: (id: string) => Promise<void>;
 }
@@ -169,10 +171,10 @@ export const useDeliveryStore = create<DeliveryState>((set, get) => ({
 
   // ── Active deliveries ───────────────────────────────────────────
 
-  fetchActiveDeliveries: async () => {
+  fetchActiveDeliveries: async (branchId) => {
     set({ activeDeliveriesLoading: true, activeDeliveriesError: false });
     try {
-      const activeDeliveries = await deliveryService.getActiveDeliveries();
+      const activeDeliveries = await deliveryService.getActiveDeliveries(branchId);
       set({ activeDeliveries, activeDeliveriesLoading: false });
     } catch {
       set({ activeDeliveriesLoading: false, activeDeliveriesError: true });
@@ -183,11 +185,13 @@ export const useDeliveryStore = create<DeliveryState>((set, get) => ({
   // include driver.fullName/order.orderNumber the way the active-list
   // rows need — so instead of trying to splice a mismatched shape in,
   // just refetch the active list. One extra request, correct data.
-  assignDelivery: async (orderId, payload) => {
+  // branchId is threaded through so the refetch stays scoped to
+  // whatever branch was selected when the assign happened.
+  assignDelivery: async (orderId, payload, branchId) => {
     set({ isAssigningDelivery: true });
     try {
       await deliveryService.assignDelivery(orderId, payload);
-      const activeDeliveries = await deliveryService.getActiveDeliveries();
+      const activeDeliveries = await deliveryService.getActiveDeliveries(branchId);
       set({ isAssigningDelivery: false, activeDeliveries });
       toast.success('Delivery assigned.');
       return true;
@@ -223,11 +227,11 @@ export const useDeliveryStore = create<DeliveryState>((set, get) => ({
   // Refetching here just keeps the internal-driver list accurate; it will
   // not reflect this Chowdeck dispatch in any way. See backend request
   // doc note on this — the two delivery paths don't share a table.
-  dispatchViaChowdeck: async (orderId, feeId) => {
+  dispatchViaChowdeck: async (orderId, feeId, branchId) => {
     set({ isDispatchingChowdeck: true });
     try {
       await deliveryService.dispatchViaChowdeck(orderId, { feeId });
-      const activeDeliveries = await deliveryService.getActiveDeliveries();
+      const activeDeliveries = await deliveryService.getActiveDeliveries(branchId);
       set({ isDispatchingChowdeck: false, chowdeckEstimate: null, activeDeliveries });
       toast.success('Dispatched via Chowdeck.');
       return true;
@@ -321,10 +325,10 @@ export const useDeliveryStore = create<DeliveryState>((set, get) => ({
 
   // ── Delivery Partners ───────────────────────────────────────────
 
-  fetchPartners: async () => {
+  fetchPartners: async (branchId) => {
     set({ partnersLoading: true, partnersError: false });
     try {
-      const partners = await deliveryService.getDeliveryPartners();
+      const partners = await deliveryService.getDeliveryPartners(branchId);
       set({ partners, partnersLoading: false });
     } catch {
       set({ partnersLoading: false, partnersError: true });
@@ -333,10 +337,10 @@ export const useDeliveryStore = create<DeliveryState>((set, get) => ({
 
   // NEW — separate loading/error state so the summary stat cards can
   // resolve independently of the partner cards list below them.
-  fetchPartnersSummary: async () => {
+  fetchPartnersSummary: async (branchId) => {
     set({ partnersSummaryLoading: true, partnersSummaryError: false });
     try {
-      const partnersSummary = await deliveryService.getDeliveryPartnersSummary();
+      const partnersSummary = await deliveryService.getDeliveryPartnersSummary(branchId);
       set({ partnersSummary, partnersSummaryLoading: false });
     } catch {
       set({ partnersSummaryLoading: false, partnersSummaryError: true });

@@ -6,6 +6,8 @@ import {
   GetItemsFilters,
   CreateMenuItemPayload,
   UpdateMenuItemPayload,
+  CreateCategoryPayload,
+  UpdateCategoryPayload,
 } from '@/types/menu';
 
 export const menuService = {
@@ -29,25 +31,24 @@ export const menuService = {
   search: (q: string) =>
     apiClient.get<MenuItem[]>('/menu/search', { params: { q } }).then((r) => r.data),
 
-  // ── Admin ──
-  createItem: (payload: CreateMenuItemPayload, files: File[]) => {
-    const formData = new FormData();
-    Object.entries(payload).forEach(([key, value]) => {
-      if (value === undefined) return;
-      if (Array.isArray(value)) {
-        value.forEach((v) => formData.append(key, v));
-      } else {
-        formData.append(key, String(value));
-      }
-    });
-    files.forEach((file) => formData.append('files', file));
+  // ── Admin: Categories ──
+  createCategory: (payload: CreateCategoryPayload) =>
+    apiClient.post<MenuCategory>('/admin/menu/categories', payload).then((r) => r.data),
 
-    return apiClient
-      .post<MenuItem>('/admin/menu/items', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-      .then((r) => r.data);
-  },
+  updateCategory: (id: string, payload: UpdateCategoryPayload) =>
+    apiClient.patch<MenuCategory>(`/admin/menu/categories/${id}`, payload).then((r) => r.data),
+
+  // Confirmed via Swagger: 409 if the category still contains active items.
+  // Callers should catch that specifically and surface a clear message
+  // rather than the generic "Could not delete" fallback.
+  deleteCategory: (id: string) =>
+    apiClient.delete(`/admin/menu/categories/${id}`).then((r) => r.data),
+
+  // ── Admin: Items ──
+  // Confirmed via Swagger: this endpoint is application/json, no file field.
+  // Images go through the separate /images endpoint below.
+  createItem: (payload: CreateMenuItemPayload) =>
+    apiClient.post<MenuItem>('/admin/menu/items', payload).then((r) => r.data),
 
   updateItem: (id: string, payload: UpdateMenuItemPayload) =>
     apiClient.patch<MenuItem>(`/admin/menu/items/${id}`, payload).then((r) => r.data),
@@ -58,14 +59,19 @@ export const menuService = {
   toggleAvailability: (id: string) =>
     apiClient.patch<MenuItem>(`/admin/menu/items/${id}/availability`).then((r) => r.data),
 
-  
-  updateItemImage: (id: string, file: File) => {
+  // Same endpoint used both right after creation and for adding more images
+  // later — confirmed 201, path param is just `id`, body is multipart.
+  uploadItemImages: (id: string, files: File[]) => {
     const formData = new FormData();
-    formData.append('files', file);
+    files.forEach((file) => formData.append('files', file));
     return apiClient
       .post<MenuItem>(`/admin/menu/items/${id}/images`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       .then((r) => r.data);
   },
+
+  
+  deleteItemImage: (itemId: string, imageId: string) =>
+    apiClient.delete(`/admin/menu/items/${itemId}/images/${imageId}`).then((r) => r.data),
 };

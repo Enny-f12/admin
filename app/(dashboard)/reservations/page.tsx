@@ -20,14 +20,23 @@ import {
 import { useReservationsStore } from "@/store/useReservationsStore";
 import { ReservationPolicies } from "@/types/reservations.types";
 import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
-import { useBranch } from "../layout";
+import { useBranch, ALL_BRANCHES_ID } from "../layout";
 
-// NOTE: Policies, Waitlist, and Reminders tabs below are UNCHANGED from the
-// previous version — they still point at speculative endpoints, since
-// nothing in the real ReservationService covers table-type aggregates,
-// booking-rule persistence, a waitlist, or reminder rules. Only the
-// Availability tab (further down) has been rewired to real data — see the
-// AvailabilityTab component and its accompanying store/service changes.
+// NOTE: Waitlist and Reminders tabs below are UNCHANGED — they still
+// point at speculative endpoints, since nothing in the real
+// ReservationService covers a waitlist or reminder rules beyond what's
+// already wired. Availability and Policies both use real data.
+//
+// CHANGED — PoliciesTab and the page header no longer hardcode
+// "Foodies 1 [Lekki]" — both now read branch.name from useBranch(), same
+// source as the sidebar and AvailabilityTab. PoliciesTab also now guards
+// against ALL_BRANCHES_ID the same way morning-count/page.tsx does:
+// reservation policies are inherently per-branch (you can't set one set
+// of booking rules for every branch at once), so fetchPolicies is no
+// longer called with the sentinel id, and a friendly empty-state message
+// is shown instead of letting a bad request fire. This mirrors the
+// backend fix for the find-then-create race in
+// OperationsService.getReservationPolicies (now an atomic upsert).
 
 type Tab = "policies" | "availability" | "waitlist" | "reminders";
 
@@ -141,6 +150,15 @@ function PoliciesTab() {
   const { policies, policiesLoading, policiesError, fetchPolicies, savePolicies, isSavingPolicies, addSpecialDate, removeSpecialDate, isSavingSpecialDate } = useReservationsStore();
   const branch = useBranch();
 
+  // Reservation policies are per-branch — you can't set one set of
+  // booking rules for every branch simultaneously (same reasoning as
+  // Morning Count). Guard mirrors morning-count/page.tsx's
+  // hasUsableBranch pattern: don't fire fetchPolicies with the
+  // "All Branches" sentinel, and show a friendly empty state instead of
+  // letting a bad/misleading request go out.
+  const isAllBranches = branch.id === ALL_BRANCHES_ID;
+  const hasUsableBranch = Boolean(branch.id) && !isAllBranches;
+
   const [form, setForm] = useState<ReservationPolicies | null>(null);
 
   const [addTypeOpen, setAddTypeOpen] = useState(false);
@@ -155,13 +173,23 @@ function PoliciesTab() {
   });
 
   useEffect(() => {
-    if (branch.id) fetchPolicies(branch.id);
-  }, [fetchPolicies, branch.id]);
+    if (hasUsableBranch) fetchPolicies(branch.id);
+  }, [fetchPolicies, branch.id, hasUsableBranch]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (policies) setForm(policies);
   }, [policies]);
+
+  if (isAllBranches) {
+    return (
+      <div className="card" style={{ padding: 40, textAlign: "center" }}>
+        <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+          Reservation policies are per-branch — pick a specific branch above to view or edit them.
+        </p>
+      </div>
+    );
+  }
 
   if (policiesLoading || !form) {
     return (
@@ -202,7 +230,9 @@ function PoliciesTab() {
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
-              <p style={{ margin: 0, fontWeight: 600, fontSize: "0.9rem", color: "var(--color-heading)" }}>Foodies 1 [Lekki]</p>
+              <p style={{ margin: 0, fontWeight: 600, fontSize: "0.9rem", color: "var(--color-heading)" }}>
+                {branch.name || "—"}
+              </p>
               <p style={{ margin: "2px 0 0", fontWeight: 400, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
                 {totalTables} tables · {totalSeats} seats total
               </p>
@@ -493,14 +523,8 @@ function PoliciesTab() {
 // staff can click to change. See ReservationService.getAvailableTables for
 // the same overlap logic this mirrors.
 //
-// CHANGED — branchId was hardcoded to a literal UUID
-// ("adf6fd7a-340b-4b32-977c-76d5177f2cc3"), which is a REAL branch id
-// (Victoria Island), not a placeholder string. That's why it returned 200
-// — but it silently showed Victoria Island's tables (VI-T01…VI-T08)
-// regardless of what the header branch switcher said. Same bug class as
-// the earlier OUTLET_ID/CURRENT_BRANCH_ID hardcodes, just harder to spot
-// because it didn't error. Now sourced from useBranch(), same as
-// morning-count.
+// branchId is sourced from useBranch(), same as morning-count — no
+// hardcoded UUID.
 function AvailabilityTab() {
   const { tables, tablesLoading, tablesError, fetchTables, reservations, reservationsLoading, fetchReservations } = useReservationsStore();
   const branch = useBranch();
@@ -543,9 +567,6 @@ function AvailabilityTab() {
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
-        {/* CHANGED — header now reflects the actual selected branch instead
-            of a hardcoded "Foodies 1 [Lekki]" string, which was never
-            actually true while the wrong branchId was hardcoded above. */}
         <p style={{ margin: 0, fontWeight: 600, fontSize: "0.9rem", color: "var(--color-heading)" }}>
           {branch.name || "—"} — Table Availability
         </p>
@@ -785,12 +806,13 @@ const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
 
 export default function ReservationsPage() {
   const [tab, setTab] = useState<Tab>("policies");
+  const branch = useBranch();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
         <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-          Foodies 1 LEKKI
+          {branch.name ? branch.name.toUpperCase() : "—"}
         </p>
         <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
           RESERVATION POLICIES

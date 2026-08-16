@@ -6,13 +6,16 @@ import {
   Plus,
   Search,
   SquarePen,
-  Trash2,
+  UserX,
   X,
   ChevronDown,
   Check,
 } from "lucide-react";
+import { useBranch } from "../layout";
+import { useAuthStore } from "@/store/useAuthStore";
 import { useStaffStore } from "@/store/useStaffStore";
 import { StaffMember, CreateStaffPayload } from "@/types/staff";
+import { Branch } from "@/types/auth.types";
 
 type StaffForm = {
   name: string;
@@ -25,8 +28,27 @@ type StaffForm = {
   sendWelcome: boolean;
 };
 
-const ROLES = ["Manager", "Kitchen Staff", "Delivery Coord", "Admin", "Cashier", "Waiter"];
-const BRANCHES = ["Lekki", "Abuja", "Maitama", "Victoria Island"];
+// CONFIRMED via a live 400 — "role must be one of the following values:
+// CUSTOMER, SUPER_ADMIN, MANAGER, KITCHEN_STAFF, DELIVERY_COORDINATOR,
+// DRIVER". The old ROLES list ("Admin", "Cashier", "Waiter") sent values
+// that don't exist on the backend at all. CUSTOMER is intentionally
+// excluded — that's the customer-app role, not something this staff
+// screen should ever assign.
+const ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: "MANAGER", label: "Manager" },
+  { value: "KITCHEN_STAFF", label: "Kitchen Staff" },
+  { value: "DELIVERY_COORDINATOR", label: "Delivery Coordinator" },
+  { value: "DRIVER", label: "Driver" },
+  // TODO(BACKEND): confirm SUPER_ADMIN is actually meant to be assignable
+  // from this modal, vs. reserved for a separate/protected flow. Included
+  // for now since the backend didn't say otherwise, but worth a product
+  // check before this ships.
+  { value: "SUPER_ADMIN", label: "Super Admin" },
+];
+
+function roleLabel(value: string) {
+  return ROLE_OPTIONS.find((r) => r.value === value)?.label ?? value.replace(/_/g, " ");
+}
 
 const INV_PERMISSIONS = [
   "View inventory (all items)",
@@ -77,7 +99,7 @@ function RoleDropdown({ value, onChange }: { value: string; onChange: (v: string
           cursor: "pointer", fontFamily: "var(--font-sans)", gap: 8,
         }}
       >
-        <span>{value || "Select role"}</span>
+        <span>{value ? roleLabel(value) : "Select role"}</span>
         <ChevronDown size={14} strokeWidth={1.8} color="var(--color-text-muted)" />
       </button>
       {open && (
@@ -86,24 +108,24 @@ function RoleDropdown({ value, onChange }: { value: string; onChange: (v: string
           background: "var(--color-bg-card)", border: "1px solid var(--color-border)",
           borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", overflow: "hidden",
         }}>
-          {ROLES.map((r) => (
+          {ROLE_OPTIONS.map((r) => (
             <button
-              key={r}
+              key={r.value}
               type="button"
-              onClick={() => { onChange(r); setOpen(false); }}
+              onClick={() => { onChange(r.value); setOpen(false); }}
               style={{
                 width: "100%", textAlign: "left", padding: "9px 14px", border: "none",
-                background: r === value ? "var(--color-bg-soft)" : "transparent",
-                color: r === value ? "var(--color-primary)" : "var(--color-text)",
+                background: r.value === value ? "var(--color-bg-soft)" : "transparent",
+                color: r.value === value ? "var(--color-primary)" : "var(--color-text)",
                 fontFamily: "var(--font-sans)", fontSize: "0.85rem",
-                fontWeight: r === value ? 500 : 400, cursor: "pointer",
+                fontWeight: r.value === value ? 500 : 400, cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "space-between",
               }}
-              onMouseEnter={(e) => { if (r !== value) (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)"; }}
-              onMouseLeave={(e) => { if (r !== value) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+              onMouseEnter={(e) => { if (r.value !== value) (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)"; }}
+              onMouseLeave={(e) => { if (r.value !== value) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
-              {r}
-              {r === value && <Check size={13} strokeWidth={2.2} color="var(--color-primary)" />}
+              {r.label}
+              {r.value === value && <Check size={13} strokeWidth={2.2} color="var(--color-primary)" />}
             </button>
           ))}
         </div>
@@ -143,11 +165,13 @@ function toggleArr(arr: string[], val: string): string[] {
 ══════════════════════════════════════════ */
 function StaffModal({
   editStaff,
+  branches,
   onClose,
   onSave,
   isSaving,
 }: {
   editStaff: StaffMember | null;
+  branches: Branch[];
   onClose: () => void;
   onSave: (form: StaffForm) => void;
   isSaving: boolean;
@@ -156,7 +180,15 @@ function StaffModal({
     editStaff
       ? {
           name: editStaff.name, email: editStaff.email, phone: editStaff.phone,
-          role: editStaff.role, branches: editStaff.branches,
+          role: editStaff.role,
+          // editStaff.branches are NAMES (confirmed via GET), but the
+          // update payload needs IDs (confirmed via the 22P02 uuid error
+          // on save) — map name -> id using the real branch list. Any
+          // name that doesn't match a known branch is dropped rather than
+          // silently sent as garbage.
+          branches: editStaff.branches
+            .map((name) => branches.find((b) => b.name === name)?.id)
+            .filter((id): id is string => Boolean(id)),
           invPermissions: editStaff.invPermissions, permissions: editStaff.permissions,
           sendWelcome: true,
         }
@@ -212,16 +244,22 @@ function StaffModal({
         {/* Branch Access */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>Branch Access:</label>
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-            {BRANCHES.map((b) => (
-              <Checkbox
-                key={b}
-                label={b}
-                checked={form.branches.includes(b)}
-                onChange={() => setForm((f) => ({ ...f, branches: toggleArr(f.branches, b) }))}
-              />
-            ))}
-          </div>
+          {branches.length === 0 ? (
+            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+              No branches loaded yet.
+            </p>
+          ) : (
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              {branches.map((b) => (
+                <Checkbox
+                  key={b.id}
+                  label={b.name}
+                  checked={form.branches.includes(b.id)}
+                  onChange={() => setForm((f) => ({ ...f, branches: toggleArr(f.branches, b.id) }))}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Inventory Permissions */}
@@ -300,6 +338,9 @@ function StaffModal({
    MAIN PAGE
 ══════════════════════════════════════════ */
 export default function StaffManagementPage() {
+  const branch = useBranch();
+  const { branches: authBranches, fetchBranches } = useAuthStore();
+
   const [search, setSearch] = useState("");
   const [modalOpen, setModal] = useState(false);
   const [editTarget, setEdit] = useState<StaffMember | null>(null);
@@ -308,14 +349,29 @@ export default function StaffManagementPage() {
     useStaffStore();
 
   useEffect(() => {
-    fetchStaff();
+    fetchStaff({ status: "ACTIVE" });
   }, [fetchStaff]);
 
+  // Real branch list (same source as the branch switcher) — replaces the
+  // old hardcoded, mismatched BRANCHES array ("Lekki" vs the real "Lekki
+  // Phase 1", etc). Kept as full {id, name} objects: the update payload
+  // needs branch IDs (confirmed via a live 22P02 "invalid uuid" error
+  // when names were sent), but the checkboxes need names to display and
+  // to match against editStaff.branches (which come back as names).
+  useEffect(() => {
+    if (!authBranches) fetchBranches();
+  }, [authBranches, fetchBranches]);
+  const branches = authBranches ?? [];
+
   const list = staff ?? [];
-  const filtered = list.filter((s) =>
-    s.name.toLowerCase().includes(search.toLowerCase()) ||
-    s.role.toLowerCase().includes(search.toLowerCase())
-  );
+  // Client-side safety net — status param to fetchStaff isn't confirmed
+  // to do anything server-side, so filter here too in case it's ignored.
+  const filtered = list
+    .filter((s) => s.status === "ACTIVE")
+    .filter((s) =>
+      s.name.toLowerCase().includes(search.toLowerCase()) ||
+      s.role.toLowerCase().includes(search.toLowerCase())
+    );
 
   const openAdd = () => { setEdit(null); setModal(true); };
   const openEdit = (s: StaffMember) => { setEdit(s); setModal(true); };
@@ -350,7 +406,11 @@ export default function StaffManagementPage() {
     }
   };
 
-  const handleDelete = async (s: StaffMember) => {
+  // Confirmed via live testing: the DELETE endpoint deactivates (status
+  // ACTIVE -> OFFLINE) rather than removing the record — the list refetch
+  // that follows (see useStaffStore) naturally drops them since we fetch
+  // status: "ACTIVE" only.
+  const handleDeactivate = async (s: StaffMember) => {
     await deleteStaff(s.id);
   };
 
@@ -362,7 +422,7 @@ export default function StaffManagementPage() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-              Foodies 1 LEKKI
+              {branch?.name ?? "—"}
             </p>
             <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
               STAFF MANAGEMENT
@@ -398,30 +458,31 @@ export default function StaffManagementPage() {
               <thead>
                 <tr>
                   <th style={{ minWidth: 200 }}>Name</th>
-                  <th></th>
+                  <th>Role</th>
+                  <th>Branch</th>
                   <th>Status</th>
-                  <th></th>
+                  <th>Last Seen</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {isLoading && (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
+                    <td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
                       Loading…
                     </td>
                   </tr>
                 )}
                 {!isLoading && isError && (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
+                    <td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
                       Could not load staff
                     </td>
                   </tr>
                 )}
                 {!isLoading && !isError && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
+                    <td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
                       No staff found
                     </td>
                   </tr>
@@ -429,7 +490,10 @@ export default function StaffManagementPage() {
                 {!isLoading && !isError && filtered.map((s) => (
                     <tr key={s.id}>
                       <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{s.name}</td>
-                      <td style={{ fontWeight: 400, color: "var(--color-text-secondary)" }}>{s.role}</td>
+                      <td style={{ fontWeight: 400, color: "var(--color-text-secondary)" }}>{roleLabel(s.role)}</td>
+                      <td style={{ fontWeight: 400, color: "var(--color-text-secondary)", fontSize: "0.82rem" }}>
+                        {s.branches.length > 0 ? s.branches.join(", ") : "—"}
+                      </td>
                       <td>
                         <span
                           className="badge"
@@ -456,14 +520,15 @@ export default function StaffManagementPage() {
                             <SquarePen size={15} strokeWidth={1.8} />
                           </button>
                           <button
-                            onClick={() => handleDelete(s)}
+                            onClick={() => handleDeactivate(s)}
                             disabled={isDeleting}
-                            aria-label={`Delete ${s.name}`}
+                            title="Deactivate staff member"
+                            aria-label={`Deactivate ${s.name}`}
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6, transition: "color 0.15s" }}
                             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-primary)")}
                             onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-muted)")}
                           >
-                            <Trash2 size={15} strokeWidth={1.8} />
+                            <UserX size={15} strokeWidth={1.8} />
                           </button>
                         </div>
                       </td>
@@ -478,6 +543,7 @@ export default function StaffManagementPage() {
       {modalOpen && (
         <StaffModal
           editStaff={editTarget}
+          branches={branches}
           onClose={() => setModal(false)}
           onSave={handleSave}
           isSaving={isSaving}

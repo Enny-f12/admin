@@ -1,8 +1,10 @@
 // app/(admin)/customers/page.tsx
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { useBranch } from "../layout";
 import { useCustomerStore } from "@/store/useCustomerStore";
 import { AdminCustomer } from "@/types/customer";
+import { asBranchId } from "@/lib/branch";
 
 const PAGE_SIZE = 10;
 const AVATAR_COLORS = ["#E05C2A", "#F5A623", "#16A34A", "#0284C7", "#7C3AED", "#DB2777"];
@@ -271,6 +273,7 @@ function CustomerModal({ customer, onClose }: { customer: AdminCustomer; onClose
 }
 
 export default function CustomersPage() {
+  const branch = useBranch();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<AdminCustomer | null>(null);
   const [focused, setFocused] = useState(false);
@@ -279,20 +282,24 @@ export default function CustomersPage() {
   const { customers, total, isLoading, isError, fetchCustomers } = useCustomerStore();
   const didMount = useRef(false);
 
+  // branchId resolves to undefined for "All Branches" (or no branch) —
+  // same convention as Dashboard: omitting the param means unfiltered.
+  const branchId = asBranchId(branch?.id);
+
   useEffect(() => {
     const delay = didMount.current ? 350 : 0;
     didMount.current = true;
     const timer = setTimeout(() => {
       setPage(1);
-      fetchCustomers({ search: search || undefined, page: 1, limit: PAGE_SIZE });
+      fetchCustomers({ search: search || undefined, page: 1, limit: PAGE_SIZE, branchId });
     }, delay);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, branchId]);
 
   useEffect(() => {
     if (page === 1) return;
-    fetchCustomers({ search: search || undefined, page, limit: PAGE_SIZE });
+    fetchCustomers({ search: search || undefined, page, limit: PAGE_SIZE, branchId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
@@ -324,7 +331,7 @@ export default function CustomersPage() {
 
       <div style={{ margin: "0 auto" }}>
         <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-          Foodies 1 LEKKI
+          {branch?.name ?? "—"}
         </p>
         <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
           CUSTOMERS MANAGEMENT
@@ -454,7 +461,7 @@ export default function CustomersPage() {
                           >
                             <IconEye />
                           </button>
-                          
+
                           <a
                             title="Send email"
                             href={`mailto:${c.email}`}
