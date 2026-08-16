@@ -6,9 +6,21 @@ import { FoodInventoryItem, InventoryStats, StatusBanner } from '@/types/food-in
 import { DrinksInventoryItem, AdjustWarehousePayload } from '@/types/drinks.types';
 import { TransferToFridgePayload, CreateDeliveryPayload } from '@/types/drinks.types';
 
-function extractErrorMessage(error: unknown, fallback: string) {
-  const anyErr = error as any;
-  return anyErr?.response?.data?.message ?? anyErr?.message ?? fallback;
+function extractErrorMessage(error: unknown, fallback: string): string {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error
+  ) {
+    const response = (error as { response?: { data?: { message?: string } } }).response;
+    if (response?.data?.message) {
+      return response.data.message;
+    }
+  }
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
 }
 
 interface InventoryDashboardState {
@@ -91,6 +103,10 @@ export const useInventoryDashboardStore = create<InventoryDashboardState>((set) 
     }
   },
 
+  // NOTE: foodInventoryService.getStatusBanner currently has no parameters
+  // in its type signature. Update it in food-inventory.service.ts to accept
+  // an optional `branchId?: string` so this call typechecks:
+  //   getStatusBanner: async (branchId?: string) => { ... }
   fetchBanner: async (branchId) => {
     set({ bannerLoading: true, bannerError: false });
     try {
