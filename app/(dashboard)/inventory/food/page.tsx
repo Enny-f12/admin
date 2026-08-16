@@ -24,6 +24,7 @@ import { useInventoryDashboardStore } from "@/store/useInventoryStore";
 import { FoodInventoryItem } from "@/types/food-inventory.types";
 import { DrinksInventoryItem, Supplier } from "@/types/drinks.types";
 import { drinksService } from "@/services/drinks.service";
+import { useBranch, ALL_BRANCHES_ID } from "../../layout";
 
 type Status = "In Stock" | "Low Stock" | "Out of Stock";
 
@@ -45,6 +46,64 @@ const StatusBadge = ({ status }: { status: Status }) => (
   </span>
 );
 
+// Builds a CSV string from whichever tab is active and triggers a
+// browser download. Purely client-side against currently-loaded data --
+// no backend export endpoint exists for this.
+function downloadCsv(filename: string, rows: (string | number)[][]) {
+  const csv = rows
+    .map((row) =>
+      row
+        .map((cell) => {
+          const str = String(cell ?? "");
+          return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+        })
+        .join(",")
+    )
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// Opens a new window with a simple printable table and triggers the
+// browser print dialog. Client-side only, same as the CSV export.
+function printTable(title: string, headers: string[], rows: (string | number)[][]) {
+  const win = window.open("", "_blank", "width=900,height=700");
+  if (!win) return;
+  const tableRows = rows
+    .map((r) => `<tr>${r.map((c) => `<td style="padding:8px;border-bottom:1px solid #ddd;">${c}</td>`).join("")}</tr>`)
+    .join("");
+  win.document.write(`
+    <html>
+      <head>
+        <title>${title}</title>
+        <style>
+          body { font-family: sans-serif; padding: 24px; }
+          h1 { font-size: 1.2rem; margin-bottom: 12px; }
+          table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+          th { text-align: left; padding: 8px; border-bottom: 2px solid #333; }
+        </style>
+      </head>
+      <body>
+        <h1>${title}</h1>
+        <table>
+          <thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </body>
+    </html>
+  `);
+  win.document.close();
+  win.focus();
+  win.print();
+}
+
 export default function InventoryDashboardPage() {
   const [tab, setTab] = useState<"food" | "drinks">("food");
   const [search, setSearch] = useState("");
@@ -57,6 +116,15 @@ export default function InventoryDashboardPage() {
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
+
+  // Soft branch scoping, same pattern as Stock Inventory / Suppliers:
+  // "All Branches" still works (company-wide view), a specific branch
+  // filters both tabs' data. Previously this page had no branch
+  // awareness at all.
+  const branch = useBranch();
+  const [branchOpen, setBranchOpen] = useState(false);
+  const branchOptions = [{ id: ALL_BRANCHES_ID, name: "All Branches" }, ...branch.branches];
+  const resolvedBranchId = branch.id === ALL_BRANCHES_ID ? undefined : branch.id;
 
   const {
     foodItems,
@@ -82,12 +150,14 @@ export default function InventoryDashboardPage() {
 
   useEffect(() => {
     fetchFoodCategories();
-    fetchBanner();
-  }, [fetchFoodCategories, fetchBanner]);
+    fetchBanner(resolvedBranchId);
+     
+  }, [fetchFoodCategories, fetchBanner, resolvedBranchId]);
 
   useEffect(() => {
     if (tab === "food") {
       fetchFoodItems({
+        branchId: resolvedBranchId,
         search: search || undefined,
         category: category === "All Categories" ? undefined : category,
         status: status === "All Status" ? undefined : status,
@@ -96,6 +166,7 @@ export default function InventoryDashboardPage() {
       });
     } else {
       fetchDrinkItems({
+        branchId: resolvedBranchId,
         search: search || undefined,
         status: status === "All Status" ? undefined : status,
         page,
@@ -103,7 +174,7 @@ export default function InventoryDashboardPage() {
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, search, category, status, page]);
+  }, [tab, search, category, status, page, resolvedBranchId]);
 
   const switchTab = (t: "food" | "drinks") => {
     setTab(t);
@@ -128,13 +199,91 @@ export default function InventoryDashboardPage() {
   const outOfStockFood = foodItems?.filter((i) => i.status === "Out of Stock") ?? [];
   const inStockFood = foodItems?.filter((i) => i.status === "In Stock") ?? [];
 
+  const handleExportCsv = () => {
+    if (tab === "food") {
+      const headers = ["Item", "Unit", "Pack", "Stock", "Threshold", "Status"];
+      const rows = (foodItems ?? []).map((i) => [i.name, i.unit, i.pack, i.stock, i.threshold, i.status]);
+      downloadCsv(`food-inventory-${branch.name.replace(/\s+/g, "-")}.csv`, [headers, ...rows]);
+    } else {
+      const headers = ["Item", "Unit", "Fridge", "Warehouse", "Threshold", "Status"];
+      const rows = (drinkItems ?? []).map((i) => [i.name, i.unit, i.fridgeStock, i.warehouseStock, i.fridgeThreshold, i.status]);
+      downloadCsv(`drinks-inventory-${branch.name.replace(/\s+/g, "-")}.csv`, [headers, ...rows]);
+    }
+  };
+
+  const handlePrint = () => {
+    if (tab === "food") {
+      const headers = ["Item", "Unit", "Pack", "Stock", "Threshold", "Status"];
+      const rows = (foodItems ?? []).map((i) => [i.name, i.unit, i.pack, i.stock, i.threshold, i.status]);
+      printTable(`Food Inventory -- ${branch.name}`, headers, rows);
+    } else {
+      const headers = ["Item", "Unit", "Fridge", "Warehouse", "Threshold", "Status"];
+      const rows = (drinkItems ?? []).map((i) => [i.name, i.unit, i.fridgeStock, i.warehouseStock, i.fridgeThreshold, i.status]);
+      printTable(`Drinks Inventory -- ${branch.name}`, headers, rows);
+    }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, position: "relative" }}>
       <div>
-        <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>Foodies 1 LEKKI</p>
+        <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>{branch.name}</p>
         <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>Inventory</h1>
         <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Food &amp; Drinks inventory</p>
       </div>
+
+      {/* Branch filter -- dropdown for supers, static chip for locked managers */}
+      {branch.canPickBranch ? (
+        <div style={{ position: "relative", alignSelf: "flex-start" }}>
+          <button
+            onClick={() => setBranchOpen((v) => !v)}
+            style={{
+              display: "flex", alignItems: "center", gap: 20, justifyContent: "space-between",
+              minWidth: 150, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--color-border)",
+              background: "#fff", cursor: "pointer", fontSize: "0.9rem", color: "var(--color-text)",
+              fontFamily: "var(--font-sans)",
+            }}
+          >
+            {branch.name}
+            <ChevronDown size={16} strokeWidth={1.8} color="var(--color-text-muted)" />
+          </button>
+          {branchOpen && (
+            <div
+              style={{
+                position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 150,
+                background: "#fff", border: "1px solid var(--color-border)", borderRadius: 10,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.10)", overflow: "hidden", zIndex: 60,
+              }}
+            >
+              {branchOptions.map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => { branch.setBranch(b); setBranchOpen(false); }}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+                    padding: "10px 14px", background: b.id === branch.id ? "var(--color-bg-soft)" : "#fff",
+                    border: "none", cursor: "pointer", fontSize: "0.85rem", fontFamily: "var(--font-sans)",
+                    color: "var(--color-text)", textAlign: "left",
+                  }}
+                >
+                  {b.id === branch.id && <span style={{ marginRight: 6 }}>{"✓"}</span>}
+                  {b.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div
+          style={{
+            display: "flex", alignItems: "center", minWidth: 150, alignSelf: "flex-start",
+            padding: "10px 14px", borderRadius: 8, border: "1px solid var(--color-border)",
+            background: "var(--color-bg-soft)", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)",
+          }}
+          title="Your account is scoped to this branch"
+        >
+          {branch.name}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 10 }}>
         <TabButton active={tab === "food"} onClick={() => switchTab("food")} icon={<ChefHat size={16} strokeWidth={1.8} />} label="Food Inventory" />
@@ -153,7 +302,6 @@ export default function InventoryDashboardPage() {
           </>
         ) : (
           <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/inventory/status-banner not implemented — see request doc #3 */}
             Status unavailable
           </p>
         )}
@@ -165,36 +313,36 @@ export default function InventoryDashboardPage() {
             ? <ChefHat size={20} strokeWidth={1.8} color="#E10B1C" style={{ margin: "0 auto" }} />
             : <GlassWater size={20} strokeWidth={1.8} color="#E10B1C" style={{ margin: "0 auto" }} />}
           <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>
-            {stats ? stats.totalItems : loading ? "…" : "–"}
+            {stats ? stats.totalItems : loading ? "..." : "-"}
           </p>
           <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Total Items</p>
         </div>
         <div className="card" style={{ textAlign: "center" }}>
           <AlertTriangle size={20} strokeWidth={1.8} color="#a07a00" style={{ margin: "0 auto" }} />
           <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "#a07a00" }}>
-            {stats ? stats.lowStock : loading ? "…" : "–"}
+            {stats ? stats.lowStock : loading ? "..." : "-"}
           </p>
           <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Low Stock</p>
         </div>
         <div className="card" style={{ textAlign: "center" }}>
           <AlertTriangle size={20} strokeWidth={1.8} color="#E10B1C" style={{ margin: "0 auto" }} />
           <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "#E10B1C" }}>
-            {stats ? stats.outOfStock : loading ? "…" : "–"}
+            {stats ? stats.outOfStock : loading ? "..." : "-"}
           </p>
           <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Out of Stock</p>
         </div>
         <div className="card" style={{ textAlign: "center" }}>
           <DollarSign size={20} strokeWidth={1.8} color="var(--color-heading)" style={{ margin: "0 auto" }} />
           <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>
-            {stats ? `₦${stats.totalValue.toLocaleString()}` : loading ? "…" : "–"}
+            {stats ? `₦${stats.totalValue.toLocaleString()}` : loading ? "..." : "-"}
           </p>
           <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Total Value</p>
         </div>
       </div>
 
       <div style={{ display: "flex", gap: 10 }}>
-        <OutlineButton icon={<Upload size={15} strokeWidth={1.8} />} label="Export to CSV" />
-        <OutlineButton icon={<Download size={15} strokeWidth={1.8} />} label="Print" />
+        <OutlineButton icon={<Upload size={15} strokeWidth={1.8} />} label="Export to CSV" onClick={handleExportCsv} />
+        <OutlineButton icon={<Download size={15} strokeWidth={1.8} />} label="Print" onClick={handlePrint} />
       </div>
 
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
@@ -243,7 +391,7 @@ export default function InventoryDashboardPage() {
               {loading && (
                 <tr>
                   <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
-                    Loading…
+                    Loading...
                   </td>
                 </tr>
               )}
@@ -251,7 +399,6 @@ export default function InventoryDashboardPage() {
               {!loading && hasError && (
                 <tr>
                   <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
-                    {/* TODO(BACKEND): tab === "food" ? see request doc #1 : see request doc #4 */}
                     No inventory data available
                   </td>
                 </tr>
@@ -374,9 +521,10 @@ export default function InventoryDashboardPage() {
 
       {receiveOpen && (
         <ReceiveDeliveryModal
+          branchId={resolvedBranchId}
           onClose={() => setReceiveOpen(false)}
           onSubmit={async (payload) => {
-            const ok = await receiveDelivery(payload);
+            const ok = await receiveDelivery(payload, resolvedBranchId);
             if (ok) setReceiveOpen(false);
           }}
         />
@@ -386,7 +534,7 @@ export default function InventoryDashboardPage() {
           items={drinkItems ?? []}
           onClose={() => setTransferOpen(false)}
           onSubmit={async (payload) => {
-            const ok = await transferToFridge(payload);
+            const ok = await transferToFridge(payload, resolvedBranchId);
             if (ok) setTransferOpen(false);
           }}
         />
@@ -396,7 +544,7 @@ export default function InventoryDashboardPage() {
           items={drinkItems ?? []}
           onClose={() => setAdjustOpen(false)}
           onSubmit={async (payload) => {
-            const ok = await adjustWarehouseStock(payload);
+            const ok = await adjustWarehouseStock(payload, resolvedBranchId);
             if (ok) setAdjustOpen(false);
           }}
         />
@@ -413,7 +561,7 @@ export default function InventoryDashboardPage() {
   );
 }
 
-/* ── Building blocks ── */
+/* -- Building blocks -- */
 function TabButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
   return (
     <button
@@ -507,7 +655,7 @@ function Dropdown({
   );
 }
 
-/* ── Shared modal shell ── */
+/* -- Shared modal shell -- */
 function ModalShell({ title, onClose, children, width = 460 }: { title: string; onClose: () => void; children: React.ReactNode; width?: number }) {
   return (
     <div
@@ -564,12 +712,13 @@ const outlineBtn: React.CSSProperties = {
   cursor: "pointer", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)", fontFamily: "var(--font-sans)",
 };
 
-/* ── Receive Delivery modal ── */
+/* -- Receive Delivery modal -- */
 type ReceivedRow = { name: string; qty: number; costPerUnit: number };
 
 function ReceiveDeliveryModal({
   onClose, onSubmit,
 }: {
+  branchId?: string;
   onClose: () => void;
   onSubmit: (payload: {
     supplierId: string | null;
@@ -586,6 +735,9 @@ function ReceiveDeliveryModal({
   const [items, setItems] = useState<ReceivedRow[]>([{ name: "", qty: 0, costPerUnit: 0 }]);
 
   useEffect(() => {
+    // NOTE: getSuppliers() is still unscoped by branch (open backend
+    // request, same one covering Stock/Suppliers) -- branchId isn't
+    // passed here yet because the endpoint doesn't accept it.
     drinksService.getSuppliers().then(setSuppliers).catch(() => setSuppliers([]));
   }, []);
 
@@ -593,6 +745,7 @@ function ReceiveDeliveryModal({
   const canSubmit = items.some((i) => i.name.trim() && i.qty > 0);
 
   const addItem = () => setItems((prev) => [...prev, { name: "", qty: 0, costPerUnit: 0 }]);
+  const removeItem = (i: number) => setItems((prev) => prev.filter((_, idx) => idx !== i));
   const updateItem = (i: number, patch: Partial<ReceivedRow>) =>
     setItems((prev) => prev.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
 
@@ -609,7 +762,7 @@ function ReceiveDeliveryModal({
   };
 
   return (
-    <ModalShell title="Receive Delivery" onClose={onClose} width={620}>
+    <ModalShell title="Receive Delivery" onClose={onClose} width={640}>
       <Field label="Supplier">
         <select className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
           <option value="">Select supplier</option>
@@ -629,13 +782,33 @@ function ReceiveDeliveryModal({
       <p style={{ margin: "0 0 10px", fontSize: "0.85rem", fontWeight: 700, color: "var(--color-heading)" }}>
         ITEMS RECEIVED (adds to Warehouse)
       </p>
+
+      {/* Column labels -- previously the row below had only placeholder
+          text as a hint, no actual headers. */}
+      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.8fr 0.9fr auto 24px", gap: 8, padding: "0 2px 6px" }}>
+        <span style={labelStyle}>Item Name</span>
+        <span style={labelStyle}>Quantity</span>
+        <span style={labelStyle}>Cost / Unit</span>
+        <span style={labelStyle}>Total</span>
+        <span />
+      </div>
+
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
         {items.map((row, i) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "1.4fr 0.8fr 0.9fr auto", gap: 8, alignItems: "center" }}>
-            <input className="input" placeholder="Item name" value={row.name} onChange={(e) => updateItem(i, { name: e.target.value })} />
-            <input className="input" type="number" value={row.qty} onChange={(e) => updateItem(i, { qty: Number(e.target.value) || 0 })} placeholder="Qty" />
-            <input className="input" type="number" value={row.costPerUnit} onChange={(e) => updateItem(i, { costPerUnit: Number(e.target.value) || 0 })} placeholder="Cost/unit" />
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "1.4fr 0.8fr 0.9fr auto 24px", gap: 8, alignItems: "center" }}>
+            <input className="input" placeholder="e.g. Fanta" value={row.name} onChange={(e) => updateItem(i, { name: e.target.value })} />
+            <input className="input" type="number" value={row.qty} onChange={(e) => updateItem(i, { qty: Number(e.target.value) || 0 })} placeholder="0" />
+            <input className="input" type="number" value={row.costPerUnit} onChange={(e) => updateItem(i, { costPerUnit: Number(e.target.value) || 0 })} placeholder="0" />
             <span style={{ fontWeight: 600, fontSize: "0.85rem", whiteSpace: "nowrap" }}>₦{(row.qty * row.costPerUnit).toLocaleString()}</span>
+            {items.length > 1 ? (
+              <button
+                onClick={() => removeItem(i)}
+                aria-label="Remove item"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 0 }}
+              >
+                <X size={16} strokeWidth={1.8} />
+              </button>
+            ) : <span />}
           </div>
         ))}
       </div>
@@ -665,8 +838,9 @@ function ReceiveDeliveryModal({
     </ModalShell>
   );
 }
+const labelStyle: React.CSSProperties = { fontSize: "0.78rem", fontWeight: 600, color: "var(--color-text-muted)" };
 
-/* ── Transfer to Fridge modal ── */
+/* -- Transfer to Fridge modal -- */
 function TransferModal({
   items, onClose, onSubmit,
 }: {
@@ -751,7 +925,7 @@ function TransferModal({
   );
 }
 
-/* ── Adjust Stock modal ── */
+/* -- Adjust Stock modal -- */
 function AdjustStockModal({
   items, onClose, onSubmit,
 }: {

@@ -32,13 +32,13 @@ interface WalkInState {
   isCreatingOrder: boolean;
   isSubmittingBlacklist: boolean;
 
-  searchCustomers: (search: string) => Promise<void>;
-  createCustomer: (payload: CreateWalkInCustomerPayload) => Promise<WalkInCustomer | null>;
-  searchMenuItems: (search: string) => Promise<void>;
-  createOrder: (payload: CreateWalkInOrderPayload) => Promise<{ id: string; orderNumber: string } | null>;
-  fetchBlacklist: () => Promise<void>;
-  addToBlacklist: (payload: AddToBlacklistPayload) => Promise<boolean>;
-  removeFromBlacklist: (id: string) => Promise<boolean>;
+  searchCustomers: (search: string, branchId?: string) => Promise<void>;
+  createCustomer: (payload: CreateWalkInCustomerPayload, branchId?: string) => Promise<WalkInCustomer | null>;
+  searchMenuItems: (search: string, branchId?: string) => Promise<void>;
+  createOrder: (payload: CreateWalkInOrderPayload, branchId?: string) => Promise<{ id: string; orderNumber: string } | null>;
+  fetchBlacklist: (branchId?: string) => Promise<void>;
+  addToBlacklist: (payload: AddToBlacklistPayload, branchId?: string) => Promise<boolean>;
+  removeFromBlacklist: (id: string, branchId?: string) => Promise<boolean>;
 }
 
 export const useWalkInStore = create<WalkInState>((set) => ({
@@ -58,20 +58,20 @@ export const useWalkInStore = create<WalkInState>((set) => ({
   isCreatingOrder: false,
   isSubmittingBlacklist: false,
 
-  searchCustomers: async (search) => {
+  searchCustomers: async (search, branchId) => {
     set({ customersLoading: true, customersError: false });
     try {
-      const customers = await walkInService.searchCustomers(search);
+      const customers = await walkInService.searchCustomers(search, branchId);
       set({ customers, customersLoading: false });
     } catch {
       set({ customersLoading: false, customersError: true });
     }
   },
 
-  createCustomer: async (payload) => {
+  createCustomer: async (payload, branchId) => {
     set({ isCreatingCustomer: true });
     try {
-      const customer = await walkInService.createCustomer(payload);
+      const customer = await walkInService.createCustomer({ ...payload, branchId });
       set((state) => ({
         isCreatingCustomer: false,
         customers: state.customers ? [...state.customers, customer] : [customer],
@@ -84,20 +84,20 @@ export const useWalkInStore = create<WalkInState>((set) => ({
     }
   },
 
-  searchMenuItems: async (search) => {
+  searchMenuItems: async (search, branchId) => {
     set({ menuItemsLoading: true, menuItemsError: false });
     try {
-      const menuItems = await walkInService.searchMenuItems(search);
+      const menuItems = await walkInService.searchMenuItems(search, branchId);
       set({ menuItems, menuItemsLoading: false });
     } catch {
       set({ menuItemsLoading: false, menuItemsError: true });
     }
   },
 
-  createOrder: async (payload) => {
+  createOrder: async (payload, branchId) => {
     set({ isCreatingOrder: true });
     try {
-      const result = await walkInService.createOrder(payload);
+      const result = await walkInService.createOrder({ ...payload, branchId });
       set({ isCreatingOrder: false });
       return result;
     } catch (error) {
@@ -107,14 +107,14 @@ export const useWalkInStore = create<WalkInState>((set) => ({
     }
   },
 
-  // NOTE: backend currently returns 500 here — request payload has been verified
+  // NOTE: backend currently returns 500 here -- request payload has been verified
   // against Swagger (no params) so this is a server-side bug. Surfacing the
   // real error message via toast (instead of failing silently) until the
   // response schema/fix is confirmed.
-  fetchBlacklist: async () => {
+  fetchBlacklist: async (branchId) => {
     set({ blacklistLoading: true, blacklistError: false });
     try {
-      const blacklist = await walkInService.getBlacklist();
+      const blacklist = await walkInService.getBlacklist(branchId);
       set({ blacklist, blacklistLoading: false });
     } catch (error) {
       set({ blacklistLoading: false, blacklistError: true });
@@ -122,10 +122,10 @@ export const useWalkInStore = create<WalkInState>((set) => ({
     }
   },
 
-  addToBlacklist: async (payload) => {
+  addToBlacklist: async (payload, branchId) => {
     set({ isSubmittingBlacklist: true });
     try {
-      const entry = await walkInService.addToBlacklist(payload);
+      const entry = await walkInService.addToBlacklist({ ...payload, branchId });
       set((state) => ({
         isSubmittingBlacklist: false,
         blacklist: state.blacklist ? [...state.blacklist, entry] : [entry],
@@ -139,9 +139,9 @@ export const useWalkInStore = create<WalkInState>((set) => ({
     }
   },
 
-  removeFromBlacklist: async (id) => {
+  removeFromBlacklist: async (id, branchId) => {
     try {
-      await walkInService.removeFromBlacklist(id);
+      await walkInService.removeFromBlacklist(id, branchId);
       set((state) => ({
         blacklist: state.blacklist ? state.blacklist.filter((b) => b.id !== id) : state.blacklist,
       }));

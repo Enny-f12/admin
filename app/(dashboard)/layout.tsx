@@ -1,4 +1,5 @@
-// app/(admin)/layout.tsx
+// app/(admin)/layout.tsx — full file
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -93,25 +94,62 @@ const NAV_SECTIONS = [
  */
 
 /**
- * BranchContext carries { id, name } — `id` is what any branch-scoped
- * API call actually needs (delivery zones, reservations, dashboard
- * summary/alerts/audit-logs/orders all take a `branchId` query param).
- * `name` is already display-mapped before it reaches context, so
- * consumers can render it directly.
+ * SelectedBranch is the minimal shape ({ id, name }) that most consumers
+ * of useBranch() actually need. BranchContextValue extends it with the
+ * extra fields a page needs if it wants to render its own branch picker
+ * (e.g. Stock Inventory) instead of just displaying the current branch.
  */
 export interface SelectedBranch {
   id: string;
   name: string;
 }
 
-const BranchContext = createContext<SelectedBranch>({ id: "", name: "" });
+export interface BranchContextValue extends SelectedBranch {
+  /** True only for a SUPER_ADMIN with no assignedBranchId — see the two-check
+   *  logic below. Any page that wants to render its own dropdown should gate
+   *  on this instead of re-deriving role/assignedBranchId itself. */
+  canPickBranch: boolean;
+  /** Full branch list, for pages that render their own dropdown (mirrors
+   *  what the sidebar picker already uses). Empty for locked users. */
+  branches: SelectedBranch[];
+  /** Changes the active branch. No-ops meaningfully for locked users since
+   *  their UI never exposes a way to call this, but it's always safe to call. */
+  setBranch: (branch: SelectedBranch) => void;
+}
+
+const BranchContext = createContext<BranchContextValue>({
+  id: "",
+  name: "",
+  canPickBranch: false,
+  branches: [],
+  setBranch: () => {},
+});
 export const useBranch = () => useContext(BranchContext);
 
-//  id for the "All Branches" picker entry. Never a real UUID, so
+// Sentinel id for the "All Branches" picker entry. Never a real UUID, so
+// it naturally falls through the branchId-must-be-a-UUID guard in
+// useDashboardStore.ts (asBranchId) and results in no branchId being
+// sent — i.e. genuinely unfiltered, not a special value the backend has
+// to know about. Exported so branch-scoped pages that CAN'T meaningfully
+// operate across every branch at once (e.g. Morning Count) can check
+// against it and refuse to fire a request with it as the outletId.
+export const ALL_BRANCHES_ID = "ALL_BRANCHES";
 
-const ALL_BRANCHES_ID = "ALL_BRANCHES";
-
-/* ── Light sidebar tokens ── */
+// Routes that operate on one physical branch and can't meaningfully run
+// against "All Branches" — e.g. you can't physically count stock at
+// every location simultaneously. "All Branches" is hidden from the
+// picker while on any of these. This list is a UX nicety on top of the
+// real fix, which is each such page guarding against ALL_BRANCHES_ID
+// itself (see morning-count/page.tsx's hasUsableBranch) — hiding the
+// option here doesn't protect a page that arrives at this route already
+// having "All Branches" selected from elsewhere.
+//
+// Stock Inventory is deliberately NOT in this list — unlike Morning
+// Count, it legitimately supports an aggregate view (the table renders
+// one column per branch when "All Branches" is selected).
+const BRANCH_REQUIRED_PREFIXES = [
+  "/inventory/morning-count",
+];
 const SB = {
   bg:          "#FFFFFF",
   border:      "#E4E0D8",
@@ -169,6 +207,7 @@ export default function DashboardLayout({
   const [branchOpen, setBranchOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const pathname = usePathname();
+  const requiresSpecificBranch = BRANCH_REQUIRED_PREFIXES.some((p) => pathname.startsWith(p));
   const sidebarW = collapsed ? 72 : 240;
 
   const { branches, branchesLoading, fetchBranches, user, loginBranchId } = useAuthStore();
@@ -221,18 +260,23 @@ export default function DashboardLayout({
       ? { id: ALL_BRANCHES_ID, name: "All Branches" }
       : branches?.find((b) => b.id === effectiveBranchId) ?? null;
 
-  const branchContextValue: SelectedBranch = selectedBranch
-    ? { id: selectedBranch.id, name: selectedBranch.name }
-    : {
-        id: effectiveBranchId ?? "",
-        name: branchesLoading
-          ? ""
-          : canPickBranch
-            ? "Select branch"
-            : assignedBranchId
-              ? "Your Branch"
-              : "No branch assigned",
-      };
+  const branchContextValue: BranchContextValue = {
+    ...(selectedBranch
+      ? { id: selectedBranch.id, name: selectedBranch.name }
+      : {
+          id: effectiveBranchId ?? "",
+          name: branchesLoading
+            ? ""
+            : canPickBranch
+              ? "Select branch"
+              : assignedBranchId
+                ? "Your Branch"
+                : "No branch assigned",
+        }),
+    canPickBranch,
+    branches: branches ?? [],
+    setBranch: (b) => setSelectedBranchId(b.id),
+  };
 
   const pageTitle =
     NAV_SECTIONS.flatMap((s) => s.items).find((n) => n.href === pathname)
@@ -302,7 +346,7 @@ export default function DashboardLayout({
             transform: translateX(0);
           }
           .desktop-collapse-btn {
-            display: none;
+            display: none !important;
           }
           .hamburger-btn {
             display: flex !important;
@@ -749,42 +793,48 @@ export default function DashboardLayout({
                 >
                   {/* "All Branches" — a real, explicit option, not just
                       an implied default. Selecting it sends no branchId
-                      filter downstream (see ALL_BRANCHES_ID above). */}
-                  <button
-                    onClick={() => {
-                      setSelectedBranchId(ALL_BRANCHES_ID);
-                      setBranchOpen(false);
-                    }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      width: "100%",
-                      padding: "10px 14px",
-                      background:
-                        effectiveBranchId === ALL_BRANCHES_ID ? "var(--color-bg-soft)" : "#fff",
-                      border: "none",
-                      borderBottom: "1px solid var(--color-border)",
-                      cursor: "pointer",
-                      fontSize: "0.85rem",
-                      fontWeight: 600,
-                      fontFamily: "var(--font-sans)",
-                      color: "var(--color-text)",
-                      textAlign: "left",
-                    }}
-                    onMouseEnter={(e) =>
-                      ((e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)")
-                    }
-                    onMouseLeave={(e) =>
-                      ((e.currentTarget as HTMLButtonElement).style.background =
-                        effectiveBranchId === ALL_BRANCHES_ID ? "var(--color-bg-soft)" : "#fff")
-                    }
-                  >
-                    All Branches
-                    {effectiveBranchId === ALL_BRANCHES_ID && (
-                      <Check size={14} strokeWidth={2} color="var(--color-primary)" />
-                    )}
-                  </button>
+                      filter downstream (see ALL_BRANCHES_ID above).
+                      Hidden entirely on routes that require one specific
+                      branch (see BRANCH_REQUIRED_PREFIXES) — the real
+                      protection lives in each such page's own guard, this
+                      is just not offering the option in the first place. */}
+                  {!requiresSpecificBranch && (
+                    <button
+                      onClick={() => {
+                        setSelectedBranchId(ALL_BRANCHES_ID);
+                        setBranchOpen(false);
+                      }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        width: "100%",
+                        padding: "10px 14px",
+                        background:
+                          effectiveBranchId === ALL_BRANCHES_ID ? "var(--color-bg-soft)" : "#fff",
+                        border: "none",
+                        borderBottom: "1px solid var(--color-border)",
+                        cursor: "pointer",
+                        fontSize: "0.85rem",
+                        fontWeight: 600,
+                        fontFamily: "var(--font-sans)",
+                        color: "var(--color-text)",
+                        textAlign: "left",
+                      }}
+                      onMouseEnter={(e) =>
+                        ((e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)")
+                      }
+                      onMouseLeave={(e) =>
+                        ((e.currentTarget as HTMLButtonElement).style.background =
+                          effectiveBranchId === ALL_BRANCHES_ID ? "var(--color-bg-soft)" : "#fff")
+                      }
+                    >
+                      All Branches
+                      {effectiveBranchId === ALL_BRANCHES_ID && (
+                        <Check size={14} strokeWidth={2} color="var(--color-primary)" />
+                      )}
+                    </button>
+                  )}
 
                   {(branches ?? []).map((b) => {
                     const selected = b.id === effectiveBranchId;

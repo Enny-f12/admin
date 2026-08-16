@@ -9,9 +9,11 @@ import {
   Building2,
   ChevronDown,
   Check,
+  Tag,
 } from "lucide-react";
 import { useSuppliersStore } from "@/store/useSuppliersStore";
 import { SupplierType } from "@/types/suppliers.types";
+import { useBranch, ALL_BRANCHES_ID } from "../../layout";
 
 export default function SuppliersPage() {
   const {
@@ -27,24 +29,38 @@ export default function SuppliersPage() {
     addSupplier,
   } = useSuppliersStore();
 
+  // Soft branch scoping, same pattern as Stock Inventory: "All Branches"
+  // still works and shows the company-wide vendor directory, a specific
+  // branch filters deliveries/outstanding to that branch. This is a
+  // judgment call, not a hard guard like Drinks & Fridge -- a supplier
+  // is a vendor relationship, not a physical location, so "All
+  // Branches" is treated as a legitimate view here rather than blocked.
+  const branch = useBranch();
+  const [branchOpen, setBranchOpen] = useState(false);
+  const branchOptions = [{ id: ALL_BRANCHES_ID, name: "All Branches" }, ...branch.branches];
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [successName, setSuccessName] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchSuppliers();
-  }, [fetchSuppliers]);
+    const resolvedBranchId = branch.id === ALL_BRANCHES_ID ? undefined : branch.id;
+    fetchSuppliers(resolvedBranchId);
+  }, [fetchSuppliers, branch.id]);
 
   useEffect(() => {
-    if (selectedId) fetchSupplierDetail(selectedId);
-  }, [selectedId, fetchSupplierDetail]);
+    if (selectedId) {
+      const resolvedBranchId = branch.id === ALL_BRANCHES_ID ? undefined : branch.id;
+      fetchSupplierDetail(selectedId, resolvedBranchId);
+    }
+  }, [selectedId, branch.id, fetchSupplierDetail]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
           <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-            Foodies 1 LEKKI
+            {branch.name}
           </p>
           <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
             SUPPLIERS
@@ -64,14 +80,67 @@ export default function SuppliersPage() {
         </button>
       </div>
 
+      {/* Branch filter -- dropdown for supers, static chip for locked managers */}
+      {branch.canPickBranch ? (
+        <div style={{ position: "relative", alignSelf: "flex-start" }}>
+          <button
+            onClick={() => setBranchOpen((v) => !v)}
+            style={{
+              display: "flex", alignItems: "center", gap: 20, justifyContent: "space-between",
+              minWidth: 150, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--color-border)",
+              background: "#fff", cursor: "pointer", fontSize: "0.9rem", color: "var(--color-text)",
+              fontFamily: "var(--font-sans)",
+            }}
+          >
+            {branch.name}
+            <ChevronDown size={16} strokeWidth={1.8} color="var(--color-text-muted)" />
+          </button>
+          {branchOpen && (
+            <div
+              style={{
+                position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 150,
+                background: "#fff", border: "1px solid var(--color-border)", borderRadius: 10,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.10)", overflow: "hidden", zIndex: 60,
+              }}
+            >
+              {branchOptions.map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => { branch.setBranch(b); setBranchOpen(false); }}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+                    padding: "10px 14px", background: b.id === branch.id ? "var(--color-bg-soft)" : "#fff",
+                    border: "none", cursor: "pointer", fontSize: "0.85rem", fontFamily: "var(--font-sans)",
+                    color: "var(--color-text)", textAlign: "left",
+                  }}
+                >
+                  {b.id === branch.id && <span style={{ marginRight: 6 }}>{"✓"}</span>}
+                  {b.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div
+          style={{
+            display: "flex", alignItems: "center", minWidth: 150, alignSelf: "flex-start",
+            padding: "10px 14px", borderRadius: 8, border: "1px solid var(--color-border)",
+            background: "var(--color-bg-soft)", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)",
+          }}
+          title="Your account is scoped to this branch"
+        >
+          {branch.name}
+        </div>
+      )}
+
       {suppliersLoading && (
-        <div className="card"><p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p></div>
+        <div className="card"><p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading...</p></div>
       )}
 
       {!suppliersLoading && (suppliersError || !suppliers?.length) && (
         <div className="card">
           <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/suppliers (with deliveries/outstanding) not implemented — see request doc A1 */}
             No supplier data available
           </p>
         </div>
@@ -94,7 +163,7 @@ export default function SuppliersPage() {
                     color: "var(--color-primary)", fontWeight: 700, fontSize: "0.8rem",
                   }}
                 >
-                  ₦{s.outstanding.toLocaleString()}
+                  {"₦"}{s.outstanding.toLocaleString()}
                 </span>
               )}
 
@@ -109,6 +178,12 @@ export default function SuppliersPage() {
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: "var(--color-heading)" }}>{s.name}</p>
+                  {s.type && (
+                    <p style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0 0", fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
+                      <Tag size={12} strokeWidth={1.8} />
+                      {s.type}
+                    </p>
+                  )}
                   {s.phone && (
                     <p style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0 0", fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
                       <Phone size={13} strokeWidth={1.8} />
@@ -132,7 +207,7 @@ export default function SuppliersPage() {
                 </div>
                 <div style={{ padding: "12px 10px", borderRadius: 10, background: "var(--color-bg-soft)", textAlign: "center" }}>
                   <p style={{ margin: 0, fontWeight: 700, fontSize: "1rem", color: s.outstanding > 0 ? "var(--color-primary)" : "var(--color-heading)" }}>
-                    ₦{s.outstanding.toLocaleString()}
+                    {"₦"}{s.outstanding.toLocaleString()}
                   </p>
                   <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>outstanding</p>
                 </div>
@@ -156,7 +231,8 @@ export default function SuppliersPage() {
         <AddSupplierModal
           onClose={() => setAddOpen(false)}
           onSave={async (payload) => {
-            const supplier = await addSupplier(payload);
+            const resolvedBranchId = branch.id === ALL_BRANCHES_ID ? undefined : branch.id;
+            const supplier = await addSupplier(payload, resolvedBranchId);
             if (supplier) {
               setAddOpen(false);
               setSuccessName(supplier.name);
@@ -170,7 +246,7 @@ export default function SuppliersPage() {
   );
 }
 
-/* ── Shared modal shell ── */
+/* -- Shared modal shell -- */
 function ModalShell({ title, onClose, children, width = 700 }: { title?: string; onClose: () => void; children: React.ReactNode; width?: number }) {
   return (
     <div
@@ -202,7 +278,7 @@ function ModalShell({ title, onClose, children, width = 700 }: { title?: string;
   );
 }
 
-/* ── Supplier detail modal ── */
+/* -- Supplier detail modal -- */
 function SupplierDetailModal({
   supplierName, detail, loading, error, onClose,
 }: {
@@ -214,11 +290,10 @@ function SupplierDetailModal({
 }) {
   return (
     <ModalShell title={supplierName || "Supplier"} onClose={onClose}>
-      {loading && <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p>}
+      {loading && <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading...</p>}
 
       {!loading && (error || !detail) && (
         <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-          {/* TODO(BACKEND): GET /admin/suppliers/:id not implemented — see request doc A2 */}
           No supplier detail available
         </p>
       )}
@@ -226,6 +301,12 @@ function SupplierDetailModal({
       {!loading && detail && (
         <>
           <div style={{ padding: "14px 16px", borderRadius: 10, background: "var(--color-bg-soft)", display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+            {detail.type && (
+              <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--color-text)" }}>
+                <Tag size={15} strokeWidth={1.8} color="var(--color-primary)" />
+                {detail.type}
+              </span>
+            )}
             {detail.phone && (
               <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.9rem", color: "var(--color-text)" }}>
                 <Phone size={15} strokeWidth={1.8} color="var(--color-primary)" />
@@ -262,7 +343,7 @@ function SupplierDetailModal({
                     <tr key={i}>
                       <td style={cellStyle}>{p.date}</td>
                       <td style={cellStyle}>{p.invoiceNumber}</td>
-                      <td style={{ ...cellStyle, fontWeight: 600 }}>₦{p.amount.toLocaleString()}</td>
+                      <td style={{ ...cellStyle, fontWeight: 600 }}>{"₦"}{p.amount.toLocaleString()}</td>
                       <td style={cellStyle}>{p.paid ? "Yes" : "No"}</td>
                       <td style={cellStyle}>{p.reference}</td>
                     </tr>
@@ -310,7 +391,7 @@ function SupplierDetailModal({
 }
 const cellStyle: React.CSSProperties = { padding: "12px 8px", fontSize: "0.85rem", color: "var(--color-text)", borderBottom: "1px solid var(--color-border)" };
 
-/* ── Add Supplier modal ── */
+/* -- Add Supplier modal -- */
 const SUPPLIER_TYPES: SupplierType[] = ["Food Supplier", "Beverage Supplier", "Packaging Supplier"];
 
 function AddSupplierModal({
@@ -382,7 +463,7 @@ function AddSupplierModal({
   );
 }
 
-/* ── Success confirmation ── */
+/* -- Success confirmation -- */
 function SuccessModal({ name, onClose }: { name: string; onClose: () => void }) {
   return (
     <ModalShell onClose={onClose} width={420}>

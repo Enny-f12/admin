@@ -19,10 +19,10 @@ interface SuppliersState {
 
   isSaving: boolean;
 
-  fetchSuppliers: () => Promise<void>;
-  fetchSupplierDetail: (id: string) => Promise<void>;
+  fetchSuppliers: (branchId?: string) => Promise<void>;
+  fetchSupplierDetail: (id: string, branchId?: string) => Promise<void>;
   clearDetail: () => void;
-  addSupplier: (payload: AddSupplierPayload) => Promise<Supplier | null>;
+  addSupplier: (payload: AddSupplierPayload, branchId?: string) => Promise<Supplier | null>;
 }
 
 export const useSuppliersStore = create<SuppliersState>((set) => ({
@@ -36,20 +36,20 @@ export const useSuppliersStore = create<SuppliersState>((set) => ({
 
   isSaving: false,
 
-  fetchSuppliers: async () => {
+  fetchSuppliers: async (branchId) => {
     set({ suppliersLoading: true, suppliersError: false });
     try {
-      const suppliers = await suppliersService.getSuppliers();
+      const suppliers = await suppliersService.getSuppliers(branchId);
       set({ suppliers, suppliersLoading: false });
     } catch {
       set({ suppliersLoading: false, suppliersError: true });
     }
   },
 
-  fetchSupplierDetail: async (id) => {
+  fetchSupplierDetail: async (id, branchId) => {
     set({ detailLoading: true, detailError: false, detail: null });
     try {
-      const detail = await suppliersService.getSupplierDetail(id);
+      const detail = await suppliersService.getSupplierDetail(id, branchId);
       set({ detail, detailLoading: false });
     } catch {
       set({ detailLoading: false, detailError: true });
@@ -58,10 +58,10 @@ export const useSuppliersStore = create<SuppliersState>((set) => ({
 
   clearDetail: () => set({ detail: null, detailError: false }),
 
-  addSupplier: async (payload) => {
+  addSupplier: async (payload, branchId) => {
     set({ isSaving: true });
     try {
-      const supplier = await suppliersService.addSupplier(payload);
+      const supplier = await suppliersService.addSupplier({ ...payload, branchId });
       set((state) => ({
         suppliers: state.suppliers ? [...state.suppliers, supplier] : [supplier],
         isSaving: false,

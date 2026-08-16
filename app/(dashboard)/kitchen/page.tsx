@@ -17,10 +17,12 @@ import {
   Square,
   Minus,
   Plus,
+  AlertTriangle,
 } from "lucide-react";
 import { useKitchenStore } from "@/store/useKitchenStore";
 import { OrderSource, KitchenDisplaySettings } from "@/types/kitchen.types";
 import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
+import { useBranch, ALL_BRANCHES_ID } from "../layout";
 
 const SOURCE_ICON: Record<OrderSource, React.ElementType> = {
   "Mobile App": Smartphone,
@@ -40,6 +42,14 @@ export default function KitchenDisplayPage() {
   const [view, setView] = useState<"live" | "settings">("live");
   const [now, setNow] = useState(() => new Date());
 
+  // Hard branch guard, same pattern as Drinks & Fridge, Reconciliation,
+  // and Walk-in: a kitchen display is physically one screen at one
+  // branch -- there's no meaningful "All Branches" kitchen queue.
+  // Previously this page had no branch awareness at all.
+  const branch = useBranch();
+  const isAllBranches = branch.id === ALL_BRANCHES_ID;
+  const hasUsableBranch = Boolean(branch.id) && !isAllBranches;
+
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(t);
@@ -51,45 +61,59 @@ export default function KitchenDisplayPage() {
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>Foodies 1 LEKKI</p>
+          <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>{branch.name}</p>
           <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>KITCHEN DISPLAY</h1>
           <p style={{ margin: "4px 0 0", fontSize: "0.875rem", color: "var(--color-text-muted)" }}>
-            {view === "live" ? "Real-time queue • All order sources" : "Settings"}
+            {view === "live" ? "Real-time queue - All order sources" : "Settings"}
           </p>
         </div>
 
-        {view === "live" ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ padding: "9px 16px", borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", fontWeight: 700, fontSize: "0.9rem", color: "var(--color-heading)" }}>
-              {timeStr}
+        {hasUsableBranch && (
+          view === "live" ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ padding: "9px 16px", borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", fontWeight: 700, fontSize: "0.9rem", color: "var(--color-heading)" }}>
+                {timeStr}
+              </div>
+              <button
+                onClick={() => setView("settings")}
+                aria-label="Kitchen display settings"
+                style={{ width: 38, height: 38, borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+              >
+                <SettingsIcon size={17} strokeWidth={1.8} color="var(--color-text-muted)" />
+              </button>
             </div>
+          ) : (
             <button
-              onClick={() => setView("settings")}
-              aria-label="Kitchen display settings"
-              style={{ width: 38, height: 38, borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+              onClick={() => setView("live")}
+              className="btn btn-primary"
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 18px", fontSize: "0.85rem" }}
             >
-              <SettingsIcon size={17} strokeWidth={1.8} color="var(--color-text-muted)" />
+              <Monitor size={16} strokeWidth={1.8} />
+              View TV Display
             </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => setView("live")}
-            className="btn btn-primary"
-            style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 18px", fontSize: "0.85rem" }}
-          >
-            <Monitor size={16} strokeWidth={1.8} />
-            View TV Display
-          </button>
+          )
         )}
       </div>
 
-      {view === "live" ? <LiveQueueView /> : <SettingsView />}
+      {!hasUsableBranch ? (
+        <div className="card">
+          <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.9rem", color: "var(--color-text)" }}>
+            <AlertTriangle size={16} strokeWidth={1.8} color="#a07a00" />
+            Kitchen Display is per-branch -- pick a specific branch from the selector above to view the live
+            order queue and display settings.
+          </p>
+        </div>
+      ) : view === "live" ? (
+        <LiveQueueView branchId={branch.id} />
+      ) : (
+        <SettingsView branchId={branch.id} />
+      )}
     </div>
   );
 }
 
 /* ══════════════════════════ Live Queue ══════════════════════════ */
-function LiveQueueView() {
+function LiveQueueView({ branchId }: { branchId: string }) {
   const {
     liveQueue, liveQueueLoading, liveQueueError, fetchLiveQueue,
     completed, completedLoading, completedError, fetchCompleted,
@@ -97,22 +121,25 @@ function LiveQueueView() {
   } = useKitchenStore();
 
   useEffect(() => {
-    fetchLiveQueue();
-    fetchCompleted();
+    fetchLiveQueue(branchId);
+    fetchCompleted(30, branchId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [branchId]);
 
   // Poll the live queue at whatever interval settings specify, defaulting
   // to a sane 15s until settings load (mock's "2 seconds" would hammer a
-  // real API — worth confirming the real default with backend/product).
+  // real API -- worth confirming the real default with backend/product).
   useEffect(() => {
     const intervalMs = (settings?.refreshIntervalSeconds ?? 15) * 1000;
-    const t = setInterval(() => fetchLiveQueue(), intervalMs);
+    const t = setInterval(() => fetchLiveQueue(branchId), intervalMs);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings?.refreshIntervalSeconds]);
+  }, [settings?.refreshIntervalSeconds, branchId]);
 
-  const counts: Record<string, number> = { "Mobile App": 0, "POS": 0, "Walk-In": 0, "Phone": 0 };
+  // Delivery was previously excluded from this count entirely, despite
+  // being a valid OrderSource and already rendering with its own Truck
+  // icon on individual queue cards below.
+  const counts: Record<string, number> = { "Mobile App": 0, "POS": 0, "Walk-In": 0, "Phone": 0, "Delivery": 0 };
   liveQueue?.forEach((o) => {
     if (o.source in counts) counts[o.source] += 1;
   });
@@ -122,6 +149,7 @@ function LiveQueueView() {
     { label: "POS", value: counts["POS"], icon: CreditCard, color: "red" },
     { label: "Walk-In", value: counts["Walk-In"], icon: User, color: "gold" },
     { label: "Phone", value: counts["Phone"], icon: Phone, color: "red" },
+    { label: "Delivery", value: counts["Delivery"], icon: Truck, color: "gold" },
   ];
 
   return (
@@ -167,7 +195,6 @@ function LiveQueueView() {
       {!liveQueueLoading && (liveQueueError || !liveQueue?.length) && (
         <div className="card">
           <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/kitchen/orders not implemented */}
             No orders in the queue
           </p>
         </div>
@@ -243,7 +270,6 @@ function LiveQueueView() {
 
         {!completedLoading && (completedError || !completed?.length) && (
           <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/kitchen/completed not implemented */}
             No completed orders in this window
           </p>
         )}
@@ -252,7 +278,7 @@ function LiveQueueView() {
           <div style={{ display: "flex", flexDirection: "column" }}>
             {completed?.map((c, i) => (
               <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderTop: i > 0 ? "1px solid var(--color-border)" : "none" }}>
-                <span style={{ fontSize: "0.88rem", color: "var(--color-text)" }}>{c.orderNumber} • {formatTime(c.completedAt)} • {c.source}</span>
+                <span style={{ fontSize: "0.88rem", color: "var(--color-text)" }}>{c.orderNumber} - {formatTime(c.completedAt)} - {c.source}</span>
                 <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#16A34A" }}>Completed</span>
               </div>
             ))}
@@ -264,15 +290,15 @@ function LiveQueueView() {
 }
 
 /* ══════════════════════════ Settings ══════════════════════════ */
-function SettingsView() {
+function SettingsView({ branchId }: { branchId: string }) {
   const { settings, settingsLoading, settingsError, fetchSettings, saveSettings, isSavingSettings } = useKitchenStore();
 
   const [form, setForm] = useState<KitchenDisplaySettings | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    fetchSettings();
-  }, [fetchSettings]);
+    fetchSettings(branchId);
+  }, [fetchSettings, branchId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -320,7 +346,6 @@ function SettingsView() {
         </div>
         {settingsError && (
           <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/kitchen/settings not implemented */}
             Settings unavailable
           </p>
         )}
@@ -442,9 +467,9 @@ function SettingsView() {
           className="btn btn-primary"
           style={{ padding: "10px 20px", fontSize: "0.85rem" }}
           disabled={isSavingSettings}
-          onClick={() => saveSettings(form)}
+          onClick={() => saveSettings(form, branchId)}
         >
-          {isSavingSettings ? "Saving…" : "Save Changes"}
+          {isSavingSettings ? "Saving..." : "Save Changes"}
         </button>
       </div>
     </>

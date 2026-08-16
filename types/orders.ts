@@ -11,11 +11,11 @@ export type OrderStatus =
 
 export type OrderType = "DINE_IN" | "TAKEAWAY" | "DELIVERY";
 
-// Confirmed from real GET /admin/orders response — no longer a guess.
+// Confirmed from real GET /admin/orders response -- no longer a guess.
 export type PaymentMethodType = "CARD" | "CASH_ON_DELIVERY" | "BANK_TRANSFER";
 
 // PAID / PENDING / REFUNDED confirmed from real data. FAILED requested from
-// backend — see backend request doc, Orders #1. Revert to a loose `string`
+// backend -- see backend request doc, Orders #1. Revert to a loose `string`
 // on paymentStatus below if backend confirms other values exist beyond these four.
 export type PaymentStatus = "PAID" | "PENDING" | "REFUNDED" | "FAILED";
 
@@ -31,11 +31,14 @@ export interface OrderItem {
   menuItemId: string | null;
   nameSnapshot: string;
   descriptionSnapshot: string | null;
-  unitPrice: string;   // backend returns decimals as strings — wrap with Number() before display math
+  unitPrice: string;   // backend returns decimals as strings -- wrap with Number() before display math
   quantity: number;
   totalPrice: string;
   notes: string | null;
-  options: OrderItemOption[];
+  // Optional, not required: confirmed real order items omit this key
+  // entirely rather than sending an empty array. Previously typed as
+  // required, which didn't match actual API responses.
+  options?: OrderItemOption[];
 }
 
 export interface OrderStatusHistoryChangedBy {
@@ -76,7 +79,7 @@ export interface AdminOrder {
   branch?: OrderBranch;
 
   // Present on GET /admin/orders (list), absent on GET /admin/orders/:id (detail).
-  // Confirmed backend gap — see backend request doc, Orders #2.
+  // Confirmed backend gap -- see backend request doc, Orders #2.
   customer?: OrderCustomer;
 
   orderType: OrderType;
@@ -85,6 +88,11 @@ export interface AdminOrder {
   paymentMethod: PaymentMethodType;
 
   customerNotes: string | null;
+  // Confirmed present in real data -- previously missing from this type
+  // despite the detail modal wanting to show it.
+  kitchenNotes: string | null;
+  cancelReason: string | null;
+
   guestName: string | null;
   guestPhone: string | null;
   guestEmail: string | null;
@@ -92,6 +100,9 @@ export interface AdminOrder {
   subtotalAmount: string;
   taxAmount: string;
   deliveryFeeAmount: string;
+  // Confirmed present in real data ("discountAmount": "0" on every
+  // sample order) -- previously missing from this type.
+  discountAmount: string;
   totalAmount: string;
 
   deliveryInstructions: string | null;
@@ -100,7 +111,7 @@ export interface AdminOrder {
   deliveryCity: string | null;
   deliveryState: string | null;
   deliveryCountry: string | null;
-  // Currently always null in real data even on completed DELIVERY orders —
+  // Currently always null in real data even on completed DELIVERY orders --
   // see backend request doc, Orders #4. Not yet used in the UI; add a map
   // preview once backend confirms these are populated.
   deliveryLatitude: string | null;

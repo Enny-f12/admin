@@ -1,3 +1,5 @@
+// app/(admin)/inventory/stock/page.tsx — full file
+
 "use client";
 
 import { useState } from "react";
@@ -18,6 +20,7 @@ import {
 import { useEffect } from "react";
 import { useStockStore } from "@/store/useStockStore";
 import { StockItem, StockStatus } from "@/types/stock.types";
+import { useBranch, ALL_BRANCHES_ID } from "../../layout";
 
 type ModalItem = {
   itemId: string;
@@ -42,8 +45,6 @@ const StatusBadge = ({ status }: { status: StockStatus }) => (
     {status}
   </span>
 );
-
-const ALL_BRANCHES_ID = "all";
 
 /* ── Pagination hook + bar (shared by both tables) ──
    No effect / no setState-in-effect: page is clamped at render time,
@@ -129,8 +130,9 @@ export default function StockInventoryPage() {
     lowStock,
     lowStockLoading,
     suppliers,
-    fetchAll,
+    fetchBranches,
     fetchItems,
+    fetchLowStockAlerts,
     fetchSuppliers,
     adjustStock,
     transferStock,
@@ -138,7 +140,13 @@ export default function StockInventoryPage() {
     addSupplier,
   } = useStockStore();
 
-  const [branchId, setBranchId] = useState<string>(ALL_BRANCHES_ID);
+  // Single source of truth for the active branch — same context the
+  // sidebar picker in app/(admin)/layout.tsx writes to. This page no
+  // longer keeps its own branchId state or re-derives role logic:
+  // canPickBranch is resolved once, upstream, from assignedBranchId +
+  // role, and this page just renders differently based on it.
+  const branch = useBranch();
+
   const [branchOpen, setBranchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [showThresholds, setShowThresholds] = useState(false);
@@ -149,17 +157,20 @@ export default function StockInventoryPage() {
   const [supplierOpen, setSupplierOpen] = useState(false);
 
   useEffect(() => {
-    fetchAll();
+    fetchBranches();
     fetchSuppliers();
-  }, [fetchAll, fetchSuppliers]);
+  }, [fetchBranches, fetchSuppliers]);
 
   useEffect(() => {
-    fetchItems(branchId === ALL_BRANCHES_ID ? undefined : branchId, search || undefined);
+    const resolvedBranchId = branch.id === ALL_BRANCHES_ID ? undefined : branch.id;
+    fetchItems(resolvedBranchId, search || undefined);
+    fetchLowStockAlerts(resolvedBranchId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId, search]);
+  }, [branch.id, search]);
 
-  const branchOptions = [{ id: ALL_BRANCHES_ID, name: "All Branches" }, ...(branches ?? [])];
-  const branchLabel = branchOptions.find((b) => b.id === branchId)?.name ?? "All Branches";
+  // Only ever rendered for supers (branch.canPickBranch) — a locked
+  // manager's UI never reads this since the dropdown itself doesn't render.
+  const branchOptions = [{ id: ALL_BRANCHES_ID, name: "All Branches" }, ...branch.branches];
 
   const totalItems = items?.length ?? 0;
   const lowStockCount = items?.filter((i) => i.status === "Low Stock").length ?? 0;
@@ -191,7 +202,7 @@ export default function StockInventoryPage() {
       {!showThresholds ? (
         <>
           <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--color-heading)" }}>
-            Stock levels across all locations
+            {branch.id === ALL_BRANCHES_ID ? "Stock levels across all locations" : `Stock levels — ${branch.name}`}
           </h2>
 
           {/* Stat cards */}
@@ -219,75 +230,79 @@ export default function StockInventoryPage() {
             </div>
           </div>
 
-          {/* Action buttons */}
+          {/* Top action row — Threshold Configuration is page-level
+              navigation, so it legitimately belongs here. Adjust /
+              Transfer / Remove were dropped from this row: those are
+              item-scoped actions and belong on each table row (below),
+              not as standalone buttons guessing at "the first item". */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
             <button
               className="btn btn-primary"
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 16px", fontSize: "0.85rem" }}
-              disabled={!items?.length}
-              onClick={() => items?.[0] && setAdjustItem(toModalItem(items[0]))}
-            >
-              <Plus size={16} strokeWidth={2} />
-              Adjust Stock
-            </button>
-            <ActionButton
-              icon={<ArrowLeftRight size={16} strokeWidth={1.8} />}
-              label="Transfer"
-              onClick={() => items?.[0] && setTransferItem(toModalItem(items[0]))}
-            />
-            <ActionButton
-              icon={<PackageMinus size={16} strokeWidth={1.8} />}
-              label="Remove Stock"
-              onClick={() => items?.[0] && setRemoveItem(toModalItem(items[0]))}
-            />
-            <ActionButton
-              icon={<SlidersHorizontal size={16} strokeWidth={1.8} />}
-              label="Threshold Configuration"
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", fontSize: "0.85rem" }}
               onClick={() => setShowThresholds(true)}
-            />
+            >
+              <SlidersHorizontal size={16} strokeWidth={1.8} />
+              Threshold Configuration
+            </button>
           </div>
 
           {/* Branch filter + search */}
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ position: "relative" }}>
-              <button
-                onClick={() => setBranchOpen((v) => !v)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 20, justifyContent: "space-between",
-                  minWidth: 150, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--color-border)",
-                  background: "#fff", cursor: "pointer", fontSize: "0.9rem", color: "var(--color-text)",
-                  fontFamily: "var(--font-sans)",
-                }}
-              >
-                {branchLabel}
-                <ChevronDown size={16} strokeWidth={1.8} color="var(--color-text-muted)" />
-              </button>
-              {branchOpen && (
-                <div
+            {branch.canPickBranch ? (
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setBranchOpen((v) => !v)}
                   style={{
-                    position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 150,
-                    background: "#fff", border: "1px solid var(--color-border)", borderRadius: 10,
-                    boxShadow: "0 8px 24px rgba(0,0,0,0.10)", overflow: "hidden", zIndex: 60,
+                    display: "flex", alignItems: "center", gap: 20, justifyContent: "space-between",
+                    minWidth: 150, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--color-border)",
+                    background: "#fff", cursor: "pointer", fontSize: "0.9rem", color: "var(--color-text)",
+                    fontFamily: "var(--font-sans)",
                   }}
                 >
-                  {branchOptions.map((b) => (
-                    <button
-                      key={b.id}
-                      onClick={() => { setBranchId(b.id); setBranchOpen(false); }}
-                      style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
-                        padding: "10px 14px", background: b.id === branchId ? "var(--color-bg-soft)" : "#fff",
-                        border: "none", cursor: "pointer", fontSize: "0.85rem", fontFamily: "var(--font-sans)",
-                        color: "var(--color-text)", textAlign: "left",
-                      }}
-                    >
-                      {b.id === branchId && <span style={{ marginRight: 6 }}>✓</span>}
-                      {b.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+                  {branch.name}
+                  <ChevronDown size={16} strokeWidth={1.8} color="var(--color-text-muted)" />
+                </button>
+                {branchOpen && (
+                  <div
+                    style={{
+                      position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 150,
+                      background: "#fff", border: "1px solid var(--color-border)", borderRadius: 10,
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.10)", overflow: "hidden", zIndex: 60,
+                    }}
+                  >
+                    {branchOptions.map((b) => (
+                      <button
+                        key={b.id}
+                        onClick={() => { branch.setBranch(b); setBranchOpen(false); }}
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+                          padding: "10px 14px", background: b.id === branch.id ? "var(--color-bg-soft)" : "#fff",
+                          border: "none", cursor: "pointer", fontSize: "0.85rem", fontFamily: "var(--font-sans)",
+                          color: "var(--color-text)", textAlign: "left",
+                        }}
+                      >
+                        {b.id === branch.id && <span style={{ marginRight: 6 }}>✓</span>}
+                        {b.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              // Locked manager (or a mid-load state) — a static, non-interactive
+              // chip. No dropdown, nothing to switch, same pattern as the
+              // sidebar's own non-picker branch display.
+              <div
+                title="Your account is scoped to this branch"
+                style={{
+                  display: "flex", alignItems: "center", minWidth: 150,
+                  padding: "10px 14px", borderRadius: 8, border: "1px solid var(--color-border)",
+                  background: "var(--color-bg-soft)", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)",
+                }}
+              >
+                {branch.name}
+              </div>
+            )}
 
             <div style={{ position: "relative", flex: 1, minWidth: 220 }}>
               <Search size={16} strokeWidth={1.8} color="var(--color-text-muted)" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
@@ -339,9 +354,9 @@ export default function StockInventoryPage() {
                     <thead>
                       <tr>
                         <th>Item</th>
-                        {(branches ?? []).map((b) => (
-                          <th key={b.id}>{b.name}</th>
-                        ))}
+                        {branch.id === ALL_BRANCHES_ID
+                          ? (branches ?? []).map((b) => <th key={b.id}>{b.name}</th>)
+                          : <th>Quantity</th>}
                         <th>Total</th>
                         <th>Status</th>
                         <th>Actions</th>
@@ -354,22 +369,32 @@ export default function StockInventoryPage() {
                             <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{item.name}</p>
                             <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{item.unit}</p>
                           </td>
-                          {(branches ?? []).map((b) => (
-                            <td key={b.id}>
-                              {item.quantities.find((q) => q.branchId === b.id)?.quantity ?? "-"}
-                            </td>
-                          ))}
+                          {branch.id === ALL_BRANCHES_ID
+                            ? (branches ?? []).map((b) => (
+                                <td key={b.id}>
+                                  {item.quantities.find((q) => q.branchId === b.id)?.quantity ?? "-"}
+                                </td>
+                              ))
+                            : (
+                                <td>
+                                  {item.quantities.find((q) => q.branchId === branch.id)?.quantity ?? item.total}
+                                </td>
+                              )}
                           <td style={{ fontWeight: 600 }}>{item.total}</td>
                           <td><StatusBadge status={item.status} /></td>
                           <td>
                             <div style={{ display: "flex", gap: 6 }}>
                               <IconButton
                                 icon={<Plus size={14} strokeWidth={2} />}
-                                onClick={() => setAdjustItem(toModalItem(item, branchId === ALL_BRANCHES_ID ? undefined : branchId))}
+                                onClick={() => setAdjustItem(toModalItem(item, branch.id === ALL_BRANCHES_ID ? undefined : branch.id))}
                               />
                               <IconButton
                                 icon={<ArrowLeftRight size={14} strokeWidth={1.8} />}
-                                onClick={() => setTransferItem(toModalItem(item, branchId === ALL_BRANCHES_ID ? undefined : branchId))}
+                                onClick={() => setTransferItem(toModalItem(item, branch.id === ALL_BRANCHES_ID ? undefined : branch.id))}
+                              />
+                              <IconButton
+                                icon={<PackageMinus size={14} strokeWidth={1.8} />}
+                                onClick={() => setRemoveItem(toModalItem(item, branch.id === ALL_BRANCHES_ID ? undefined : branch.id))}
                               />
                             </div>
                           </td>
@@ -460,22 +485,6 @@ export default function StockInventoryPage() {
 }
 
 /* ── Small shared building blocks ── */
-
-function ActionButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", borderRadius: 8,
-        border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer",
-        fontSize: "0.85rem", fontWeight: 500, color: "var(--color-text)", fontFamily: "var(--font-sans)",
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
 
 function IconButton({ icon, onClick }: { icon: React.ReactNode; onClick: () => void }) {
   return (
@@ -804,15 +813,22 @@ function RemoveStockModal({
   );
 }
 
-/* ── Add New Supplier modal ── */
+/* ── Add New Supplier modal ──
+   Fields match POST /admin/suppliers per Swagger: name, type,
+   contactPerson, phone, address. `type` renders as `{}` in Swagger's
+   example (usually means an unset-sample enum) — left as free text
+   until the real enum values are confirmed via the Schema tab, rather
+   than guessing wrong options for a <select>. */
 function AddSupplierModal({
   onClose, onSubmit,
 }: {
   onClose: () => void;
-  onSubmit: (form: { name: string; contact: string; address: string }) => void;
+  onSubmit: (form: { name: string; type: string; contactPerson: string; phone: string; address: string }) => void;
 }) {
   const [name, setName] = useState("");
-  const [contact, setContact] = useState("");
+  const [type, setType] = useState("");
+  const [contactPerson, setContactPerson] = useState("");
+  const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
 
   return (
@@ -820,8 +836,14 @@ function AddSupplierModal({
       <Field label="Name">
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
-      <Field label="Contact">
-        <input className="input" value={contact} onChange={(e) => setContact(e.target.value)} />
+      <Field label="Type">
+        <input className="input" value={type} onChange={(e) => setType(e.target.value)} placeholder="e.g. Food, Beverage" />
+      </Field>
+      <Field label="Contact Person">
+        <input className="input" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} />
+      </Field>
+      <Field label="Phone">
+        <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} />
       </Field>
       <Field label="Address">
         <input className="input" value={address} onChange={(e) => setAddress(e.target.value)} />
@@ -829,8 +851,8 @@ function AddSupplierModal({
       <button
         className="btn btn-primary"
         style={{ width: "100%", padding: "10px 0", fontSize: "0.9rem", display: "flex", alignItems: "center", justifyContent: "center" }}
-        disabled={!name.trim()}
-        onClick={() => onSubmit({ name, contact, address })}
+        disabled={!name.trim() || !contactPerson.trim() || !phone.trim()}
+        onClick={() => onSubmit({ name, type, contactPerson, phone, address })}
       >
         Add
       </button>
@@ -880,22 +902,24 @@ function ThresholdView({ onBack }: { onBack: () => void }) {
 
   return (
     <>
+      {/* Real navigation, not a decoy button row — this view is reached
+          from one place (Threshold Configuration) and should return
+          there the same way, not fake Adjust/Transfer/Remove buttons
+          that just call onBack regardless of which was clicked. */}
+      <button
+        onClick={onBack}
+        style={{
+          display: "flex", alignItems: "center", gap: 6, background: "none", border: "none",
+          cursor: "pointer", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-primary)",
+          fontFamily: "var(--font-sans)", padding: 0, alignSelf: "flex-start",
+        }}
+      >
+        ← Back to Stock Inventory
+      </button>
+
       <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--color-heading)" }}>
         Low Stock Thresholds
       </h2>
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        <ActionButton icon={<Plus size={16} strokeWidth={2} />} label="Adjust Stock" onClick={onBack} />
-        <ActionButton icon={<ArrowLeftRight size={16} strokeWidth={1.8} />} label="Transfer" onClick={onBack} />
-        <ActionButton icon={<PackageMinus size={16} strokeWidth={1.8} />} label="Remove Stock" onClick={onBack} />
-        <button
-          className="btn btn-primary"
-          style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", fontSize: "0.85rem" }}
-        >
-          <SlidersHorizontal size={16} strokeWidth={1.8} />
-          Threshold Configuration
-        </button>
-      </div>
 
       <Field label="Default threshold for all food items">
         <input

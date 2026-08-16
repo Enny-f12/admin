@@ -21,6 +21,7 @@ import { useOrderStore } from "@/store/useOrderStore";
 import { OrderStatus, OrderType, AdminOrder } from "@/types/orders";
 import { WalkInCustomer, MenuItem } from "@/types/walk-in.types";
 import { SkeletonText, SkeletonTableRows } from "@/components/ui/Skeleton";
+import { useBranch, ALL_BRANCHES_ID } from "../../layout";
 
 type Tab = "create" | "edit" | "blacklist";
 type CartItem = MenuItem & { qty: number };
@@ -56,19 +57,23 @@ const ORDER_TYPE_LABEL: Record<OrderType, string> = {
 const PAGE_SIZE = 6;
 
 function formatMoney(value: string | number | null | undefined) {
-  if (value === null || value === undefined) return "–";
+  if (value === null || value === undefined) return "-";
   const n = Number(value);
-  return Number.isFinite(n) ? `₦${n.toLocaleString()}` : "–";
+  return Number.isFinite(n) ? `₦${n.toLocaleString()}` : "-";
 }
 
 export default function WalkInPage() {
   const [tab, setTab] = useState<Tab>("create");
 
+  const branch = useBranch();
+  const isAllBranches = branch.id === ALL_BRANCHES_ID;
+  const hasUsableBranch = Boolean(branch.id) && !isAllBranches;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, position: "relative" }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>Foodies 1 LEKKI</p>
+          <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>{branch.name}</p>
           <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>MANUAL ORDER</h1>
           <p style={{ margin: "4px 0 0", fontSize: "0.875rem", color: "var(--color-text-muted)" }}>
             Create orders for call-in / walk-in customers
@@ -76,15 +81,27 @@ export default function WalkInPage() {
         </div>
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        <TabButton active={tab === "create"} onClick={() => setTab("create")} icon={<ShoppingCart size={16} strokeWidth={1.8} />} label="Create Order" />
-        <TabButton active={tab === "edit"} onClick={() => setTab("edit")} icon={<SquarePen size={16} strokeWidth={1.8} />} label="Edit Existing" />
-        <TabButton active={tab === "blacklist"} onClick={() => setTab("blacklist")} icon={<AlertTriangle size={16} strokeWidth={1.8} />} label="Blacklist" />
-      </div>
+      {!hasUsableBranch ? (
+        <div className="card">
+          <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.9rem", color: "var(--color-text)" }}>
+            <AlertTriangle size={16} strokeWidth={1.8} color="#a07a00" />
+            Manual orders are per-branch -- pick a specific branch from the selector above to create or edit
+            walk-in orders and manage the blacklist.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            <TabButton active={tab === "create"} onClick={() => setTab("create")} icon={<ShoppingCart size={16} strokeWidth={1.8} />} label="Create Order" />
+            <TabButton active={tab === "edit"} onClick={() => setTab("edit")} icon={<SquarePen size={16} strokeWidth={1.8} />} label="Edit Existing" />
+            <TabButton active={tab === "blacklist"} onClick={() => setTab("blacklist")} icon={<AlertTriangle size={16} strokeWidth={1.8} />} label="Blacklist" />
+          </div>
 
-      {tab === "create" && <CreateOrderView />}
-      {tab === "edit" && <EditExistingView />}
-      {tab === "blacklist" && <BlacklistView />}
+          {tab === "create" && <CreateOrderView branchId={branch.id} />}
+          {tab === "edit" && <EditExistingView branchId={branch.id} />}
+          {tab === "blacklist" && <BlacklistView branchId={branch.id} />}
+        </>
+      )}
     </div>
   );
 }
@@ -159,7 +176,7 @@ function Dropdown({
 }
 
 /* ══════════════════════════ CREATE ORDER ══════════════════════════ */
-function CreateOrderView() {
+function CreateOrderView({ branchId }: { branchId: string }) {
   const {
     customers, customersLoading, searchCustomers, createCustomer, isCreatingCustomer,
     menuItems, menuItemsLoading, searchMenuItems,
@@ -183,9 +200,9 @@ function CreateOrderView() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!customer) searchCustomers(custSearch);
+    if (!customer) searchCustomers(custSearch, branchId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [custSearch, customer]);
+  }, [custSearch, customer, branchId]);
 
   const subtotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const tax = Math.round(subtotal * 0.075);
@@ -230,9 +247,9 @@ function CreateOrderView() {
       paymentMethod,
       notes: notes || null,
       isDraft,
-    });
+    }, branchId);
     if (result) {
-      setSuccessMessage(isDraft ? `Draft saved — ${result.orderNumber}` : `Order ${result.orderNumber} sent to kitchen`);
+      setSuccessMessage(isDraft ? `Draft saved -- ${result.orderNumber}` : `Order ${result.orderNumber} sent to kitchen`);
       reset();
     }
   };
@@ -257,7 +274,7 @@ function CreateOrderView() {
           className="btn btn-primary"
           style={{ padding: "9px 18px", fontSize: "0.85rem", opacity: !canCreate || isCreatingOrder ? 0.6 : 1 }}
         >
-          {isCreatingOrder ? "Sending…" : "Send to Kitchen"}
+          {isCreatingOrder ? "Sending..." : "Send to Kitchen"}
         </button>
       </div>
 
@@ -311,7 +328,6 @@ function CreateOrderView() {
                   )}
                   {!customersLoading && (customers ?? []).length === 0 && (
                     <p style={{ margin: "8px 0", fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
-                      {/* TODO(BACKEND): GET /admin/customers not implemented — see request doc #1 */}
                       No customers found
                     </p>
                   )}
@@ -339,7 +355,7 @@ function CreateOrderView() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <h3 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 700, color: "var(--color-heading)" }}>Items [{cart.length}]</h3>
               <button
-                onClick={() => { setAddItemOpen(true); searchMenuItems(""); }}
+                onClick={() => { setAddItemOpen(true); searchMenuItems("", branchId); }}
                 className="btn btn-primary"
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", fontSize: "0.82rem" }}
               >
@@ -360,7 +376,7 @@ function CreateOrderView() {
                     <div>
                       <p style={{ margin: 0, fontWeight: 600, fontSize: "0.9rem", color: "var(--color-text)" }}>{item.name}</p>
                       <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
-                        {formatMoney(item.price)} • Stock: {item.stock}
+                        {formatMoney(item.price)} - Stock: {item.stock}
                       </p>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -441,7 +457,7 @@ function CreateOrderView() {
             }}
           >
             <Check size={16} strokeWidth={2.5} />
-            {isCreatingOrder ? "Creating…" : "Create Order"}
+            {isCreatingOrder ? "Creating..." : "Create Order"}
           </button>
         </div>
       </div>
@@ -450,7 +466,7 @@ function CreateOrderView() {
         <AddItemModal
           items={menuItems ?? []}
           loading={menuItemsLoading}
-          onSearch={searchMenuItems}
+          onSearch={(s) => searchMenuItems(s, branchId)}
           onAdd={addToCart}
           onOutOfStock={setStockWarnItem}
           onClose={() => setAddItemOpen(false)}
@@ -462,7 +478,7 @@ function CreateOrderView() {
           isSubmitting={isCreatingCustomer}
           onClose={() => setNewCustOpen(false)}
           onCreate={async (payload) => {
-            const created = await createCustomer(payload);
+            const created = await createCustomer(payload, branchId);
             if (created) { setCustomer(created); setNewCustOpen(false); }
           }}
         />
@@ -477,15 +493,15 @@ const qtyBtn: React.CSSProperties = {
 };
 
 /* ══════════════════════════ EDIT EXISTING ══════════════════════════ */
-// Reuses the live Orders endpoint/store — no separate "manual orders" list.
-function EditExistingView() {
+// Reuses the live Orders endpoint/store -- no separate "manual orders" list.
+function EditExistingView({ branchId }: { branchId: string }) {
   const { orders, ordersLoading, ordersError, fetchOrders, updateOrderStatus, isUpdatingStatus } = useOrderStore();
   const [page, setPage] = useState(1);
   const [editOrder, setEditOrder] = useState<AdminOrder | null>(null);
 
   useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders]);
+    fetchOrders({ branchId });
+  }, [fetchOrders, branchId]);
 
   const totalPages = Math.max(1, Math.ceil((orders?.length ?? 0) / PAGE_SIZE));
   const paged = (orders ?? []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -513,7 +529,7 @@ function EditExistingView() {
             {!ordersLoading && !ordersError && paged.map((order) => (
               <tr key={order.id}>
                 <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{order.orderNumber}</td>
-                <td>{order.customer?.fullName ?? order.guestName ?? "–"}</td>
+                <td>{order.customer?.fullName ?? order.guestName ?? "-"}</td>
                 <td>{order.items.length} {order.items.length === 1 ? "Item" : "Items"}</td>
                 <td style={{ fontWeight: 500, color: "var(--color-text)" }}>{formatMoney(order.totalAmount)}</td>
                 <td>{ORDER_TYPE_LABEL[order.orderType]}</td>
@@ -558,8 +574,8 @@ function EditExistingView() {
           order={editOrder}
           isSaving={isUpdatingStatus}
           onClose={() => setEditOrder(null)}
-          onSave={async (id, status) => {
-            const ok = await updateOrderStatus(id, { status });
+          onSave={async (id, status, notes) => {
+            const ok = await updateOrderStatus(id, { status, notes: notes || undefined });
             if (ok) setEditOrder(null);
           }}
         />
@@ -570,14 +586,18 @@ function EditExistingView() {
 
 function EditOrderModal({
   order, isSaving, onClose, onSave,
-}: { order: AdminOrder; isSaving: boolean; onClose: () => void; onSave: (id: string, status: OrderStatus) => void }) {
+}: { order: AdminOrder; isSaving: boolean; onClose: () => void; onSave: (id: string, status: OrderStatus, notes: string) => void }) {
   const [status, setStatus] = useState<OrderStatus>(order.status);
   const [statusOpen, setStatusOpen] = useState(false);
+  // Was completely missing -- onSave only ever received (id, status),
+  // even though PATCH /admin/orders/:id/status accepts an optional
+  // `notes` field (confirmed via Swagger).
+  const [notes, setNotes] = useState("");
 
   return (
     <ModalShell title={`Edit Order ${order.orderNumber}`} onClose={onClose}>
       <div style={{ padding: "14px 16px", borderRadius: 10, background: "var(--color-bg-soft)", marginBottom: 18 }}>
-        <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--color-text)" }}><strong>Customer:</strong> {order.customer?.fullName ?? order.guestName ?? "–"}</p>
+        <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--color-text)" }}><strong>Customer:</strong> {order.customer?.fullName ?? order.guestName ?? "-"}</p>
         <p style={{ margin: "4px 0 0", fontSize: "0.9rem", color: "var(--color-text)" }}><strong>Status:</strong> {STATUS_LABEL[order.status]}</p>
       </div>
 
@@ -589,6 +609,16 @@ function EditOrderModal({
           setOpen={setStatusOpen}
           onChange={(v) => setStatus(v as OrderStatus)}
           labelFor={(v) => STATUS_LABEL[v as OrderStatus]}
+        />
+      </Field>
+
+      <Field label="Notes (Optional)">
+        <textarea
+          className="input"
+          rows={3}
+          placeholder="e.g. reason for the status change, note for the kitchen....."
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
         />
       </Field>
 
@@ -604,9 +634,9 @@ function EditOrderModal({
           className="btn btn-primary"
           style={{ padding: "9px 18px", fontSize: "0.85rem", opacity: isSaving ? 0.6 : 1 }}
           disabled={isSaving}
-          onClick={() => onSave(order.id, status)}
+          onClick={() => onSave(order.id, status, notes)}
         >
-          {isSaving ? "Saving…" : "Save Changes"}
+          {isSaving ? "Saving..." : "Save Changes"}
         </button>
       </div>
     </ModalShell>
@@ -614,13 +644,13 @@ function EditOrderModal({
 }
 
 /* ══════════════════════════ BLACKLIST ══════════════════════════ */
-function BlacklistView() {
+function BlacklistView({ branchId }: { branchId: string }) {
   const { blacklist, blacklistLoading, blacklistError, fetchBlacklist, removeFromBlacklist, addToBlacklist } = useWalkInStore();
   const [addOpen, setAddOpen] = useState(false);
 
   useEffect(() => {
-    fetchBlacklist();
-  }, [fetchBlacklist]);
+    fetchBlacklist(branchId);
+  }, [fetchBlacklist, branchId]);
 
   return (
     <>
@@ -642,7 +672,6 @@ function BlacklistView() {
 
         {!blacklistLoading && (blacklistError || !blacklist?.length) && (
           <p style={{ margin: "10px 0", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/customers/blacklist not implemented — see request doc #5 */}
             No blacklisted customers.
           </p>
         )}
@@ -659,10 +688,10 @@ function BlacklistView() {
               >
                 <div>
                   <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{b.name}</p>
-                  <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>{b.phone} • {b.reason}</p>
+                  <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>{b.phone} - {b.reason}</p>
                 </div>
                 <button
-                  onClick={() => removeFromBlacklist(b.id)}
+                  onClick={() => removeFromBlacklist(b.id, branchId)}
                   style={{ padding: "7px 16px", borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600, color: "var(--color-text)", fontFamily: "var(--font-sans)" }}
                 >
                   Unblock
@@ -687,9 +716,10 @@ function BlacklistView() {
 
       {addOpen && (
         <AddToBlacklistModal
+          branchId={branchId}
           onClose={() => setAddOpen(false)}
           onSubmit={async (payload) => {
-            const ok = await addToBlacklist(payload);
+            const ok = await addToBlacklist(payload, branchId);
             if (ok) setAddOpen(false);
           }}
         />
@@ -699,17 +729,17 @@ function BlacklistView() {
 }
 
 function AddToBlacklistModal({
-  onClose, onSubmit,
-}: { onClose: () => void; onSubmit: (payload: { customerId: string; reason: string }) => void }) {
+  branchId, onClose, onSubmit,
+}: { branchId: string; onClose: () => void; onSubmit: (payload: { customerId: string; reason: string }) => void }) {
   const { customers, customersLoading, searchCustomers } = useWalkInStore();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<WalkInCustomer | null>(null);
   const [reason, setReason] = useState("");
 
   useEffect(() => {
-    if (!selected) searchCustomers(search);
+    if (!selected) searchCustomers(search, branchId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, selected]);
+  }, [search, selected, branchId]);
 
   const canSubmit = !!selected && reason.trim().length > 0;
 
@@ -840,7 +870,6 @@ function AddItemModal({
 
         {!loading && items.length === 0 && (
           <p style={{ margin: "12px 4px", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/menu-items not implemented — see request doc #3 */}
             No menu items found
           </p>
         )}
@@ -916,7 +945,7 @@ function NewCustomerModal({
           style={{ padding: "9px 18px", fontSize: "0.85rem", opacity: canSubmit && !isSubmitting ? 1 : 0.5, cursor: canSubmit && !isSubmitting ? "pointer" : "not-allowed" }}
           onClick={() => onCreate({ name, phone, email })}
         >
-          {isSubmitting ? "Creating…" : "Create"}
+          {isSubmitting ? "Creating..." : "Create"}
         </button>
         <button onClick={onClose} style={outlineBtn}>Cancel</button>
       </div>

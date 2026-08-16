@@ -9,6 +9,7 @@ import {
   SaveFridgeThresholdsPayload,
   Supplier,
   AddSupplierPayload,
+  DrinksInventoryResponse,
 } from '@/types/drinks.types';
 
 function extractErrorMessage(error: unknown, fallback: string) {
@@ -30,17 +31,22 @@ interface DrinksState {
   thresholdsError: boolean;
   savingThresholds: boolean;
 
+  summary: DrinksInventoryResponse['stats'] | null;
+  summaryLoading: boolean;
+  summaryError: boolean;
+
   isSubmittingDelivery: boolean;
   isTransferring: boolean;
 
-  fetchItems: (search?: string) => Promise<void>;
+  fetchItems: (branchId?: string, search?: string) => Promise<void>;
   fetchSuppliers: () => Promise<void>;
-  fetchThresholds: () => Promise<void>;
+  fetchThresholds: (branchId?: string) => Promise<void>;
+  fetchSummary: (branchId?: string) => Promise<void>;
 
-  createDelivery: (payload: CreateDeliveryPayload) => Promise<boolean>;
-  transferToFridge: (payload: TransferToFridgePayload) => Promise<boolean>;
+  createDelivery: (payload: CreateDeliveryPayload, branchId?: string) => Promise<boolean>;
+  transferToFridge: (payload: TransferToFridgePayload, branchId?: string) => Promise<boolean>;
   addSupplier: (payload: AddSupplierPayload) => Promise<boolean>;
-  saveThresholds: (payload: SaveFridgeThresholdsPayload) => Promise<boolean>;
+  saveThresholds: (payload: SaveFridgeThresholdsPayload, branchId?: string) => Promise<boolean>;
 }
 
 export const useDrinksStore = create<DrinksState>((set) => ({
@@ -57,13 +63,17 @@ export const useDrinksStore = create<DrinksState>((set) => ({
   thresholdsError: false,
   savingThresholds: false,
 
+  summary: null,
+  summaryLoading: false,
+  summaryError: false,
+
   isSubmittingDelivery: false,
   isTransferring: false,
 
-  fetchItems: async (search) => {
+  fetchItems: async (branchId, search) => {
     set({ itemsLoading: true, itemsError: false });
     try {
-      const items = await drinksService.getItems(search);
+      const items = await drinksService.getItems(branchId, search);
       set({ items, itemsLoading: false });
     } catch {
       set({ itemsLoading: false, itemsError: true });
@@ -80,20 +90,30 @@ export const useDrinksStore = create<DrinksState>((set) => ({
     }
   },
 
-  fetchThresholds: async () => {
+  fetchThresholds: async (branchId) => {
     set({ thresholdsLoading: true, thresholdsError: false });
     try {
-      const thresholds = await drinksService.getThresholds();
+      const thresholds = await drinksService.getThresholds(branchId);
       set({ thresholds, thresholdsLoading: false });
     } catch {
       set({ thresholdsLoading: false, thresholdsError: true });
     }
   },
 
-  createDelivery: async (payload) => {
+  fetchSummary: async (branchId) => {
+    set({ summaryLoading: true, summaryError: false });
+    try {
+      const { stats } = await drinksService.getInventorySummary({ branchId });
+      set({ summary: stats, summaryLoading: false });
+    } catch {
+      set({ summaryLoading: false, summaryError: true });
+    }
+  },
+
+  createDelivery: async (payload, branchId) => {
     set({ isSubmittingDelivery: true });
     try {
-      const { items: updatedItems } = await drinksService.createDelivery(payload);
+      const { items: updatedItems } = await drinksService.createDelivery({ ...payload, branchId });
       set((state) => ({
         isSubmittingDelivery: false,
         items: state.items
@@ -109,10 +129,10 @@ export const useDrinksStore = create<DrinksState>((set) => ({
     }
   },
 
-  transferToFridge: async (payload) => {
+  transferToFridge: async (payload, branchId) => {
     set({ isTransferring: true });
     try {
-      const updatedItem = await drinksService.transferToFridge(payload);
+      const updatedItem = await drinksService.transferToFridge({ ...payload, branchId });
       set((state) => ({
         isTransferring: false,
         items: state.items ? state.items.map((i) => (i.id === updatedItem.id ? updatedItem : i)) : state.items,
@@ -140,10 +160,10 @@ export const useDrinksStore = create<DrinksState>((set) => ({
     }
   },
 
-  saveThresholds: async (payload) => {
+  saveThresholds: async (payload, branchId) => {
     set({ savingThresholds: true });
     try {
-      const thresholds = await drinksService.saveThresholds(payload);
+      const thresholds = await drinksService.saveThresholds({ ...payload, branchId });
       set({ thresholds, savingThresholds: false });
       toast.success('Thresholds saved.');
       return true;

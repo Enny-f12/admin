@@ -22,10 +22,10 @@ interface KitchenState {
   settingsError: boolean;
   isSavingSettings: boolean;
 
-  fetchLiveQueue: () => Promise<void>;
-  fetchCompleted: (minutes?: number) => Promise<void>;
-  fetchSettings: () => Promise<void>;
-  saveSettings: (payload: UpdateKitchenSettingsPayload) => Promise<boolean>;
+  fetchLiveQueue: (branchId?: string) => Promise<void>;
+  fetchCompleted: (minutes?: number, branchId?: string) => Promise<void>;
+  fetchSettings: (branchId?: string) => Promise<void>;
+  saveSettings: (payload: UpdateKitchenSettingsPayload, branchId?: string) => Promise<boolean>;
 }
 
 export const useKitchenStore = create<KitchenState>((set) => ({
@@ -42,41 +42,42 @@ export const useKitchenStore = create<KitchenState>((set) => ({
   settingsError: false,
   isSavingSettings: false,
 
-  // NOT YET BUILT — fail silently, no toast (this is polled repeatedly)
-  fetchLiveQueue: async () => {
+  // Fails silently, no toast -- this is polled repeatedly and a
+  // transient error shouldn't spam the kitchen screen with toasts.
+  fetchLiveQueue: async (branchId) => {
     set({ liveQueueLoading: true, liveQueueError: false });
     try {
-      const liveQueue = await kitchenService.getLiveQueue();
+      const liveQueue = await kitchenService.getLiveQueue(branchId);
       set({ liveQueue, liveQueueLoading: false });
     } catch {
       set({ liveQueueLoading: false, liveQueueError: true });
     }
   },
 
-  fetchCompleted: async (minutes = 30) => {
+  fetchCompleted: async (minutes = 30, branchId) => {
     set({ completedLoading: true, completedError: false });
     try {
-      const completed = await kitchenService.getCompleted(minutes);
+      const completed = await kitchenService.getCompleted(minutes, branchId);
       set({ completed, completedLoading: false });
     } catch {
       set({ completedLoading: false, completedError: true });
     }
   },
 
-  fetchSettings: async () => {
+  fetchSettings: async (branchId) => {
     set({ settingsLoading: true, settingsError: false });
     try {
-      const settings = await kitchenService.getSettings();
+      const settings = await kitchenService.getSettings(branchId);
       set({ settings, settingsLoading: false });
     } catch {
       set({ settingsLoading: false, settingsError: true });
     }
   },
 
-  saveSettings: async (payload) => {
+  saveSettings: async (payload, branchId) => {
     set({ isSavingSettings: true });
     try {
-      const settings = await kitchenService.updateSettings(payload);
+      const settings = await kitchenService.updateSettings(payload, branchId);
       set({ settings, isSavingSettings: false });
       toast.success('Settings saved.');
       return true;

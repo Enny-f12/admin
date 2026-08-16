@@ -15,10 +15,15 @@ import {
   MapPin,
   ShoppingBag,
   Clock,
+  Store,
+  CreditCard,
+  StickyNote,
+  AlertTriangle,
 } from "lucide-react";
 import { useOrderStore } from "@/store/useOrderStore";
 import { OrderStatus, AdminOrder } from "@/types/orders";
 import { SkeletonText, SkeletonTableRows } from "@/components/ui/Skeleton";
+import { useBranch, ALL_BRANCHES_ID } from "../layout";
 
 const STATUS_OPTIONS: ("All Status" | OrderStatus)[] = [
   "All Status", "RECEIVED", "PREPARING", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY", "DELIVERED", "COMPLETED", "CANCELLED",
@@ -44,6 +49,25 @@ const STATUS_CLASS: Record<OrderStatus, string> = {
   CANCELLED: "badge badge-red",
 };
 
+const ORDER_TYPE_LABEL: Record<AdminOrder["orderType"], string> = {
+  DINE_IN: "Dine-in",
+  TAKEAWAY: "Pick Up",
+  DELIVERY: "Delivery",
+};
+
+const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  CARD: "Card",
+  CASH_ON_DELIVERY: "Cash on Delivery",
+  BANK_TRANSFER: "Bank Transfer",
+};
+
+const PAYMENT_STATUS_CLASS: Record<string, string> = {
+  PAID: "badge badge-green",
+  PENDING: "badge badge-yellow",
+  REFUNDED: "badge badge-red",
+  FAILED: "badge badge-red",
+};
+
 const SEARCH_BY_OPTIONS = ["Name", "Type", "Order ID"];
 const PAGE_SIZE = 10;
 
@@ -56,20 +80,20 @@ function formatTime(iso: string) {
 }
 
 function formatMoney(value: string | number | null | undefined) {
-  if (value === null || value === undefined) return "–";
+  if (value === null || value === undefined) return "-";
   const n = Number(value);
-  return Number.isFinite(n) ? `₦${n.toLocaleString()}` : "–";
+  return Number.isFinite(n) ? `₦${n.toLocaleString()}` : "-";
 }
 
-// Delivery address is assembled from the discrete address fields — not
+// Delivery address is assembled from the discrete address fields -- not
 // deliveryInstructions, which is a separate free-text note field. Only
 // meaningful for DELIVERY orders; dine-in/pickup have no address.
 function formatDeliveryAddress(order: AdminOrder): string {
-  if (order.orderType !== "DELIVERY") return "–";
+  if (order.orderType !== "DELIVERY") return "-";
   const parts = [order.deliveryAddressLine1, order.deliveryAddressLine2, order.deliveryCity, order.deliveryState].filter(
     (p): p is string => Boolean(p && p.trim()),
   );
-  return parts.length > 0 ? parts.join(", ") : "–";
+  return parts.length > 0 ? parts.join(", ") : "-";
 }
 
 export default function OrdersPage() {
@@ -81,11 +105,25 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1);
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
 
+  // Soft branch scoping, same pattern as Stock Inventory: "All Branches"
+  // still works and shows every branch's orders together (with a Branch
+  // column so it's clear which is which), a specific branch filters.
+  // Previously this page had no branch awareness at all, despite
+  // AdminOrderFilters and orderService already supporting branchId.
+  const branch = useBranch();
+  const [branchOpen, setBranchOpen] = useState(false);
+  const branchOptions = [{ id: ALL_BRANCHES_ID, name: "All Branches" }, ...branch.branches];
+  const resolvedBranchId = branch.id === ALL_BRANCHES_ID ? undefined : branch.id;
+  const showBranchColumn = branch.id === ALL_BRANCHES_ID;
+
   const { orders, ordersLoading: isLoading, ordersError: isError, fetchOrders } = useOrderStore();
 
   useEffect(() => {
-    fetchOrders(statusFilter !== "All Status" ? { status: statusFilter } : {});
-  }, [statusFilter, fetchOrders]);
+    fetchOrders({
+      ...(statusFilter !== "All Status" ? { status: statusFilter } : {}),
+      branchId: resolvedBranchId,
+    });
+  }, [statusFilter, resolvedBranchId, fetchOrders]);
 
   const filtered = (orders ?? []).filter((o) => {
     const q = search.toLowerCase();
@@ -104,7 +142,7 @@ export default function OrdersPage() {
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
           <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-            Foodies 1 LEKKI
+            {branch.name}
           </p>
           <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
             MANAGE &amp; TRACK ALL ORDERS
@@ -114,12 +152,69 @@ export default function OrdersPage() {
           </p>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", border: "1px solid var(--color-border)", borderRadius: 8, background: "var(--color-bg-card)", fontSize: "0.825rem", color: "var(--color-text)" }}>
-          <CalendarDays size={14} strokeWidth={1.8} color="var(--color-primary)" />
-          {/* TODO(BACKEND): date range filter (startDate/endDate) exists on
-              AdminOrderFilterDto but no date-picker UI wired yet — currently
-              shows all orders regardless of date. */}
-          Today
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {/* Branch filter -- dropdown for supers, static chip for locked managers */}
+          {branch.canPickBranch ? (
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={() => setBranchOpen((v) => !v)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 8,
+                  border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer",
+                  fontSize: "0.825rem", fontWeight: 600, color: "var(--color-text)", fontFamily: "var(--font-sans)",
+                }}
+              >
+                <Store size={14} strokeWidth={1.8} color="var(--color-primary)" />
+                {branch.name}
+                <ChevronDown size={14} strokeWidth={1.8} color="var(--color-text-muted)" />
+              </button>
+              {branchOpen && (
+                <div
+                  style={{
+                    position: "absolute", top: "calc(100% + 6px)", right: 0, minWidth: 170,
+                    background: "#fff", border: "1px solid var(--color-border)", borderRadius: 10,
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.10)", overflow: "hidden", zIndex: 60,
+                  }}
+                >
+                  {branchOptions.map((b) => (
+                    <button
+                      key={b.id}
+                      onClick={() => { branch.setBranch(b); setBranchOpen(false); setPage(1); }}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+                        padding: "10px 14px", background: b.id === branch.id ? "var(--color-bg-soft)" : "#fff",
+                        border: "none", cursor: "pointer", fontSize: "0.85rem", fontFamily: "var(--font-sans)",
+                        color: "var(--color-text)", textAlign: "left",
+                      }}
+                    >
+                      {b.id === branch.id && <span style={{ marginRight: 6 }}>{"✓"}</span>}
+                      {b.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", borderRadius: 8,
+                border: "1px solid var(--color-border)", background: "var(--color-bg-soft)",
+                fontSize: "0.825rem", fontWeight: 600, color: "var(--color-text)",
+              }}
+              title="Your account is scoped to this branch"
+            >
+              <Store size={14} strokeWidth={1.8} color="var(--color-primary)" />
+              {branch.name}
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", border: "1px solid var(--color-border)", borderRadius: 8, background: "var(--color-bg-card)", fontSize: "0.825rem", color: "var(--color-text)" }}>
+            <CalendarDays size={14} strokeWidth={1.8} color="var(--color-primary)" />
+            {/* TODO(BACKEND): date range filter (startDate/endDate) exists on
+                AdminOrderFilterDto but no date-picker UI wired yet -- currently
+                shows all orders regardless of date. */}
+            Today
+          </div>
         </div>
       </div>
 
@@ -202,24 +297,29 @@ export default function OrdersPage() {
           <table>
             <thead>
               <tr>
-                {["Order ID", "Customer", "Items", "Total Amount", "Type", "Status", "Time", "Action"].map((c) => (
+                {[
+                  "Order ID", "Customer",
+                  ...(showBranchColumn ? ["Branch"] : []),
+                  "Items", "Total Amount", "Type", "Status", "Time", "Action",
+                ].map((c) => (
                   <th key={c}>{c}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {isLoading && <SkeletonTableRows rows={PAGE_SIZE} columns={8} />}
+              {isLoading && <SkeletonTableRows rows={PAGE_SIZE} columns={showBranchColumn ? 9 : 8} />}
 
               {!isLoading && isError && (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>Could not load orders</td>
+                  <td colSpan={showBranchColumn ? 9 : 8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>Could not load orders</td>
                 </tr>
               )}
 
               {!isLoading && !isError && paged.map((order) => (
                 <tr key={order.id}>
                   <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{order.orderNumber}</td>
-                  <td>{order.customer?.fullName ?? order.guestName ?? "–"}</td>
+                  <td>{order.customer?.fullName ?? order.guestName ?? "-"}</td>
+                  {showBranchColumn && <td>{order.branch?.name ?? "-"}</td>}
                   <td>{order.items.length} {order.items.length === 1 ? "Item" : "Items"}</td>
                   <td style={{ fontWeight: 500, color: "var(--color-text)" }}>{formatMoney(order.totalAmount)}</td>
                   <td>{formatOrderType(order.orderType)}</td>
@@ -244,7 +344,7 @@ export default function OrdersPage() {
 
               {!isLoading && !isError && paged.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
+                  <td colSpan={showBranchColumn ? 9 : 8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
                     No orders match this filter.
                   </td>
                 </tr>
@@ -282,7 +382,7 @@ export default function OrdersPage() {
 function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () => void }) {
   const { getOrderById, isUpdatingStatus, updateOrderStatus } = useOrderStore();
 
-  // Sourced from the already-loaded order list — no network call. See
+  // Sourced from the already-loaded order list -- no network call. See
   // backend request doc, Orders #4.
   const order = getOrderById(orderId);
 
@@ -299,6 +399,8 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
     }
   };
 
+  const discount = order ? Number(order.discountAmount ?? 0) : 0;
+
   return (
     <div
       onClick={onClose}
@@ -314,7 +416,7 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px 16px", flexShrink: 0, borderBottom: "1px solid var(--color-border)" }}>
           <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "var(--color-heading)" }}>
-            Order&nbsp;{order?.orderNumber ?? "–"}
+            Order&nbsp;{order?.orderNumber ?? "-"}
           </h3>
           <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex" }}>
             <X size={18} />
@@ -324,9 +426,32 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
         <div style={{ padding: "20px 24px 24px", overflowY: "auto" }}>
           {order && (
             <>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+              {/* Status + type + time */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
                 <span className={STATUS_CLASS[order.status]}>{STATUS_LABEL[order.status]}</span>
                 <span style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>{formatTime(order.createdAt)}</span>
+              </div>
+
+              {/* Order type / branch / payment -- previously not shown anywhere
+                  in the modal despite being present on every real order. */}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 999, background: "var(--color-bg-soft)", fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text)" }}>
+                  <ShoppingBag size={13} strokeWidth={1.8} />
+                  {ORDER_TYPE_LABEL[order.orderType]}
+                </span>
+                {order.branch?.name && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 999, background: "var(--color-bg-soft)", fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text)" }}>
+                    <Store size={13} strokeWidth={1.8} />
+                    {order.branch.name}
+                  </span>
+                )}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 999, background: "var(--color-bg-soft)", fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text)" }}>
+                  <CreditCard size={13} strokeWidth={1.8} />
+                  {PAYMENT_METHOD_LABEL[order.paymentMethod] ?? order.paymentMethod}
+                </span>
+                <span className={PAYMENT_STATUS_CLASS[order.paymentStatus] ?? "badge"}>
+                  {order.paymentStatus}
+                </span>
               </div>
 
               <div style={{ padding: "16px", borderRadius: 10, background: "var(--color-bg-soft)", display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
@@ -335,20 +460,51 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
                   {/* Sourced from the list response's `customer` object for
                       registered users, falling back to guest fields for
                       guest checkouts. Both are present on GET /admin/orders. */}
-                  {order.customer?.fullName ?? order.guestName ?? "–"}
+                  {order.customer?.fullName ?? order.guestName ?? "-"}
                 </span>
                 <span style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", marginLeft: 23 }}>
-                  {order.customer?.email ?? order.guestEmail ?? "–"}
+                  {order.customer?.email ?? order.guestEmail ?? "-"}
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", color: "var(--color-text)" }}>
                   <Phone size={15} strokeWidth={1.8} color="var(--color-primary)" />
-                  {order.customer?.phone ?? order.guestPhone ?? "–"}
+                  {order.customer?.phone ?? order.guestPhone ?? "-"}
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", color: "var(--color-text)" }}>
                   <MapPin size={15} strokeWidth={1.8} color="var(--color-primary)" />
                   {formatDeliveryAddress(order)}
                 </span>
               </div>
+
+              {/* Customer / kitchen notes -- present in real data
+                  ("Extra spicy please" etc.), previously never rendered.
+                  Conditionally shown only when actually present. */}
+              {(order.customerNotes || order.kitchenNotes) && (
+                <div style={{ padding: "14px 16px", borderRadius: 10, background: "rgba(160,122,0,0.06)", border: "1px solid rgba(160,122,0,0.2)", marginBottom: 20, display: "flex", flexDirection: "column", gap: 6 }}>
+                  {order.customerNotes && (
+                    <p style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
+                      <StickyNote size={14} strokeWidth={1.8} color="#a07a00" style={{ marginTop: 2, flexShrink: 0 }} />
+                      <span><strong>Customer note:</strong> {order.customerNotes}</span>
+                    </p>
+                  )}
+                  {order.kitchenNotes && (
+                    <p style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
+                      <StickyNote size={14} strokeWidth={1.8} color="#a07a00" style={{ marginTop: 2, flexShrink: 0 }} />
+                      <span><strong>Kitchen note:</strong> {order.kitchenNotes}</span>
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Cancel reason -- only relevant/shown for cancelled orders
+                  that actually have one recorded. */}
+              {order.status === "CANCELLED" && order.cancelReason && (
+                <div style={{ padding: "14px 16px", borderRadius: 10, background: "rgba(225,11,28,0.05)", border: "1px solid rgba(225,11,28,0.2)", marginBottom: 20 }}>
+                  <p style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
+                    <AlertTriangle size={14} strokeWidth={1.8} color="var(--color-primary)" style={{ marginTop: 2, flexShrink: 0 }} />
+                    <span><strong>Cancellation reason:</strong> {order.cancelReason}</span>
+                  </p>
+                </div>
+              )}
 
               <div style={{ padding: "16px", borderRadius: 10, background: "var(--color-bg-soft)", marginBottom: 24 }}>
                 <p style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 0 12px", fontSize: "0.9rem", fontWeight: 700, color: "var(--color-heading)" }}>
@@ -363,9 +519,36 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
                     </div>
                   ))}
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: "1px solid var(--color-border)", fontWeight: 700, color: "var(--color-heading)" }}>
-                  <span>Total</span>
-                  <span>{formatMoney(order.totalAmount)}</span>
+
+                {/* Cost breakdown -- previously the modal jumped straight
+                    from item lines to a single Total, skipping subtotal,
+                    tax, delivery fee, and discount even though the API
+                    returns all four as distinct fields. */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingTop: 10, borderTop: "1px solid var(--color-border)", fontSize: "0.85rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", color: "var(--color-text-muted)" }}>
+                    <span>Subtotal</span>
+                    <span>{formatMoney(order.subtotalAmount)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", color: "var(--color-text-muted)" }}>
+                    <span>Tax</span>
+                    <span>{formatMoney(order.taxAmount)}</span>
+                  </div>
+                  {order.orderType === "DELIVERY" && (
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "var(--color-text-muted)" }}>
+                      <span>Delivery Fee</span>
+                      <span>{formatMoney(order.deliveryFeeAmount)}</span>
+                    </div>
+                  )}
+                  {discount > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "#16A34A" }}>
+                      <span>Discount</span>
+                      <span>-{formatMoney(order.discountAmount)}</span>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 6, marginTop: 2, borderTop: "1px solid var(--color-border)", fontWeight: 700, color: "var(--color-heading)" }}>
+                    <span>Total</span>
+                    <span>{formatMoney(order.totalAmount)}</span>
+                  </div>
                 </div>
               </div>
 

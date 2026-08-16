@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useReconciliationStore } from "@/store/useReconciliationStore";
 import { ReconciliationItem } from "@/types/reconciliation.types";
+import { useBranch, ALL_BRANCHES_ID } from "../../layout";
 
 const CATEGORIES = ["All Categories", "Pastry", "Swallow", "Soup", "Intercontinental", "Protein", "Drinks"];
 const PAGE_SIZE = 6;
@@ -29,6 +30,15 @@ export default function ReconciliationPage() {
     isSyncing,
   } = useReconciliationStore();
 
+  // Hard branch guard, same pattern as Morning Count and Drinks &
+  // Fridge: physical counting is inherently single-location -- you
+  // can't reconcile "All Branches" at once. Previously this page had no
+  // branch awareness at all (confirmed via Network tab: no branchId on
+  // any request, unlike the sibling Food Inventory tab).
+  const branch = useBranch();
+  const isAllBranches = branch.id === ALL_BRANCHES_ID;
+  const hasUsableBranch = Boolean(branch.id) && !isAllBranches;
+
   const [countDate, setCountDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [conductedBy, setConductedBy] = useState("");
   const [search, setSearch] = useState("");
@@ -39,8 +49,9 @@ export default function ReconciliationPage() {
   const [adjustTarget, setAdjustTarget] = useState<ReconciliationItem | null>(null);
 
   useEffect(() => {
-    fetchStaff();
-  }, [fetchStaff]);
+    if (!hasUsableBranch) return;
+    fetchStaff(branch.id);
+  }, [fetchStaff, branch.id, hasUsableBranch]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -48,7 +59,9 @@ export default function ReconciliationPage() {
   }, [staff, conductedBy]);
 
   useEffect(() => {
+    if (!hasUsableBranch) return;
     fetchItems({
+      branchId: branch.id,
       date: countDate,
       conductedBy: conductedBy || undefined,
       search: search || undefined,
@@ -57,15 +70,38 @@ export default function ReconciliationPage() {
       pageSize: PAGE_SIZE,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [countDate, conductedBy, search, category, page]);
+  }, [countDate, conductedBy, search, category, page, branch.id, hasUsableBranch]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const hasVariance = (items ?? []).some((i) => i.variance !== 0);
 
+  if (!hasUsableBranch) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <div>
+          <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>{branch.name}</p>
+          <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
+            PHYSICAL COUNT RECONCILIATION
+          </h1>
+          <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+            Physical count vs system records
+          </p>
+        </div>
+        <div className="card">
+          <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.9rem", color: "var(--color-text)" }}>
+            <AlertTriangle size={16} strokeWidth={1.8} color="#a07a00" />
+            Reconciliation is per-branch -- pick a specific branch from the selector above to compare
+            physical counts against system records.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, position: "relative" }}>
       <div>
-        <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>Foodies 1 LEKKI</p>
+        <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>{branch.name}</p>
         <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
           PHYSICAL COUNT RECONCILIATION
         </h1>
@@ -167,7 +203,7 @@ export default function ReconciliationPage() {
               {itemsLoading && (
                 <tr>
                   <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
-                    Loading…
+                    Loading...
                   </td>
                 </tr>
               )}
@@ -175,7 +211,6 @@ export default function ReconciliationPage() {
               {!itemsLoading && (itemsError || !items?.length) && (
                 <tr>
                   <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
-                    {/* TODO(BACKEND): GET /admin/reconciliation/items not implemented — see request doc B1 */}
                     No reconciliation data available
                   </td>
                 </tr>
@@ -265,10 +300,10 @@ export default function ReconciliationPage() {
           style={{ padding: "10px 20px", fontSize: "0.85rem" }}
           disabled={!hasVariance || !conductedBy || isSyncing}
           onClick={async () => {
-            await sync({ date: countDate, conductedBy, reasonForVariance });
+            await sync({ date: countDate, conductedBy, reasonForVariance }, branch.id);
           }}
         >
-          {isSyncing ? "Syncing…" : "Confirm & Sync"}
+          {isSyncing ? "Syncing..." : "Confirm & Sync"}
         </button>
       </div>
 
@@ -277,7 +312,7 @@ export default function ReconciliationPage() {
           item={adjustTarget}
           onClose={() => setAdjustTarget(null)}
           onSubmit={async (payload) => {
-            const ok = await adjustItem(adjustTarget.id, payload);
+            const ok = await adjustItem(adjustTarget.id, payload, branch.id);
             if (ok) setAdjustTarget(null);
           }}
         />

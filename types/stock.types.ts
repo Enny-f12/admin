@@ -1,3 +1,5 @@
+// types/stock.types.ts — full file
+
 export type StockStatus = 'In Stock' | 'Low Stock' | 'Critical';
 
 export interface Branch {
@@ -32,7 +34,9 @@ export interface StockAlert {
 export interface Supplier {
   id: string;
   name: string;
-  contact: string;
+  type: string; // TODO: confirm enum values via Swagger "Schema" tab (currently free text — see AddSupplierModal)
+  contactPerson: string;
+  phone: string;
   address: string;
 }
 
@@ -80,7 +84,9 @@ export interface RemoveStockPayload {
 
 export interface AddSupplierPayload {
   name: string;
-  contact: string;
+  type: string;
+  contactPerson: string;
+  phone: string;
   address: string;
 }
 

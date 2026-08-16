@@ -10,9 +10,11 @@ import {
   ChevronDown,
   X,
   Search,
+  Box,
 } from "lucide-react";
 import { useDrinksStore } from "@/store/useDrinkStore";
 import { DrinksItem, SupplierType } from "@/types/drinks.types";
+import { useBranch, ALL_BRANCHES_ID } from "../../layout";
 
 type Tab = "receive" | "transfer" | "threshold";
 
@@ -24,37 +26,101 @@ type DraftLineItem = {
 
 export default function DrinksFridgePage() {
   const [tab, setTab] = useState<Tab>("receive");
-  const { fetchItems, fetchSuppliers } = useDrinksStore();
+  const branch = useBranch();
+  const { fetchItems, fetchSuppliers, fetchThresholds, fetchSummary } = useDrinksStore();
 
+  const isAllBranches = branch.id === ALL_BRANCHES_ID;
+  const hasUsableBranch = Boolean(branch.id) && !isAllBranches;
+
+  // branchId sent on every call below now that each branch is confirmed
+  // to have its own warehouse/fridge stock. Pending backend request:
+  // none of these endpoints accept branchId in the schema yet (as of
+  // 15-Aug-26), so this is currently sent but silently ignored -- data
+  // will read the same across branches until that request lands.
   useEffect(() => {
-    fetchItems();
+    if (!hasUsableBranch) return;
+    fetchItems(branch.id);
     fetchSuppliers();
-  }, [fetchItems, fetchSuppliers]);
+    fetchThresholds(branch.id);
+    fetchSummary(branch.id);
+  }, [fetchItems, fetchSuppliers, fetchThresholds, fetchSummary, branch.id, hasUsableBranch]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <Header tab={tab} />
+      <Header tab={tab} branchName={branch.name} />
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        <TabButton active={tab === "receive"} onClick={() => setTab("receive")} icon={<Plus size={16} strokeWidth={2} />} label="Receive Delivery" />
-        <TabButton active={tab === "transfer"} onClick={() => setTab("transfer")} icon={<ArrowLeftRight size={16} strokeWidth={1.8} />} label="Transfer to Fridge" />
-        <TabButton active={tab === "threshold"} onClick={() => setTab("threshold")} icon={<SlidersHorizontal size={16} strokeWidth={1.8} />} label="Fridge Threshold" />
-      </div>
+      {!hasUsableBranch ? (
+        <div className="card">
+          <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.9rem", color: "var(--color-text)" }}>
+            <AlertTriangle size={16} strokeWidth={1.8} color="#a07a00" />
+            Drinks & Fridge is per-branch -- pick a specific branch from the selector above to receive
+            deliveries, transfer stock, or manage fridge thresholds.
+          </p>
+        </div>
+      ) : (
+        <>
+          <SummaryCards />
 
-      {tab === "receive" && <ReceiveDeliveryView />}
-      {tab === "transfer" && <TransferToFridgeView />}
-      {tab === "threshold" && <FridgeThresholdView />}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            <TabButton active={tab === "receive"} onClick={() => setTab("receive")} icon={<Plus size={16} strokeWidth={2} />} label="Receive Delivery" />
+            <TabButton active={tab === "transfer"} onClick={() => setTab("transfer")} icon={<ArrowLeftRight size={16} strokeWidth={1.8} />} label="Transfer to Fridge" />
+            <TabButton active={tab === "threshold"} onClick={() => setTab("threshold")} icon={<SlidersHorizontal size={16} strokeWidth={1.8} />} label="Fridge Threshold" />
+          </div>
+
+          {tab === "receive" && <ReceiveDeliveryView branchId={branch.id} />}
+          {tab === "transfer" && <TransferToFridgeView branchId={branch.id} />}
+          {tab === "threshold" && <FridgeThresholdView branchId={branch.id} />}
+        </>
+      )}
     </div>
   );
 }
 
-/* ── Header ── */
-function Header({ tab }: { tab: Tab }) {
+/* -- Summary cards, same pattern as Stock Inventory's stat cards -- */
+function SummaryCards() {
+  const { summary, summaryLoading } = useDrinksStore();
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+      <div className="card" style={{ textAlign: "center" }}>
+        <Box size={20} strokeWidth={1.8} color="#B5442E" style={{ margin: "0 auto 6px" }} />
+        <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>
+          {summaryLoading ? "..." : summary?.totalItems ?? "-"}
+        </p>
+        <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Total Items</p>
+      </div>
+      <div className="card" style={{ textAlign: "center" }}>
+        <AlertTriangle size={20} strokeWidth={1.8} color="#a07a00" style={{ margin: "0 auto 6px" }} />
+        <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700, color: "#a07a00" }}>
+          {summaryLoading ? "..." : summary?.lowStock ?? "-"}
+        </p>
+        <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Low Stock</p>
+      </div>
+      <div className="card" style={{ textAlign: "center" }}>
+        <AlertTriangle size={20} strokeWidth={1.8} color="#E10B1C" style={{ margin: "0 auto 6px" }} />
+        <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700, color: "#E10B1C" }}>
+          {summaryLoading ? "..." : summary?.outOfStock ?? "-"}
+        </p>
+        <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Out of Stock</p>
+      </div>
+      <div className="card" style={{ textAlign: "center" }}>
+        <Box size={20} strokeWidth={1.8} color="var(--color-primary)" style={{ margin: "0 auto 6px" }} />
+        <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>
+          {summaryLoading ? "..." : summary ? `₦${summary.totalValue.toLocaleString()}` : "-"}
+        </p>
+        <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Total Value</p>
+      </div>
+    </div>
+  );
+}
+
+/* -- Header -- */
+function Header({ tab, branchName }: { tab: Tab; branchName: string }) {
   const heading = tab === "receive" ? "RECEIVE DRINKS DELIVERY" : "TRANSFER TO FRIDGE";
   return (
     <div>
       <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-        Foodies 1 LEKKI
+        {branchName}
       </p>
       <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
         {heading}
@@ -94,8 +160,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/* ── Receive Delivery ── */
-function ReceiveDeliveryView() {
+/* -- Receive Delivery -- */
+function ReceiveDeliveryView({ branchId }: { branchId: string }) {
   const { suppliers, createDelivery, isSubmittingDelivery } = useDrinksStore();
 
   const [supplierId, setSupplierId] = useState("");
@@ -109,13 +175,16 @@ function ReceiveDeliveryView() {
 
   const submit = async (isDraft: boolean) => {
     if (!items.length) return;
-    const ok = await createDelivery({
-      supplierId: supplierId || null,
-      deliveryDate,
-      invoiceNumber: invoice,
-      isDraft,
-      items: items.map((i) => ({ itemName: i.name, quantity: i.qty, costPerUnit: i.costPerUnit })),
-    });
+    const ok = await createDelivery(
+      {
+        supplierId: supplierId || null,
+        deliveryDate,
+        invoiceNumber: invoice,
+        isDraft,
+        items: items.map((i) => ({ itemName: i.name, quantity: i.qty, costPerUnit: i.costPerUnit })),
+      },
+      branchId,
+    );
     if (ok && !isDraft) {
       setItems([]);
       setInvoice("");
@@ -224,7 +293,7 @@ function ReceiveDeliveryView() {
 
       <div style={{ display: "flex", gap: 10 }}>
         <button style={outlineBtn} disabled={!items.length || isSubmittingDelivery} onClick={() => submit(true)}>
-          {isSubmittingDelivery ? "Saving…" : "Save Draft"}
+          {isSubmittingDelivery ? "Saving..." : "Save Draft"}
         </button>
         <button
           className="btn btn-primary"
@@ -250,8 +319,8 @@ function ReceiveDeliveryView() {
   );
 }
 
-/* ── Transfer to Fridge ── */
-function TransferToFridgeView() {
+/* -- Transfer to Fridge -- */
+function TransferToFridgeView({ branchId }: { branchId: string }) {
   const { items, itemsLoading, itemsError, transferToFridge, isTransferring } = useDrinksStore();
   const [itemId, setItemId] = useState<string>("");
   const [qty, setQty] = useState(0);
@@ -265,14 +334,13 @@ function TransferToFridgeView() {
   const selected: DrinksItem | undefined = items?.find((i) => i.id === itemId);
 
   if (itemsLoading) {
-    return <div className="card"><p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p></div>;
+    return <div className="card"><p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading...</p></div>;
   }
 
   if (itemsError || !items?.length || !selected) {
     return (
       <div className="card">
         <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-          {/* TODO(BACKEND): GET /admin/drinks/items not implemented — see request doc #1 */}
           No drinks data available
         </p>
       </div>
@@ -335,28 +403,25 @@ function TransferToFridgeView() {
           style={{ padding: "10px 20px", fontSize: "0.85rem" }}
           disabled={!qty || exceedsWarehouse || isTransferring}
           onClick={async () => {
-            const ok = await transferToFridge({ itemId: selected.id, quantity: qty, reason });
+            const ok = await transferToFridge({ itemId: selected.id, quantity: qty, reason }, branchId);
             if (ok) setQty(0);
           }}
         >
-          {isTransferring ? "Transferring…" : "Transfer to Fridge"}
+          {isTransferring ? "Transferring..." : "Transfer to Fridge"}
         </button>
       </div>
     </div>
   );
 }
 
-/* ── Fridge Threshold ── */
-function FridgeThresholdView() {
-  const { thresholds, thresholdsLoading, thresholdsError, savingThresholds, fetchThresholds, saveThresholds } =
+/* -- Fridge Threshold -- */
+function FridgeThresholdView({ branchId }: { branchId: string }) {
+  const { thresholds, thresholdsLoading, thresholdsError, savingThresholds, saveThresholds } =
     useDrinksStore();
+  // fetchThresholds(branchId) already fired by the page-level effect.
   const [defaultThreshold, setDefaultThreshold] = useState(10);
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<{ itemId: string; itemName: string; threshold: number; notify: boolean }[]>([]);
-
-  useEffect(() => {
-    fetchThresholds();
-  }, [fetchThresholds]);
 
   useEffect(() => {
     if (thresholds) {
@@ -405,11 +470,10 @@ function FridgeThresholdView() {
         </div>
 
         {thresholdsLoading && (
-          <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p>
+          <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading...</p>
         )}
         {!thresholdsLoading && (thresholdsError || !rows.length) && (
           <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/drinks/thresholds not implemented — see request doc #4 */}
             No fridge threshold data available
           </p>
         )}
@@ -451,13 +515,16 @@ function FridgeThresholdView() {
           style={{ padding: "10px 20px", fontSize: "0.85rem" }}
           disabled={savingThresholds}
           onClick={() =>
-            saveThresholds({
-              defaultThreshold,
-              items: rows.map((r) => ({ itemId: r.itemId, threshold: r.threshold, notify: r.notify })),
-            })
+            saveThresholds(
+              {
+                defaultThreshold,
+                items: rows.map((r) => ({ itemId: r.itemId, threshold: r.threshold, notify: r.notify })),
+              },
+              branchId,
+            )
           }
         >
-          {savingThresholds ? "Saving…" : "Save Changes"}
+          {savingThresholds ? "Saving..." : "Save Changes"}
         </button>
       </div>
     </>
@@ -483,7 +550,7 @@ function Radio({ checked, onClick, label }: { checked: boolean; onClick: () => v
   );
 }
 
-/* ── Modal shell ── */
+/* -- Modal shell -- */
 function ModalShell({ title, onClose, children, width = 460 }: { title: string; onClose: () => void; children: React.ReactNode; width?: number }) {
   return (
     <div
@@ -513,7 +580,7 @@ function ModalShell({ title, onClose, children, width = 460 }: { title: string; 
   );
 }
 
-/* ── Add Item modal ── */
+/* -- Add Item modal -- */
 function AddItemModal({ onClose, onSave }: { onClose: () => void; onSave: (item: DraftLineItem) => void }) {
   const [name, setName] = useState("");
   const [qty, setQty] = useState(0);
@@ -528,10 +595,10 @@ function AddItemModal({ onClose, onSave }: { onClose: () => void; onSave: (item:
       <Field label="Qty Received (packs)">
         <input className="input" type="number" value={qty} onChange={(e) => setQty(Number(e.target.value) || 0)} />
       </Field>
-      <Field label="Cost per Unit (₦)">
+      <Field label="Cost per Unit">
         <input className="input" type="number" value={cost} onChange={(e) => setCost(Number(e.target.value) || 0)} />
       </Field>
-      <Field label="Total Cost (₦)">
+      <Field label="Total Cost">
         <input className="input" value={`₦${totalCost.toLocaleString()}`} readOnly />
       </Field>
       <button
@@ -546,7 +613,7 @@ function AddItemModal({ onClose, onSave }: { onClose: () => void; onSave: (item:
   );
 }
 
-/* ── Add New Supplier modal ── */
+/* -- Add New Supplier modal -- */
 const SUPPLIER_TYPES: SupplierType[] = ["Beverage Supplier", "Food Supplier", "Packaging Supplier"];
 
 function AddSupplierModal({ onClose }: { onClose: () => void }) {

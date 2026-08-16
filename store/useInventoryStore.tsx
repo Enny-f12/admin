@@ -32,14 +32,16 @@ interface InventoryDashboardState {
   bannerLoading: boolean;
   bannerError: boolean;
 
-  fetchFoodItems: (params: { search?: string; category?: string; status?: string; page?: number; pageSize?: number }) => Promise<void>;
+  // branchId added to every fetch/mutation below -- each branch has its
+  // own food/drinks stock, same as stock/drinks/suppliers elsewhere.
+  fetchFoodItems: (params: { branchId?: string; search?: string; category?: string; status?: string; page?: number; pageSize?: number }) => Promise<void>;
   fetchFoodCategories: () => Promise<void>;
-  fetchDrinkItems: (params: { search?: string; status?: string; page?: number; pageSize?: number }) => Promise<void>;
-  fetchBanner: () => Promise<void>;
+  fetchDrinkItems: (params: { branchId?: string; search?: string; status?: string; page?: number; pageSize?: number }) => Promise<void>;
+  fetchBanner: (branchId?: string) => Promise<void>;
 
-  adjustWarehouseStock: (payload: AdjustWarehousePayload) => Promise<boolean>;
-  transferToFridge: (payload: TransferToFridgePayload) => Promise<boolean>;
-  receiveDelivery: (payload: CreateDeliveryPayload) => Promise<boolean>;
+  adjustWarehouseStock: (payload: AdjustWarehousePayload, branchId?: string) => Promise<boolean>;
+  transferToFridge: (payload: TransferToFridgePayload, branchId?: string) => Promise<boolean>;
+  receiveDelivery: (payload: CreateDeliveryPayload, branchId?: string) => Promise<boolean>;
 }
 
 export const useInventoryDashboardStore = create<InventoryDashboardState>((set) => ({
@@ -89,19 +91,19 @@ export const useInventoryDashboardStore = create<InventoryDashboardState>((set) 
     }
   },
 
-  fetchBanner: async () => {
+  fetchBanner: async (branchId) => {
     set({ bannerLoading: true, bannerError: false });
     try {
-      const banner = await foodInventoryService.getStatusBanner();
+      const banner = await foodInventoryService.getStatusBanner(branchId);
       set({ banner, bannerLoading: false });
     } catch {
       set({ bannerLoading: false, bannerError: true });
     }
   },
 
-  adjustWarehouseStock: async (payload) => {
+  adjustWarehouseStock: async (payload, branchId) => {
     try {
-      const updated = await drinksService.adjustWarehouseStock(payload);
+      const updated = await drinksService.adjustWarehouseStock({ ...payload, branchId });
       set((state) => ({
         drinkItems: state.drinkItems
           ? state.drinkItems.map((i) => (i.id === updated.id ? updated : i))
@@ -115,9 +117,9 @@ export const useInventoryDashboardStore = create<InventoryDashboardState>((set) 
     }
   },
 
-  transferToFridge: async (payload) => {
+  transferToFridge: async (payload, branchId) => {
     try {
-      await drinksService.transferToFridge(payload);
+      await drinksService.transferToFridge({ ...payload, branchId });
       toast.success('Transferred to fridge.');
       return true;
     } catch (error) {
@@ -126,9 +128,9 @@ export const useInventoryDashboardStore = create<InventoryDashboardState>((set) 
     }
   },
 
-  receiveDelivery: async (payload) => {
+  receiveDelivery: async (payload, branchId) => {
     try {
-      await drinksService.createDelivery(payload);
+      await drinksService.createDelivery({ ...payload, branchId });
       toast.success(payload.isDraft ? 'Delivery saved as draft.' : 'Delivery received.');
       return true;
     } catch (error) {
