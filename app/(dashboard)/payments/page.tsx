@@ -12,6 +12,7 @@ import {
   X,
   Check,
 } from "lucide-react";
+import { useBranch } from "../layout";
 import { usePaymentsAdminStore } from "@/store/usePaymentStore";
 import { PaymentMethod, ManualSaleLineItem } from "@/types/payment-admin.types";
 import { SkeletonText } from "@/components/ui/Skeleton";
@@ -25,6 +26,7 @@ function formatMoney(value: string | number | null | undefined) {
 }
 
 export default function PaymentsPage() {
+  const branch = useBranch();
   const [tab, setTab] = useState<Tab>("payments");
 
   const heading =
@@ -41,7 +43,7 @@ export default function PaymentsPage() {
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>Foodies 1 LEKKI</p>
+          <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>{branch.name} Branch</p>
           <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>{heading}</h1>
           <p style={{ margin: "4px 0 0", fontSize: "0.875rem", color: "var(--color-text-muted)" }}>{subtitle}</p>
         </div>
@@ -58,9 +60,9 @@ export default function PaymentsPage() {
         <TabButton active={tab === "manual"} onClick={() => setTab("manual")} icon={<FileText size={16} strokeWidth={1.8} />} label="Manual Sale Entry" />
       </div>
 
-      {tab === "payments" && <RecordPaymentsView />}
-      {tab === "pos" && <POSIntegrationView />}
-      {tab === "manual" && <ManualSaleEntryView />}
+      {tab === "payments" && <RecordPaymentsView branchId={branch.id} />}
+      {tab === "pos" && <POSIntegrationView branchId={branch.id} />}
+      {tab === "manual" && <ManualSaleEntryView branchId={branch.id} />}
     </div>
   );
 }
@@ -123,7 +125,7 @@ const outlineBtn: React.CSSProperties = {
 };
 
 /* ══════════════════════════ Record Payments ══════════════════════════ */
-function RecordPaymentsView() {
+function RecordPaymentsView({ branchId }: { branchId: string }) {
   const {
     loadedOrder, orderLookupLoading, orderLookupError, lookupOrder,
     recordPayment, isRecordingPayment,
@@ -167,7 +169,7 @@ function RecordPaymentsView() {
             <input className="input" placeholder="e.g. FHS-1778856693602-000" value={orderNum} onChange={(e) => setOrderNum(e.target.value)} style={{ minWidth: 260 }} />
           </Field>
           <button
-            onClick={() => orderNum.trim() && lookupOrder(orderNum.trim())}
+            onClick={() => orderNum.trim() && lookupOrder(orderNum.trim(), branchId)}
             disabled={!orderNum.trim() || orderLookupLoading}
             style={{ ...outlineBtn, marginBottom: 14, opacity: !orderNum.trim() || orderLookupLoading ? 0.6 : 1 }}
           >
@@ -289,7 +291,7 @@ function RecordPaymentsView() {
 }
 
 /* ══════════════════════════ POS Integration ══════════════════════════ */
-function POSIntegrationView() {
+function POSIntegrationView({ branchId }: { branchId: string }) {
   const {
     posStatus, posStatusLoading, posStatusError, fetchPOSStatus,
     posOrders, posOrdersLoading, posOrdersError, fetchPOSOrders,
@@ -297,9 +299,9 @@ function POSIntegrationView() {
   } = usePaymentsAdminStore();
 
   useEffect(() => {
-    fetchPOSStatus();
-    fetchPOSOrders();
-  }, [fetchPOSStatus, fetchPOSOrders]);
+    fetchPOSStatus(branchId);
+    fetchPOSOrders(branchId);
+  }, [branchId, fetchPOSStatus, fetchPOSOrders]);
 
   return (
     <>
@@ -409,7 +411,7 @@ function POSIntegrationView() {
 }
 
 /* ══════════════════════════ Manual Sale Entry ══════════════════════════ */
-function ManualSaleEntryView() {
+function ManualSaleEntryView({ branchId }: { branchId: string }) {
   const { createManualSale, isCreatingSale, lastSaleId, emailReceipt, isEmailingReceipt } = usePaymentsAdminStore();
 
   const [customer, setCustomer] = useState("");
@@ -428,7 +430,11 @@ function ManualSaleEntryView() {
 
   const submit = async () => {
     if (!items.length) return;
-    await createManualSale({ customerName: customer, method, items, amountReceived });
+    // NOTE: ManualSale has no branchId column in the schema — branchId
+    // is passed through here so the backend can start persisting it once
+    // that migration lands, but today this sale record won't actually
+    // be attributable to a specific branch server-side.
+    await createManualSale({ customerName: customer, method, items, amountReceived }, branchId);
   };
 
   return (
