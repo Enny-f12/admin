@@ -1,6 +1,4 @@
-// types/analytics.types.ts
-
-export type AnalyticsRange = '7d' | '30d' | '6m' | '1y';
+export type AnalyticsRange = 'today' | 'week' | 'month' | 'year';
 export type AnalyticsMetric = 'revenue' | 'orders';
 
 export interface AnalyticsDataPoint {

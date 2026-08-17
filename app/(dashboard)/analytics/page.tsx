@@ -6,15 +6,16 @@ import {
 } from "recharts";
 import type { TooltipProps } from "recharts";
 import type { ValueType, NameType } from "recharts/types/component/DefaultTooltipContent";
+import { useBranch } from "../layout";
 import { useAnalyticsStore } from "@/store/useAnalyticsStore";
 import { AnalyticsRange, AnalyticsMetric } from "@/types/analytics.types";
 import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
 
 const RANGE_OPTS: { key: AnalyticsRange; label: string }[] = [
-  { key: "7d", label: "7 days" },
-  { key: "30d", label: "30 days" },
-  { key: "6m", label: "6 months" },
-  { key: "1y", label: "1 year" },
+  { key: "today", label: "Today" },
+  { key: "week", label: "7 days" },
+  { key: "month", label: "This month" },
+  { key: "year", label: "This year" },
 ];
 
 const RANK_COLORS = ["#E05C2A", "#F5A623", "#F5C842", "#D1D5DB", "#D1D5DB"];
@@ -124,6 +125,8 @@ function StatCard({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function AnalyticsPage() {
+  const branch = useBranch();
+
   const {
     timeseries, timeseriesLoading, timeseriesError, fetchTimeseries,
     summary, summaryLoading, summaryError, fetchSummary,
@@ -131,14 +134,17 @@ export default function AnalyticsPage() {
     exportReport, isExporting,
   } = useAnalyticsStore();
 
-  const [range, setRange] = useState<AnalyticsRange>("6m");
+  const [range, setRange] = useState<AnalyticsRange>("week");
   const [metric, setMetric] = useState<AnalyticsMetric>("revenue");
 
   useEffect(() => {
-    fetchTimeseries({ range });
-    fetchSummary({ range });
-    fetchTopItems({ range, limit: 5 });
-  }, [range, fetchTimeseries, fetchSummary, fetchTopItems]);
+    // branch.id comes from the sidebar branch selector (see layout.tsx
+    // SelectedBranch) — every analytics call is scoped to it, matching
+    // how the backend AnalyticsService filters by branchId.
+    fetchTimeseries({ range, branchId: branch.id });
+    fetchSummary({ range, branchId: branch.id });
+    fetchTopItems({ range, branchId: branch.id, limit: 5 });
+  }, [range, branch, fetchTimeseries, fetchSummary, fetchTopItems]);
 
   const chartData = useMemo(() => timeseries ?? [], [timeseries]);
 
@@ -149,7 +155,7 @@ export default function AnalyticsPage() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
           <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-            Foodies 1 LEKKI
+            {branch.name} Branch
           </p>
           <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
             ANALYTICS
@@ -157,7 +163,7 @@ export default function AnalyticsPage() {
           <p style={{ fontSize: 13, color: "#9CA3AF", margin: 0 }}>Sales trends, order volume, and item performance over time</p>
         </div>
         <button
-          onClick={() => exportReport({ range, format: "csv" })}
+          onClick={() => exportReport({ range, branchId: branch.id, format: "csv" })}
           disabled={isExporting}
           style={{ display: "flex", alignItems: "center", gap: 7, background: "#E05C2A", color: "#fff", border: "none", borderRadius: 10, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: isExporting ? 0.6 : 1 }}
         >
@@ -186,7 +192,6 @@ export default function AnalyticsPage() {
 
       {!summaryLoading && summaryError && (
         <p style={{ margin: "0 0 20px", fontSize: 13, color: "#9CA3AF" }}>
-          {/* TODO(BACKEND): GET /admin/analytics/summary not implemented — see request doc #2 */}
           Summary data unavailable
         </p>
       )}
@@ -243,10 +248,7 @@ export default function AnalyticsPage() {
 
         {!timeseriesLoading && (timeseriesError || !chartData.length) && (
           <div style={{ height: 250, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <p style={{ margin: 0, fontSize: 13, color: "#9CA3AF" }}>
-              {/* TODO(BACKEND): GET /admin/analytics/timeseries not implemented — see request doc #1 */}
-              No chart data available
-            </p>
+            <p style={{ margin: 0, fontSize: 13, color: "#9CA3AF" }}>No chart data available</p>
           </div>
         )}
 
@@ -290,10 +292,7 @@ export default function AnalyticsPage() {
           )}
 
           {!topItemsLoading && (topItemsError || !topItems?.length) && (
-            <p style={{ margin: 0, fontSize: 13, color: "#9CA3AF" }}>
-              {/* TODO(BACKEND): GET /admin/analytics/top-items not implemented — see request doc #3 */}
-              No item data available
-            </p>
+            <p style={{ margin: 0, fontSize: 13, color: "#9CA3AF" }}>No item data available</p>
           )}
 
           {!topItemsLoading && !topItemsError && topItems && topItems.length > 0 && (

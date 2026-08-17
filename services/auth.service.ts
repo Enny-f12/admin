@@ -12,6 +12,12 @@ import {
   RefreshPayload,
   RefreshResponse,
   Branch,
+  ForgotPasswordPayload,
+  ForgotPasswordResponse,
+  ResetPasswordPayload,
+  ResetPasswordResponse,
+  ChangePasswordPayload,
+  ChangePasswordResponse,
 } from '@/types/auth.types';
 
 export const authService = {
@@ -48,4 +54,23 @@ export const authService = {
   me: () => apiClient.get('/auth/me').then((r) => r.data),
 
   getBranches: () => apiClient.get<Branch[]>('/auth/branches').then((r) => r.data),
+
+  // NOT YET BUILT ON THE BACKEND — see the doc comment on
+  // ForgotPasswordPayload/ResetPasswordPayload/ChangePasswordPayload in
+  // types/auth.types.ts. Flag all three routes to the backend dev before
+  // relying on this for real.
+  forgotPassword: (payload: ForgotPasswordPayload) =>
+    apiClient.post<ForgotPasswordResponse>('/auth/forgot-password', payload).then((r) => r.data),
+
+  // Public/code-based flow only — from the /forgot-password page, after
+  // forgotPassword() above. Does NOT cover the authenticated "change
+  // password" case; use changePassword() for that.
+  resetPassword: (payload: ResetPasswordPayload) =>
+    apiClient.post<ResetPasswordResponse>('/auth/reset-password', payload).then((r) => r.data),
+
+  // Authenticated flow — from the profile page's "change password" form.
+  // apiClient already attaches the access token; currentPassword is sent
+  // to confirm it's really the account owner.
+  changePassword: (payload: ChangePasswordPayload) =>
+    apiClient.post<ChangePasswordResponse>('/auth/change-password', payload).then((r) => r.data),
 };

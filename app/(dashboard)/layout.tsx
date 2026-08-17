@@ -230,7 +230,7 @@ export default function DashboardLayout({
       return;
     }
     if (branches && branches.length > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+       
       setSelectedBranchId(branches[0].id);
     }
   }, [canPickBranch, assignedBranchId, loginBranchId, selectedBranchId, branches]);
@@ -570,8 +570,10 @@ export default function DashboardLayout({
           </Link>
 
           {/* User row — pulled from useAuthStore().user (fullName, role).
-              Shows a skeleton until the store has hydrated a user. */}
-          <div
+              Shows a skeleton until the store has hydrated a user.
+              Links to /profile, same as the navbar avatar below. */}
+          <Link
+            href="/profile"
             style={{
               display: "flex",
               alignItems: "center",
@@ -579,7 +581,16 @@ export default function DashboardLayout({
               padding: collapsed ? "8px 0" : "8px 12px",
               justifyContent: collapsed ? "center" : "flex-start",
               marginTop: 4,
+              textDecoration: "none",
+              borderRadius: 8,
+              transition: "background 0.15s",
             }}
+            onMouseEnter={(e) =>
+              ((e.currentTarget as HTMLAnchorElement).style.background = SB.hoverBg)
+            }
+            onMouseLeave={(e) =>
+              ((e.currentTarget as HTMLAnchorElement).style.background = "transparent")
+            }
           >
             <div
               style={{
@@ -636,7 +647,7 @@ export default function DashboardLayout({
                 )}
               </div>
             )}
-          </div>
+          </Link>
         </div>
       </aside>
 
@@ -822,6 +833,31 @@ export default function DashboardLayout({
 
             {/* Notifications — live, wired to GET /notifications */}
             <NotificationBell />
+
+            {/* Profile avatar — initials from useAuthStore().user, links
+                to /profile. Full details there are pulled from the staff
+                endpoint since useAuthStore().user only carries
+                fullName/role. */}
+            <Link
+              href="/profile"
+              title="Profile"
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: "50%",
+                background: "var(--color-primary)",
+                color: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "0.72rem",
+                fontWeight: 700,
+                textDecoration: "none",
+                flexShrink: 0,
+              }}
+            >
+              {user ? getInitials(user.fullName) : <Skeleton width={16} height={10} radius={4} />}
+            </Link>
           </div>
         </header>
 

@@ -16,6 +16,7 @@ import {
   X,
   TrendingUp,
   TrendingDown,
+  PackagePlus,
 } from "lucide-react";
 import { useEffect } from "react";
 import { useStockStore } from "@/store/useStockStore";
@@ -135,6 +136,8 @@ export default function StockInventoryPage() {
     fetchLowStockAlerts,
     fetchSuppliers,
     adjustStock,
+    addStock,
+    isAddingStock,
     transferStock,
     removeStock,
     addSupplier,
@@ -152,6 +155,7 @@ export default function StockInventoryPage() {
   const [branchOpen, setBranchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [showThresholds, setShowThresholds] = useState(false);
+  const [showAddStock, setShowAddStock] = useState(false);
 
   const [adjustItem, setAdjustItem] = useState<ModalItem | null>(null);
   const [transferItem, setTransferItem] = useState<ModalItem | null>(null);
@@ -196,7 +200,7 @@ export default function StockInventoryPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, position: "relative" }}>
 
-      {!showThresholds ? (
+      {!showThresholds && !showAddStock ? (
         <>
           <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--color-heading)" }}>
             {`Stock levels — ${branch.name}`}
@@ -227,12 +231,21 @@ export default function StockInventoryPage() {
             </div>
           </div>
 
-          {/* Top action row — Threshold Configuration is page-level
-              navigation, so it legitimately belongs here. Adjust /
-              Transfer / Remove were dropped from this row: those are
-              item-scoped actions and belong on each table row (below),
-              not as standalone buttons guessing at "the first item". */}
+          {/* Top action row — Add Stock and Threshold Configuration are
+              both page-level navigation (full-view swaps, same pattern
+              as ThresholdView below), so they belong here together.
+              Adjust / Transfer / Remove stay off this row: those are
+              item-scoped actions and belong on each table row, not as
+              standalone buttons guessing at "the first item". */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            <button
+              className="btn btn-primary"
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", fontSize: "0.85rem" }}
+              onClick={() => setShowAddStock(true)}
+            >
+              <PackagePlus size={16} strokeWidth={1.8} />
+              Add Stock
+            </button>
             <button
               className="btn btn-primary"
               style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", fontSize: "0.85rem" }}
@@ -398,6 +411,28 @@ export default function StockInventoryPage() {
             )}
           </div>
         </>
+      ) : showAddStock ? (
+        <AddStockView
+          items={items ?? []}
+          suppliers={suppliers ?? []}
+          branch={branch}
+          isSubmitting={isAddingStock}
+          onBack={() => setShowAddStock(false)}
+          onOpenSupplier={() => setSupplierOpen(true)}
+          supplierModalOpen={supplierOpen}
+          onSubmit={async (form) => {
+            const ok = await addStock({
+              itemId: form.itemId,
+              branchId: form.branchId,
+              quantity: form.qty,
+              costPerUnit: form.cost,
+              supplierId: form.supplierId || null,
+              invoiceNumber: form.invoice || null,
+              reason: form.reason,
+            });
+            if (ok) setShowAddStock(false);
+          }}
+        />
       ) : (
         <ThresholdView onBack={() => setShowThresholds(false)} />
       )}
@@ -844,6 +879,221 @@ function AddSupplierModal({
         Add
       </button>
     </ModalShell>
+  );
+}
+
+/* ── Add Stock view — full page, same pattern as ThresholdView ──
+   Reached only from the "Add Stock" button on the main inventory page
+   and returns there the same way (Back link), rather than being a
+   modal. Item picker searches the already-loaded `items` list (the
+   same data backing the main table) so there's no separate menu-search
+   endpoint dependency here. */
+function AddStockView({
+  items, suppliers, branch, isSubmitting, onBack, onOpenSupplier, supplierModalOpen, onSubmit,
+}: {
+  items: StockItem[];
+  suppliers: { id: string; name: string }[];
+  branch: { id: string; name: string; canPickBranch: boolean; branches: { id: string; name: string }[] };
+  isSubmitting: boolean;
+  onBack: () => void;
+  onOpenSupplier: () => void;
+  supplierModalOpen: boolean;
+  onSubmit: (form: {
+    itemId: string;
+    branchId: string;
+    qty: number;
+    cost: number;
+    supplierId: string;
+    invoice: string;
+    reason: string;
+  }) => void;
+}) {
+  const [itemQuery, setItemQuery] = useState("");
+  const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
+  const [branchId, setBranchId] = useState(branch.id);
+  const [supplierId, setSupplierId] = useState("");
+  const [invoice, setInvoice] = useState("");
+  const [qty, setQty] = useState(20);
+  const [cost, setCost] = useState(0);
+  const [reason, setReason] = useState("New delivery received from supplier");
+
+  const filteredItems = itemQuery.trim()
+    ? items.filter((i) => i.name.toLowerCase().includes(itemQuery.trim().toLowerCase()))
+    : [];
+
+  const currentAtBranch =
+    selectedItem?.quantities.find((q) => q.branchId === branchId)?.quantity ?? 0;
+  const newStock = currentAtBranch + qty;
+  const totalCost = qty * cost;
+
+  const canSubmit = !!selectedItem && !!branchId && qty > 0 && reason.trim().length > 0 && !isSubmitting;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, position: "relative" }}>
+      {/* Real navigation, not a decoy button — same pattern as
+          ThresholdView's back link below. */}
+      <button
+        onClick={onBack}
+        style={{
+          display: "flex", alignItems: "center", gap: 6, background: "none", border: "none",
+          cursor: "pointer", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-primary)",
+          fontFamily: "var(--font-sans)", padding: 0, alignSelf: "flex-start",
+        }}
+      >
+        ← Back to Stock Inventory
+      </button>
+
+      <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--color-heading)" }}>
+        Add Stock
+      </h2>
+
+      <div className="card">
+        <Field label="Item">
+          {selectedItem ? (
+            <div
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "10px 14px", borderRadius: 8, background: "var(--color-bg-soft)",
+              }}
+            >
+              <div>
+                <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{selectedItem.name}</p>
+                <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{selectedItem.unit}</p>
+              </div>
+              <button
+                onClick={() => { setSelectedItem(null); setItemQuery(""); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-primary)", fontSize: "0.8rem", fontWeight: 600, fontFamily: "var(--font-sans)" }}
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <div style={{ position: "relative" }}>
+              <Search size={16} strokeWidth={1.8} color="var(--color-text-muted)" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                className="input"
+                placeholder="Search item to restock..."
+                value={itemQuery}
+                onChange={(e) => setItemQuery(e.target.value)}
+                style={{ width: "100%", paddingLeft: 38 }}
+                autoFocus
+              />
+              {filteredItems.length > 0 && (
+                <div
+                  style={{
+                    marginTop: 6, border: "1px solid var(--color-border)", borderRadius: 8,
+                    maxHeight: 220, overflowY: "auto", background: "#fff",
+                  }}
+                >
+                  {filteredItems.slice(0, 8).map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => { setSelectedItem(item); setCost(item.costPerUnit || 0); }}
+                      style={{
+                        display: "block", width: "100%", textAlign: "left", padding: "10px 14px",
+                        background: "none", border: "none", borderBottom: "1px solid var(--color-border)",
+                        fontSize: "0.85rem", color: "var(--color-text)", cursor: "pointer", fontFamily: "var(--font-sans)",
+                      }}
+                    >
+                      {item.name} <span style={{ color: "var(--color-text-muted)" }}>· {item.unit}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {itemQuery.trim() && filteredItems.length === 0 && (
+                <p style={{ margin: "6px 0 0", fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+                  No matching items in this branch&apos;s inventory.
+                </p>
+              )}
+            </div>
+          )}
+        </Field>
+
+        {branch.canPickBranch && (
+          <Field label="Branch">
+            <select className="input" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+              {branch.branches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </Field>
+        )}
+
+        <Field label="Supplier">
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <select className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} style={{ flex: 1, minWidth: 160 }}>
+              <option value="">Select supplier</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={onOpenSupplier}
+              style={{
+                padding: "0 14px", height: 42, borderRadius: 8, border: "1px solid var(--color-primary)",
+                background: "#fff", color: "var(--color-primary)", fontWeight: 600, fontSize: "0.85rem",
+                cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+              }}
+            >
+              Add New Supplier
+            </button>
+          </div>
+        </Field>
+
+        <Field label="Invoice Number">
+          <input className="input" placeholder="INV-12345....." value={invoice} onChange={(e) => setInvoice(e.target.value)} />
+        </Field>
+
+        {selectedItem && (
+          <p style={{ margin: "0 0 6px", fontSize: "0.85rem", color: "var(--color-text)" }}>
+            Current at {branch.branches.find((b) => b.id === branchId)?.name ?? branch.name}: <strong>{currentAtBranch} {selectedItem.unit}</strong>
+          </p>
+        )}
+        <div style={{ marginBottom: 16 }}>
+          <Stepper value={qty} onChange={setQty} />
+        </div>
+
+        {selectedItem && (
+          <p style={{ margin: "0 0 16px", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>
+            New Stock: {newStock} {selectedItem.unit}
+          </p>
+        )}
+
+        <Field label="Cost price per unit">
+          <input className="input" type="number" value={cost} onChange={(e) => setCost(Number(e.target.value) || 0)} />
+        </Field>
+
+        <p style={{ margin: "-6px 0 16px", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>
+          Total cost: ₦{totalCost.toLocaleString()}
+        </p>
+
+        <Field label="Reason (required)">
+          <textarea className="input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </Field>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <button onClick={onBack} style={cancelBtn}>Cancel</button>
+          <button
+            className="btn btn-primary"
+            style={{ padding: "9px 18px", fontSize: "0.85rem", opacity: canSubmit ? 1 : 0.6 }}
+            disabled={!canSubmit}
+            onClick={() =>
+              selectedItem &&
+              onSubmit({ itemId: selectedItem.id, branchId, qty, cost, supplierId, invoice, reason })
+            }
+          >
+            {isSubmitting ? "Adding…" : "Add Stock"}
+          </button>
+        </div>
+      </div>
+
+      {supplierModalOpen && (
+        // Rendered by the parent page (shares the same AddSupplierModal
+        // instance used elsewhere) — this component just triggers it via
+        // onOpenSupplier and doesn't own the modal itself.
+        <></>
+      )}
+    </div>
   );
 }
 

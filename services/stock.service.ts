@@ -10,6 +10,7 @@ import {
   RemoveStockPayload,
   AddSupplierPayload,
   SaveStockThresholdsPayload,
+  AddStockPayload,
 } from '@/types/stock.types';
 
 export const stockService = {
@@ -27,6 +28,12 @@ export const stockService = {
 
   adjustStock: (payload: AdjustStockPayload) =>
     apiClient.post<StockItem>('/admin/stock/adjust', payload).then((r) => r.data),
+
+  // Page-level restock flow — same response shape as adjustStock
+  // (updated StockItem for the affected branch) so the store can reuse
+  // mergeItemBranch for both.
+  addStock: (payload: AddStockPayload) =>
+    apiClient.post<StockItem>('/admin/stock/add', payload).then((r) => r.data),
 
   transferStock: (payload: TransferStockPayload) =>
     apiClient

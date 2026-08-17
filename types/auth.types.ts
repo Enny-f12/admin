@@ -115,3 +115,54 @@ export interface RefreshResponse {
   accessToken: string;
   refreshToken: string;
 }
+
+/**
+ * CONFIRMED CONTRACT — not yet live on the backend, but these shapes are
+ * finalized in the backend request doc (not a guess). Two calls for the
+ * public "forgot password" flow:
+ *
+ *   1. POST /auth/forgot-password { identifier }
+ *      Sends a 6-digit code to whichever email/phone `identifier`
+ *      resolves to.
+ *
+ *   2. POST /auth/reset-password { identifier, code, newPassword }
+ *      Confirms the code and sets a new password. This is
+ *      code-based only — it does NOT accept an authenticated,
+ *      code-less call, so it can't be reused for the profile page's
+ *      "change password" form. See ChangePasswordPayload below for that.
+ */
+export interface ForgotPasswordPayload {
+  identifier: string; // email or phone
+}
+
+export interface ForgotPasswordResponse {
+  message: string;
+}
+
+export interface ResetPasswordPayload {
+  identifier: string;
+  code: string;
+  newPassword: string;
+}
+
+export interface ResetPasswordResponse {
+  message: string;
+}
+
+/**
+ * NOT YET BUILT ON THE BACKEND — proposed contract for the profile page's
+ * "change password" form, handed to the backend dev alongside items 1/2
+ * above. Authenticated (accessToken in the Authorization header) and
+ * requires currentPassword to confirm it's really the account owner —
+ * a live session alone isn't proof of that. Should revoke the user's
+ * other refresh tokens on success, matching the "you'll be signed out on
+ * other devices" copy already in the UI.
+ */
+export interface ChangePasswordPayload {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface ChangePasswordResponse {
+  message: string;
+}
