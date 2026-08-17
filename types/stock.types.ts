@@ -94,3 +94,19 @@ export interface SaveStockThresholdsPayload {
   defaultThreshold: number;
   items: { itemId: string; threshold: number; notify: boolean; autoReorder: boolean }[];
 }
+
+// Full page-level "Add Stock" — separate from AdjustStockPayload (the
+// per-row Plus icon) because this flow starts from an item picker
+// rather than an already-selected row, and always represents a net
+// increase (restock), never a correction. supplierId/invoiceNumber are
+// optional here since a page-level restock may not always be tied to
+// a formal delivery, unlike an itemized adjustment.
+export interface AddStockPayload {
+  itemId: string;
+  branchId: string;
+  quantity: number;
+  costPerUnit: number;
+  supplierId: string | null;
+  invoiceNumber: string | null;
+  reason: string;
+}

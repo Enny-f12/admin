@@ -12,6 +12,7 @@ import {
   RemoveStockPayload,
   AddSupplierPayload,
   SaveStockThresholdsPayload,
+  AddStockPayload,
 } from '@/types/stock.types';
 
 function extractErrorMessage(error: unknown, fallback: string) {
@@ -41,6 +42,8 @@ interface StockState {
   thresholdsError: boolean;
   savingThresholds: boolean;
 
+  isAddingStock: boolean;
+
   fetchItems: (branchId?: string, search?: string) => Promise<void>;
   fetchBranches: () => Promise<void>;
   fetchLowStockAlerts: (branchId?: string) => Promise<void>;
@@ -48,6 +51,7 @@ interface StockState {
   fetchThresholds: (branchId?: string) => Promise<void>;
 
   adjustStock: (payload: AdjustStockPayload) => Promise<boolean>;
+  addStock: (payload: AddStockPayload) => Promise<boolean>;
   transferStock: (payload: TransferStockPayload) => Promise<boolean>;
   removeStock: (payload: RemoveStockPayload) => Promise<boolean>;
   addSupplier: (payload: AddSupplierPayload) => Promise<boolean>;
@@ -77,6 +81,8 @@ export const useStockStore = create<StockState>((set, get) => ({
   thresholdsLoading: false,
   thresholdsError: false,
   savingThresholds: false,
+
+  isAddingStock: false,
 
   fetchItems: async (branchId, search) => {
     set({ itemsLoading: true, itemsError: false });
@@ -140,6 +146,31 @@ export const useStockStore = create<StockState>((set, get) => ({
       return true;
     } catch (error) {
       toast.error(extractErrorMessage(error, 'Could not adjust stock.'));
+      return false;
+    }
+  },
+
+  addStock: async (payload) => {
+    set({ isAddingStock: true });
+    try {
+      const updatedItem = await stockService.addStock(payload);
+      set((state) => ({
+        isAddingStock: false,
+        items: state.items
+          ? state.items.some((i) => i.id === updatedItem.id)
+            ? state.items.map((i) => (i.id === updatedItem.id ? mergeItemBranch(i, updatedItem) : i))
+            // Item wasn't in the currently-loaded list (e.g. it had zero
+            // stock everywhere and was filtered out, or this is the
+            // first time it's been stocked at this branch) — append it
+            // rather than silently dropping the update.
+            : [...state.items, updatedItem]
+          : state.items,
+      }));
+      toast.success('Stock added.');
+      return true;
+    } catch (error) {
+      set({ isAddingStock: false });
+      toast.error(extractErrorMessage(error, 'Could not add stock.'));
       return false;
     }
   },

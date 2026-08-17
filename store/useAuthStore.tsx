@@ -11,6 +11,9 @@ import {
   VerifyOtpPayload,
   GoogleAuthPayload,
   AppleAuthPayload,
+  ForgotPasswordPayload,
+  ResetPasswordPayload,
+  ChangePasswordPayload,
 } from '@/types/auth.types';
 
 interface AuthState {
@@ -48,6 +51,17 @@ interface AuthState {
   fetchMe: () => Promise<void>;
 
   fetchBranches: () => Promise<void>;
+
+  // NEW — forgot/reset/change password. Same isLoading/error/toast shape
+  // as the other auth actions above, for consistency. forgotPassword +
+  // resetPassword back the public /forgot-password page (code-based).
+  // changePassword is separate — it's the authenticated, current-password
+  // based flow used by the profile page's "change password" form. All
+  // three hit endpoints that don't exist on the backend yet (see
+  // auth.service.ts / auth.types.ts for the proposed contracts).
+  forgotPassword: (payload: ForgotPasswordPayload) => Promise<boolean>;
+  resetPassword: (payload: ResetPasswordPayload) => Promise<boolean>;
+  changePassword: (payload: ChangePasswordPayload) => Promise<boolean>;
 }
 
 function extractErrorMessage(error: unknown, fallback: string) {
@@ -216,6 +230,55 @@ export const useAuthStore = create<AuthState>()(
           set({ branches, branchesLoading: false });
         } catch {
           set({ branchesLoading: false, branchesError: true });
+        }
+      },
+
+      forgotPassword: async (payload) => {
+        set({ isLoading: true, error: null });
+        try {
+          const res = await authService.forgotPassword(payload);
+          set({ isLoading: false });
+          toast.success(res.message ?? 'Reset code sent.');
+          return true;
+        } catch (error) {
+          const message = extractErrorMessage(error, 'Could not send reset code.');
+          set({ isLoading: false, error: message });
+          toast.error(message);
+          return false;
+        }
+      },
+
+      // Public/code-based flow only — from the /forgot-password page,
+      // after forgotPassword() above. See changePassword() below for the
+      // authenticated profile-page flow.
+      resetPassword: async (payload) => {
+        set({ isLoading: true, error: null });
+        try {
+          const res = await authService.resetPassword(payload);
+          set({ isLoading: false });
+          toast.success(res.message ?? 'Password reset.');
+          return true;
+        } catch (error) {
+          const message = extractErrorMessage(error, 'Could not reset password.');
+          set({ isLoading: false, error: message });
+          toast.error(message);
+          return false;
+        }
+      },
+
+      // Authenticated flow — profile page's "change password" form.
+      changePassword: async (payload) => {
+        set({ isLoading: true, error: null });
+        try {
+          const res = await authService.changePassword(payload);
+          set({ isLoading: false });
+          toast.success(res.message ?? 'Password updated.');
+          return true;
+        } catch (error) {
+          const message = extractErrorMessage(error, 'Could not update password.');
+          set({ isLoading: false, error: message });
+          toast.error(message);
+          return false;
         }
       },
     }),

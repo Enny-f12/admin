@@ -4,6 +4,7 @@
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Eye, EyeOff, ChevronDown } from "lucide-react";
 import Image from "next/image";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -196,11 +197,22 @@ export default function LoginPage() {
                       {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
-                  {errors.password && (
-                    <p className="text-xs" style={{ color: "var(--color-error)" }}>
-                      {errors.password.message}
-                    </p>
-                  )}
+                  <div className="flex items-center justify-between">
+                    {errors.password ? (
+                      <p className="text-xs" style={{ color: "var(--color-error)" }}>
+                        {errors.password.message}
+                      </p>
+                    ) : (
+                      <span />
+                    )}
+                    <Link
+                      href="/forgot-password"
+                      className="text-xs font-semibold"
+                      style={{ color: "var(--color-primary)" }}
+                    >
+                      Forgot password?
+                    </Link>
+                  </div>
                 </div>
 
                 {/* Branch — optional, now sourced from GET /auth/branches
