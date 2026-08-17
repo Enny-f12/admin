@@ -24,7 +24,7 @@ import { useInventoryDashboardStore } from "@/store/useInventoryStore";
 import { FoodInventoryItem } from "@/types/food-inventory.types";
 import { DrinksInventoryItem, Supplier } from "@/types/drinks.types";
 import { drinksService } from "@/services/drinks.service";
-import { useBranch, ALL_BRANCHES_ID } from "../../layout";
+import { useBranch } from "../../layout";
 
 type Status = "In Stock" | "Low Stock" | "Out of Stock";
 
@@ -117,14 +117,12 @@ export default function InventoryDashboardPage() {
   const [transferOpen, setTransferOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
 
-  // Soft branch scoping, same pattern as Stock Inventory / Suppliers:
-  // "All Branches" still works (company-wide view), a specific branch
-  // filters both tabs' data. Previously this page had no branch
-  // awareness at all.
+  // Branch scoping, same pattern as Stock Inventory / Suppliers. "All
+  // Branches" no longer exists as an option (see app/(admin)/layout.tsx)
+  // -- a picker always resolves to one of branch.branches, so this page
+  // filters both tabs' data to whichever branch is currently selected.
   const branch = useBranch();
   const [branchOpen, setBranchOpen] = useState(false);
-  const branchOptions = [{ id: ALL_BRANCHES_ID, name: "All Branches" }, ...branch.branches];
-  const resolvedBranchId = branch.id === ALL_BRANCHES_ID ? undefined : branch.id;
 
   const {
     foodItems,
@@ -150,14 +148,14 @@ export default function InventoryDashboardPage() {
 
   useEffect(() => {
     fetchFoodCategories();
-    fetchBanner(resolvedBranchId);
+    fetchBanner(branch.id);
      
-  }, [fetchFoodCategories, fetchBanner, resolvedBranchId]);
+  }, [fetchFoodCategories, fetchBanner, branch.id]);
 
   useEffect(() => {
     if (tab === "food") {
       fetchFoodItems({
-        branchId: resolvedBranchId,
+        branchId: branch.id,
         search: search || undefined,
         category: category === "All Categories" ? undefined : category,
         status: status === "All Status" ? undefined : status,
@@ -166,7 +164,7 @@ export default function InventoryDashboardPage() {
       });
     } else {
       fetchDrinkItems({
-        branchId: resolvedBranchId,
+        branchId: branch.id,
         search: search || undefined,
         status: status === "All Status" ? undefined : status,
         page,
@@ -174,7 +172,7 @@ export default function InventoryDashboardPage() {
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, search, category, status, page, resolvedBranchId]);
+  }, [tab, search, category, status, page, branch.id]);
 
   const switchTab = (t: "food" | "drinks") => {
     setTab(t);
@@ -254,7 +252,7 @@ export default function InventoryDashboardPage() {
                 boxShadow: "0 8px 24px rgba(0,0,0,0.10)", overflow: "hidden", zIndex: 60,
               }}
             >
-              {branchOptions.map((b) => (
+              {branch.branches.map((b) => (
                 <button
                   key={b.id}
                   onClick={() => { branch.setBranch(b); setBranchOpen(false); }}
@@ -521,10 +519,10 @@ export default function InventoryDashboardPage() {
 
       {receiveOpen && (
         <ReceiveDeliveryModal
-          branchId={resolvedBranchId}
+          branchId={branch.id}
           onClose={() => setReceiveOpen(false)}
           onSubmit={async (payload) => {
-            const ok = await receiveDelivery(payload, resolvedBranchId);
+            const ok = await receiveDelivery(payload, branch.id);
             if (ok) setReceiveOpen(false);
           }}
         />
@@ -534,7 +532,7 @@ export default function InventoryDashboardPage() {
           items={drinkItems ?? []}
           onClose={() => setTransferOpen(false)}
           onSubmit={async (payload) => {
-            const ok = await transferToFridge(payload, resolvedBranchId);
+            const ok = await transferToFridge(payload, branch.id);
             if (ok) setTransferOpen(false);
           }}
         />
@@ -544,7 +542,7 @@ export default function InventoryDashboardPage() {
           items={drinkItems ?? []}
           onClose={() => setAdjustOpen(false)}
           onSubmit={async (payload) => {
-            const ok = await adjustWarehouseStock(payload, resolvedBranchId);
+            const ok = await adjustWarehouseStock(payload, branch.id);
             if (ok) setAdjustOpen(false);
           }}
         />

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useSuppliersStore } from "@/store/useSuppliersStore";
 import { SupplierType } from "@/types/suppliers.types";
-import { useBranch, ALL_BRANCHES_ID } from "../../layout";
+import { useBranch } from "../../layout";
 
 export default function SuppliersPage() {
   const {
@@ -29,29 +29,24 @@ export default function SuppliersPage() {
     addSupplier,
   } = useSuppliersStore();
 
-  // Soft branch scoping, same pattern as Stock Inventory: "All Branches"
-  // still works and shows the company-wide vendor directory, a specific
-  // branch filters deliveries/outstanding to that branch. This is a
-  // judgment call, not a hard guard like Drinks & Fridge -- a supplier
-  // is a vendor relationship, not a physical location, so "All
-  // Branches" is treated as a legitimate view here rather than blocked.
+  // Branch scoping, same pattern as Stock Inventory: a specific branch
+  // filters deliveries/outstanding to that branch. "All Branches" no
+  // longer exists as a selectable option (see app/(admin)/layout.tsx),
+  // so this always filters to whichever branch is currently selected.
   const branch = useBranch();
   const [branchOpen, setBranchOpen] = useState(false);
-  const branchOptions = [{ id: ALL_BRANCHES_ID, name: "All Branches" }, ...branch.branches];
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [successName, setSuccessName] = useState<string | null>(null);
 
   useEffect(() => {
-    const resolvedBranchId = branch.id === ALL_BRANCHES_ID ? undefined : branch.id;
-    fetchSuppliers(resolvedBranchId);
+    fetchSuppliers(branch.id);
   }, [fetchSuppliers, branch.id]);
 
   useEffect(() => {
     if (selectedId) {
-      const resolvedBranchId = branch.id === ALL_BRANCHES_ID ? undefined : branch.id;
-      fetchSupplierDetail(selectedId, resolvedBranchId);
+      fetchSupplierDetail(selectedId, branch.id);
     }
   }, [selectedId, branch.id, fetchSupplierDetail]);
 
@@ -103,7 +98,7 @@ export default function SuppliersPage() {
                 boxShadow: "0 8px 24px rgba(0,0,0,0.10)", overflow: "hidden", zIndex: 60,
               }}
             >
-              {branchOptions.map((b) => (
+              {branch.branches.map((b) => (
                 <button
                   key={b.id}
                   onClick={() => { branch.setBranch(b); setBranchOpen(false); }}
@@ -231,8 +226,7 @@ export default function SuppliersPage() {
         <AddSupplierModal
           onClose={() => setAddOpen(false)}
           onSave={async (payload) => {
-            const resolvedBranchId = branch.id === ALL_BRANCHES_ID ? undefined : branch.id;
-            const supplier = await addSupplier(payload, resolvedBranchId);
+            const supplier = await addSupplier(payload, branch.id);
             if (supplier) {
               setAddOpen(false);
               setSuccessName(supplier.name);

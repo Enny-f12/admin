@@ -33,15 +33,15 @@ interface PaymentsAdminState {
   lastSaleId: string | null;
   isEmailingReceipt: boolean;
 
-  lookupOrder: (orderNumber: string) => Promise<void>;
+  lookupOrder: (orderNumber: string, branchId?: string) => Promise<void>;
   recordPayment: (payload: RecordPaymentPayload) => Promise<boolean>;
 
-  fetchPOSStatus: () => Promise<void>;
-  fetchPOSOrders: () => Promise<void>;
+  fetchPOSStatus: (branchId?: string) => Promise<void>;
+  fetchPOSOrders: (branchId?: string) => Promise<void>;
   toggleVerified: (id: string, verified: boolean) => Promise<void>;
   testConnection: () => Promise<void>;
 
-  createManualSale: (payload: CreateManualSalePayload) => Promise<boolean>;
+  createManualSale: (payload: CreateManualSalePayload, branchId?: string) => Promise<boolean>;
   emailReceipt: () => Promise<void>;
 }
 
@@ -64,13 +64,13 @@ export const usePaymentsAdminStore = create<PaymentsAdminState>((set, get) => ({
   lastSaleId: null,
   isEmailingReceipt: false,
 
-  lookupOrder: async (orderNumber) => {
+  lookupOrder: async (orderNumber, branchId) => {
     set({ orderLookupLoading: true, orderLookupError: false, loadedOrder: null });
     try {
-      const matches = await paymentsAdminService.lookupOrder(orderNumber);
+      const matches = await paymentsAdminService.lookupOrder(orderNumber, branchId);
       const order = matches.find((o) => o.orderNumber === orderNumber) ?? matches[0] ?? null;
       set({ loadedOrder: order, orderLookupLoading: false });
-      if (!order) toast.error('No order found with that number.');
+      if (!order) toast.error('No order found with that number for this branch.');
     } catch (error) {
       set({ orderLookupLoading: false, orderLookupError: true });
       toast.error(extractErrorMessage(error, 'Could not look up order.'));
@@ -91,20 +91,20 @@ export const usePaymentsAdminStore = create<PaymentsAdminState>((set, get) => ({
     }
   },
 
-  fetchPOSStatus: async () => {
+  fetchPOSStatus: async (branchId) => {
     set({ posStatusLoading: true, posStatusError: false });
     try {
-      const posStatus = await paymentsAdminService.getPOSStatus();
+      const posStatus = await paymentsAdminService.getPOSStatus(branchId);
       set({ posStatus, posStatusLoading: false });
     } catch {
       set({ posStatusLoading: false, posStatusError: true });
     }
   },
 
-  fetchPOSOrders: async () => {
+  fetchPOSOrders: async (branchId) => {
     set({ posOrdersLoading: true, posOrdersError: false });
     try {
-      const posOrders = await paymentsAdminService.getPOSOrders();
+      const posOrders = await paymentsAdminService.getPOSOrders(branchId);
       set({ posOrders, posOrdersLoading: false });
     } catch {
       set({ posOrdersLoading: false, posOrdersError: true });
@@ -137,10 +137,10 @@ export const usePaymentsAdminStore = create<PaymentsAdminState>((set, get) => ({
     }
   },
 
-  createManualSale: async (payload) => {
+  createManualSale: async (payload, branchId) => {
     set({ isCreatingSale: true });
     try {
-      const { id } = await paymentsAdminService.createManualSale(payload);
+      const { id } = await paymentsAdminService.createManualSale({ ...payload, branchId });
       set({ isCreatingSale: false, lastSaleId: id });
       toast.success('Sale recorded.');
       return true;

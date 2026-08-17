@@ -101,6 +101,12 @@ const PAGE_SIZE = 5;
 // would be the correct long-term fix.
 const FETCH_LIMIT = 50;
 
+// How long to wait, after the person stops changing a date field, before
+// firing the fetch. Picking a new start date shouldn't trigger a request
+// on the (now stale) previous end date the instant it's clicked — this
+// gives them a moment to also change the end date before anything loads.
+const DATE_DEBOUNCE_MS = 500;
+
 function ReadonlyField({ label, value, loading }: { label: string; value: string; loading?: boolean }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -408,10 +414,17 @@ export default function AccountingPage() {
   const [view, setView] = useState<"dashboard" | "edit">("dashboard");
   const [activeItem, setActiveItem] = useState<MarginItem | null>(null);
 
-  // Editable reporting period.
+  // Editable reporting period. startDate/endDate reflect what's in the
+  // date inputs right now (so the fields feel responsive); debouncedStart/
+  // debouncedEnd are what's actually used to fetch, updated only after the
+  // person pauses for DATE_DEBOUNCE_MS. This is what stops "change start
+  // date" from immediately firing a request against the still-old end
+  // date before they've had a chance to touch it.
   const [startDate, setStartDate] = useState(DEFAULT_START_DATE);
   const [endDate, setEndDate] = useState(DEFAULT_END_DATE);
-  const dateRangeValid = startDate !== "" && endDate !== "" && startDate <= endDate;
+  const [debouncedStart, setDebouncedStart] = useState(DEFAULT_START_DATE);
+  const [debouncedEnd, setDebouncedEnd] = useState(DEFAULT_END_DATE);
+  const dateRangeValid = debouncedStart !== "" && debouncedEnd !== "" && debouncedStart <= debouncedEnd;
 
   // Pagination — 5 rows per table page, client-side over a larger fetched
   // batch (FETCH_LIMIT). Resets to page 1 whenever the underlying data
@@ -419,9 +432,22 @@ export default function AccountingPage() {
   const [marginPage, setMarginPage] = useState(1);
   const [salesPage, setSalesPage] = useState(1);
 
+  // Debounce: only commit startDate/endDate into debouncedStart/debouncedEnd
+  // once the person has stopped changing them for DATE_DEBOUNCE_MS. Every
+  // keystroke/pick resets this timer, so picking a new start date and then
+  // immediately picking a new end date results in exactly one fetch with
+  // both dates applied, not two fetches (one stale, one correct).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedStart(startDate);
+      setDebouncedEnd(endDate);
+    }, DATE_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [startDate, endDate]);
+
   useEffect(() => {
     if (!dateRangeValid) return;
-    const filters = { startDate, endDate, branchId };
+    const filters = { startDate: debouncedStart, endDate: debouncedEnd, branchId };
     fetchSummary(filters);
     // TODO(BACKEND): item-margins and recent-sales endpoints don't yet
     // support real page/limit + total-count pagination, so we fetch a
@@ -433,7 +459,7 @@ export default function AccountingPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMarginPage(1);
     setSalesPage(1);
-  }, [fetchSummary, fetchMarginItems, fetchRecentSales, branchId, startDate, endDate, dateRangeValid]);
+  }, [fetchSummary, fetchMarginItems, fetchRecentSales, branchId, debouncedStart, debouncedEnd, dateRangeValid]);
 
   const marginTotalPages = Math.max(1, Math.ceil((marginItems?.length ?? 0) / PAGE_SIZE));
   const pagedMarginItems = useMemo(
@@ -460,10 +486,10 @@ export default function AccountingPage() {
 
   const handleExport = () => {
     const csv = buildAccountingCsv({
-      startDate, endDate, branchName: branch?.name ?? "All Branches",
+      startDate: debouncedStart, endDate: debouncedEnd, branchName: branch?.name ?? "All Branches",
       summary, marginItems, recentSales,
     });
-    downloadCsv(csv, `accounting_${startDate}_to_${endDate}.csv`);
+    downloadCsv(csv, `accounting_${debouncedStart}_to_${debouncedEnd}.csv`);
   };
 
   if (view === "edit" && activeItem) {
@@ -656,11 +682,11 @@ export default function AccountingPage() {
       {/* Daily stock movement */}
       <SectionCard title="DAILY STOCK MOVEMENT">
         <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 360 }}>
-          <ReadonlyField label={`Opening Stock (${startDate})`} loading={summaryLoading} value={fmt(summary?.stockMovement.openingStock)} />
+          <ReadonlyField label={`Opening Stock (${debouncedStart})`} loading={summaryLoading} value={fmt(summary?.stockMovement.openingStock)} />
           <ReadonlyField label="+ Purchases/ Deliveries" loading={summaryLoading} value={fmt(summary?.stockMovement.purchases)} />
           <ReadonlyField label="- COGS" loading={summaryLoading} value={fmt(summary?.stockMovement.cogs)} />
           <ReadonlyField label="- Wastage" loading={summaryLoading} value={fmt(summary?.stockMovement.wastage)} />
-          <ReadonlyField label={`Closing Stock (${endDate})`} loading={summaryLoading} value={fmt(summary?.stockMovement.closingStock)} />
+          <ReadonlyField label={`Closing Stock (${debouncedEnd})`} loading={summaryLoading} value={fmt(summary?.stockMovement.closingStock)} />
         </div>
       </SectionCard>
 

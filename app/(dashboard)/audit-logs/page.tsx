@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useBranch } from "../layout";
 import { useAuditLogStore } from "@/store/useAuditLogsStore";
 import { AuditLogExportFormat } from "@/types/audit-log.types";
 import { SkeletonText } from "@/components/ui/Skeleton";
@@ -57,6 +58,8 @@ const TD_STYLE: React.CSSProperties = {
 };
 
 export default function AuditLogsPage() {
+  const branch = useBranch();
+
   const {
     logs, logsTotal, logsLoading, logsError, fetchLogs,
     actionTypes, fetchActionTypes,
@@ -77,7 +80,12 @@ export default function AuditLogsPage() {
   }, [fetchActionTypes, fetchUsers]);
 
   useEffect(() => {
+    // branch.id scopes the query to AuditLog.branchId (see schema —
+    // branchId is optional there, so branch-agnostic events like
+    // vendor-level settings changes will still be excluded once a
+    // specific branch is selected, by design).
     fetchLogs({
+      branchId: branch.id,
       startDate: startDate || undefined,
       endDate: endDate || undefined,
       actionType: actionType || undefined,
@@ -85,10 +93,11 @@ export default function AuditLogsPage() {
       page,
       limit: PAGE_SIZE,
     });
-  }, [startDate, endDate, actionType, userId, page, fetchLogs]);
+  }, [branch, startDate, endDate, actionType, userId, page, fetchLogs]);
 
   const runExport = (format: AuditLogExportFormat) => {
     exportLogs({
+      branchId: branch.id,
       startDate: startDate || undefined,
       endDate: endDate || undefined,
       actionType: actionType || undefined,
@@ -102,7 +111,7 @@ export default function AuditLogsPage() {
   return (
     <div style={{ margin: "0 auto" }}>
       <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-        Foodies 1 LEKKI
+        {branch.name} Branch
       </p>
       <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
         AUDIT LOGS

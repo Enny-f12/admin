@@ -25,7 +25,7 @@ import {
     DeliveryAssignmentStatus,
     DeliveryZone,
 } from "@/types/delivery.types";
-import { useBranch, ALL_BRANCHES_ID } from "../layout";
+import { useBranch } from "../layout";
 
 /* ══════════════════════════════════════════
    TYPES
@@ -228,13 +228,10 @@ function ErrorState({ label, onRetry }: { label: string; onRetry: () => void }) 
 ══════════════════════════════════════════ */
 // CHANGED — branchId now threaded through both fetchPartners and
 // fetchPartnersSummary, sourced from useBranch() same as every other
-// branch-scoped tab this session. "All Branches" is sent through as-is
-// (undefined branchId, i.e. unfiltered) rather than blocked, since an
-// aggregate view across every branch's partner stats is a reasonable
-// thing to want here — unlike Morning Count/Reservation Policies, there's
-// no physical reason a partner overview can't span branches. Flag if
-// that assumption is wrong and this should be added to
-// BRANCH_REQUIRED_PREFIXES instead.
+// branch-scoped tab this session. "All Branches" no longer exists as a
+// selectable option (see app/(admin)/layout.tsx), so branch.id is
+// always the currently selected branch once the picker has made its
+// initial selection.
 function PartnersTab() {
     const partners = useDeliveryStore((s) => s.partners);
     const partnersLoading = useDeliveryStore((s) => s.partnersLoading);
@@ -251,18 +248,14 @@ function PartnersTab() {
     const fetchPartnersSummary = useDeliveryStore((s) => s.fetchPartnersSummary);
 
     const branch = useBranch();
-    // Sentinel never a real UUID — same convention as the dashboard's
-    // asBranchId guard, sent through as undefined so the backend gets
-    // no filter (aggregate) instead of a 400 on an invalid UUID.
-    const effectiveBranchId = branch.id && branch.id !== ALL_BRANCHES_ID ? branch.id : undefined;
 
     const [settingsTarget, setSettingsTarget] = useState<DeliveryPartner | null>(null);
     const [form, setForm] = useState({ commission: "", apiKey: "", webhookUrl: "", enabled: false, showKey: false });
 
     useEffect(() => {
-        fetchPartners(effectiveBranchId);
-        fetchPartnersSummary(effectiveBranchId);
-    }, [fetchPartners, fetchPartnersSummary, effectiveBranchId]);
+        fetchPartners(branch.id);
+        fetchPartnersSummary(branch.id);
+    }, [fetchPartners, fetchPartnersSummary, branch.id]);
 
     const list = partners ?? [];
 
@@ -296,7 +289,7 @@ function PartnersTab() {
         if (ok) setSettingsTarget(null);
     };
 
-    if (partnersError && !partners) return <ErrorState label="Could not load delivery partners." onRetry={() => fetchPartners(effectiveBranchId)} />;
+    if (partnersError && !partners) return <ErrorState label="Could not load delivery partners." onRetry={() => fetchPartners(branch.id)} />;
 
     const showSkeleton = partnersLoading && !partners;
 
@@ -428,10 +421,9 @@ function PartnersTab() {
    LIVE ORDERS TAB
 ══════════════════════════════════════════ */
 // CHANGED — branchId now threaded through fetchActiveDeliveries, sourced
-// from useBranch(). "All Branches" sent through as undefined (no
-// filter) — same reasoning as PartnersTab above; an ops-wide live board
-// showing every branch's active deliveries at once is a legitimate view,
-// not a per-branch-only operation like Morning Count.
+// from useBranch(). "All Branches" no longer exists as a selectable
+// option (see app/(admin)/layout.tsx), so this always scopes to the
+// currently selected branch.
 function LiveOrdersTab() {
     const activeDeliveries = useDeliveryStore((s) => s.activeDeliveries);
     const activeDeliveriesLoading = useDeliveryStore((s) => s.activeDeliveriesLoading);
@@ -439,18 +431,17 @@ function LiveOrdersTab() {
     const fetchActiveDeliveries = useDeliveryStore((s) => s.fetchActiveDeliveries);
 
     const branch = useBranch();
-    const effectiveBranchId = branch.id && branch.id !== ALL_BRANCHES_ID ? branch.id : undefined;
 
     const [detail, setDetail] = useState<AdminDelivery | null>(null);
 
     useEffect(() => {
-        fetchActiveDeliveries(effectiveBranchId);
-    }, [fetchActiveDeliveries, effectiveBranchId]);
+        fetchActiveDeliveries(branch.id);
+    }, [fetchActiveDeliveries, branch.id]);
 
     const orders = activeDeliveries ?? [];
     const stepIndex = (status: DeliveryAssignmentStatus) => DELIVERY_STEPS.indexOf(STATUS_DISPLAY[status]);
 
-    if (activeDeliveriesError && !activeDeliveries) return <ErrorState label="Could not load active deliveries." onRetry={() => fetchActiveDeliveries(effectiveBranchId)} />;
+    if (activeDeliveriesError && !activeDeliveries) return <ErrorState label="Could not load active deliveries." onRetry={() => fetchActiveDeliveries(branch.id)} />;
 
     const showSkeleton = activeDeliveriesLoading && !activeDeliveries;
 

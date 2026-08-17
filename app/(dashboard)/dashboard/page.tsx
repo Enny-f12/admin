@@ -57,7 +57,7 @@ const QUICK_ACTIONS: {
 }[] = [
   { label: "Accounting", icon: Calculator, bg: "rgba(225,11,28,0.08)", color: "#E10B1C", href: "/accounting" },
   { label: "Audit Logs", icon: FileSearch, bg: "rgba(37,99,235,0.08)", color: "#2563EB", href: "/audit-logs" },
-  { label: "User & Roles", icon: ShieldCheck, bg: "rgba(22,163,74,0.08)", color: "#16A34A", href: null },
+  { label: "User & Roles", icon: ShieldCheck, bg: "rgba(22,163,74,0.08)", color: "#16A34A", href: "/staff" },
   { label: "Settings", icon: Settings, bg: "rgba(252,208,99,0.15)", color: "#a07a00", href: "/settings" },
 ];
 

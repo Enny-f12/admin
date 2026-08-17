@@ -126,34 +126,11 @@ const BranchContext = createContext<BranchContextValue>({
 });
 export const useBranch = () => useContext(BranchContext);
 
-// Sentinel id for the "All Branches" picker entry. Never a real UUID, so
-// it naturally falls through the branchId-must-be-a-UUID guard in
-// useDashboardStore.ts (asBranchId) and results in no branchId being
-// sent — i.e. genuinely unfiltered, not a special value the backend has
-// to know about. Exported so branch-scoped pages that CAN'T meaningfully
-// operate across every branch at once (e.g. Morning Count, Reservations)
-// can check against it and refuse to fire a request with it as the
-// outletId/branchId.
-export const ALL_BRANCHES_ID = "ALL_BRANCHES";
-
-// Routes that operate on one physical branch and can't meaningfully run
-// against "All Branches" — e.g. you can't physically count stock at
-// every location simultaneously, and reservation policies/tables are
-// configured per-branch, not globally. "All Branches" is hidden from the
-// picker while on any of these. This list is a UX nicety on top of the
-// real fix, which is each such page guarding against ALL_BRANCHES_ID
-// itself (see morning-count/page.tsx's hasUsableBranch, and
-// reservations/page.tsx's PoliciesTab) — hiding the option here doesn't
-// protect a page that arrives at this route already having "All
-// Branches" selected from elsewhere.
-//
-// Stock Inventory is deliberately NOT in this list — unlike Morning
-// Count, it legitimately supports an aggregate view (the table renders
-// one column per branch when "All Branches" is selected).
-const BRANCH_REQUIRED_PREFIXES = [
-  "/inventory/morning-count",
-  "/reservations",
-];
+// Note: an "All Branches" pseudo-selection previously existed here as a
+// sentinel id. It has been removed — the branch picker now only ever
+// offers the individual branches returned by GET /auth/branches, and a
+// picker always has a real branch selected (defaulting to their last
+// login branch, or the first branch returned, if none was set).
 const SB = {
   bg:          "#FFFFFF",
   border:      "#E4E0D8",
@@ -211,7 +188,6 @@ export default function DashboardLayout({
   const [branchOpen, setBranchOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const pathname = usePathname();
-  const requiresSpecificBranch = BRANCH_REQUIRED_PREFIXES.some((p) => pathname.startsWith(p));
   const sidebarW = collapsed ? 72 : 240;
 
   const { branches, branchesLoading, fetchBranches, user, loginBranchId } = useAuthStore();
@@ -221,7 +197,7 @@ export default function DashboardLayout({
   //  1. assignedBranchId present → locked to that branch, full stop,
   //     regardless of role.
   //  2. assignedBranchId is null AND role is SUPER_ADMIN → free to pick
-  //     any branch, including an explicit "All Branches".
+  //     any branch.
   // Anything else (no assignedBranchId, not SUPER_ADMIN) is a data
   // inconsistency — treated as "no branch assigned" below rather than
   // silently defaulting to something.
@@ -235,9 +211,10 @@ export default function DashboardLayout({
 
   // Initial selection. Locked users get their assigned branch straight
   // away. Pickers default to whatever branch they chose on the login
-  // screen (loginBranchId) if any, otherwise "All Branches" — this
-  // doesn't need to wait on `branches` to load since ALL_BRANCHES_ID and
-  // loginBranchId are both already known synchronously.
+  // screen (loginBranchId) if any, otherwise the first branch returned
+  // by the backend once `branches` has loaded — there's no longer an
+  // "All Branches" fallback to reach for synchronously, so this waits
+  // on the branch list for the no-loginBranchId case.
   useEffect(() => {
     if (selectedBranchId !== null) return;
     if (!canPickBranch) {
@@ -247,9 +224,16 @@ export default function DashboardLayout({
       }
       return;
     }
-     
-    setSelectedBranchId(loginBranchId ?? ALL_BRANCHES_ID);
-  }, [canPickBranch, assignedBranchId, loginBranchId, selectedBranchId]);
+    if (loginBranchId) {
+       
+      setSelectedBranchId(loginBranchId);
+      return;
+    }
+    if (branches && branches.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedBranchId(branches[0].id);
+    }
+  }, [canPickBranch, assignedBranchId, loginBranchId, selectedBranchId, branches]);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -259,10 +243,7 @@ export default function DashboardLayout({
 
   const effectiveBranchId = canPickBranch ? selectedBranchId : assignedBranchId;
 
-  const selectedBranch =
-    effectiveBranchId === ALL_BRANCHES_ID
-      ? { id: ALL_BRANCHES_ID, name: "All Branches" }
-      : branches?.find((b) => b.id === effectiveBranchId) ?? null;
+  const selectedBranch = branches?.find((b) => b.id === effectiveBranchId) ?? null;
 
   const branchContextValue: BranchContextValue = {
     ...(selectedBranch
@@ -720,9 +701,10 @@ export default function DashboardLayout({
 
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
             {/* Branch selector — a picker (canPickBranch) sees the full
-                list plus "All Branches". Everyone else is pinned to
-                their own assignedBranchId and sees a static,
-                non-interactive chip — no dropdown, nothing to switch. */}
+                list of individual branches returned by the backend.
+                Everyone else is pinned to their own assignedBranchId and
+                sees a static, non-interactive chip — no dropdown,
+                nothing to switch. */}
             <div style={{ position: "relative" }}>
               {canPickBranch ? (
                 <button
@@ -795,51 +777,6 @@ export default function DashboardLayout({
                     zIndex: 60,
                   }}
                 >
-                  {/* "All Branches" — a real, explicit option, not just
-                      an implied default. Selecting it sends no branchId
-                      filter downstream (see ALL_BRANCHES_ID above).
-                      Hidden entirely on routes that require one specific
-                      branch (see BRANCH_REQUIRED_PREFIXES) — the real
-                      protection lives in each such page's own guard, this
-                      is just not offering the option in the first place. */}
-                  {!requiresSpecificBranch && (
-                    <button
-                      onClick={() => {
-                        setSelectedBranchId(ALL_BRANCHES_ID);
-                        setBranchOpen(false);
-                      }}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        width: "100%",
-                        padding: "10px 14px",
-                        background:
-                          effectiveBranchId === ALL_BRANCHES_ID ? "var(--color-bg-soft)" : "#fff",
-                        border: "none",
-                        borderBottom: "1px solid var(--color-border)",
-                        cursor: "pointer",
-                        fontSize: "0.85rem",
-                        fontWeight: 600,
-                        fontFamily: "var(--font-sans)",
-                        color: "var(--color-text)",
-                        textAlign: "left",
-                      }}
-                      onMouseEnter={(e) =>
-                        ((e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)")
-                      }
-                      onMouseLeave={(e) =>
-                        ((e.currentTarget as HTMLButtonElement).style.background =
-                          effectiveBranchId === ALL_BRANCHES_ID ? "var(--color-bg-soft)" : "#fff")
-                      }
-                    >
-                      All Branches
-                      {effectiveBranchId === ALL_BRANCHES_ID && (
-                        <Check size={14} strokeWidth={2} color="var(--color-primary)" />
-                      )}
-                    </button>
-                  )}
-
                   {(branches ?? []).map((b) => {
                     const selected = b.id === effectiveBranchId;
                     return (
