@@ -20,7 +20,7 @@ import {
 import { useReservationsStore } from "@/store/useReservationsStore";
 import { ReservationPolicies } from "@/types/reservations.types";
 import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
-import { useBranch, ALL_BRANCHES_ID } from "../layout";
+import { useBranch } from "../layout";
 
 // NOTE: Waitlist and Reminders tabs below are UNCHANGED — they still
 // point at speculative endpoints, since nothing in the real
@@ -29,12 +29,13 @@ import { useBranch, ALL_BRANCHES_ID } from "../layout";
 //
 // CHANGED — PoliciesTab and the page header no longer hardcode
 // "Foodies 1 [Lekki]" — both now read branch.name from useBranch(), same
-// source as the sidebar and AvailabilityTab. PoliciesTab also now guards
-// against ALL_BRANCHES_ID the same way morning-count/page.tsx does:
-// reservation policies are inherently per-branch (you can't set one set
-// of booking rules for every branch at once), so fetchPolicies is no
-// longer called with the sentinel id, and a friendly empty-state message
-// is shown instead of letting a bad request fire. This mirrors the
+// source as the sidebar and AvailabilityTab. PoliciesTab also guards
+// against an empty/not-yet-loaded branch id: reservation policies are
+// inherently per-branch (you can't set one set of booking rules for
+// every branch at once), and now that "All Branches" no longer exists
+// as a selectable option (see app/(admin)/layout.tsx), this guard just
+// covers the brief window before a picker's initial branch selection
+// lands, rather than a real "All Branches" state. This mirrors the
 // backend fix for the find-then-create race in
 // OperationsService.getReservationPolicies (now an atomic upsert).
 
@@ -152,12 +153,11 @@ function PoliciesTab() {
 
   // Reservation policies are per-branch — you can't set one set of
   // booking rules for every branch simultaneously (same reasoning as
-  // Morning Count). Guard mirrors morning-count/page.tsx's
-  // hasUsableBranch pattern: don't fire fetchPolicies with the
-  // "All Branches" sentinel, and show a friendly empty state instead of
-  // letting a bad/misleading request go out.
-  const isAllBranches = branch.id === ALL_BRANCHES_ID;
-  const hasUsableBranch = Boolean(branch.id) && !isAllBranches;
+  // Morning Count). "All Branches" no longer exists as a selectable
+  // option (see app/(admin)/layout.tsx), so this guard now just covers
+  // the brief window before a picker's initial branch selection lands,
+  // rather than a real "All Branches" state.
+  const hasUsableBranch = Boolean(branch.id);
 
   const [form, setForm] = useState<ReservationPolicies | null>(null);
 
@@ -181,11 +181,11 @@ function PoliciesTab() {
     if (policies) setForm(policies);
   }, [policies]);
 
-  if (isAllBranches) {
+  if (!hasUsableBranch) {
     return (
       <div className="card" style={{ padding: 40, textAlign: "center" }}>
         <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-          Reservation policies are per-branch — pick a specific branch above to view or edit them.
+          Loading your branch...
         </p>
       </div>
     );

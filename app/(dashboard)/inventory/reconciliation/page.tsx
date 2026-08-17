@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useReconciliationStore } from "@/store/useReconciliationStore";
 import { ReconciliationItem } from "@/types/reconciliation.types";
-import { useBranch, ALL_BRANCHES_ID } from "../../layout";
+import { useBranch } from "../../layout";
 
 const CATEGORIES = ["All Categories", "Pastry", "Swallow", "Soup", "Intercontinental", "Protein", "Drinks"];
 const PAGE_SIZE = 6;
@@ -31,13 +31,12 @@ export default function ReconciliationPage() {
   } = useReconciliationStore();
 
   // Hard branch guard, same pattern as Morning Count and Drinks &
-  // Fridge: physical counting is inherently single-location -- you
-  // can't reconcile "All Branches" at once. Previously this page had no
-  // branch awareness at all (confirmed via Network tab: no branchId on
-  // any request, unlike the sibling Food Inventory tab).
+  // Fridge: physical counting is inherently single-location. "All
+  // Branches" no longer exists as a selectable option (see
+  // app/(admin)/layout.tsx), so this now just guards the brief window
+  // before a picker's initial branch selection lands.
   const branch = useBranch();
-  const isAllBranches = branch.id === ALL_BRANCHES_ID;
-  const hasUsableBranch = Boolean(branch.id) && !isAllBranches;
+  const hasUsableBranch = Boolean(branch.id);
 
   const [countDate, setCountDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [conductedBy, setConductedBy] = useState("");
@@ -90,8 +89,7 @@ export default function ReconciliationPage() {
         <div className="card">
           <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.9rem", color: "var(--color-text)" }}>
             <AlertTriangle size={16} strokeWidth={1.8} color="#a07a00" />
-            Reconciliation is per-branch -- pick a specific branch from the selector above to compare
-            physical counts against system records.
+            Loading your branch...
           </p>
         </div>
       </div>

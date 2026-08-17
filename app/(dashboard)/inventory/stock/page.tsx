@@ -20,7 +20,7 @@ import {
 import { useEffect } from "react";
 import { useStockStore } from "@/store/useStockStore";
 import { StockItem, StockStatus } from "@/types/stock.types";
-import { useBranch, ALL_BRANCHES_ID } from "../../layout";
+import { useBranch } from "../../layout";
 
 type ModalItem = {
   itemId: string;
@@ -144,7 +144,9 @@ export default function StockInventoryPage() {
   // sidebar picker in app/(admin)/layout.tsx writes to. This page no
   // longer keeps its own branchId state or re-derives role logic:
   // canPickBranch is resolved once, upstream, from assignedBranchId +
-  // role, and this page just renders differently based on it.
+  // role, and this page just renders differently based on it. "All
+  // Branches" no longer exists as a selectable option, so branch.id is
+  // always a real branch once the picker has made its initial selection.
   const branch = useBranch();
 
   const [branchOpen, setBranchOpen] = useState(false);
@@ -162,15 +164,10 @@ export default function StockInventoryPage() {
   }, [fetchBranches, fetchSuppliers]);
 
   useEffect(() => {
-    const resolvedBranchId = branch.id === ALL_BRANCHES_ID ? undefined : branch.id;
-    fetchItems(resolvedBranchId, search || undefined);
-    fetchLowStockAlerts(resolvedBranchId);
+    fetchItems(branch.id, search || undefined);
+    fetchLowStockAlerts(branch.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branch.id, search]);
-
-  // Only ever rendered for supers (branch.canPickBranch) — a locked
-  // manager's UI never reads this since the dropdown itself doesn't render.
-  const branchOptions = [{ id: ALL_BRANCHES_ID, name: "All Branches" }, ...branch.branches];
 
   const totalItems = items?.length ?? 0;
   const lowStockCount = items?.filter((i) => i.status === "Low Stock").length ?? 0;
@@ -202,7 +199,7 @@ export default function StockInventoryPage() {
       {!showThresholds ? (
         <>
           <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--color-heading)" }}>
-            {branch.id === ALL_BRANCHES_ID ? "Stock levels across all locations" : `Stock levels — ${branch.name}`}
+            {`Stock levels — ${branch.name}`}
           </h2>
 
           {/* Stat cards */}
@@ -270,7 +267,7 @@ export default function StockInventoryPage() {
                       boxShadow: "0 8px 24px rgba(0,0,0,0.10)", overflow: "hidden", zIndex: 60,
                     }}
                   >
-                    {branchOptions.map((b) => (
+                    {branch.branches.map((b) => (
                       <button
                         key={b.id}
                         onClick={() => { branch.setBranch(b); setBranchOpen(false); }}
@@ -354,9 +351,7 @@ export default function StockInventoryPage() {
                     <thead>
                       <tr>
                         <th>Item</th>
-                        {branch.id === ALL_BRANCHES_ID
-                          ? (branches ?? []).map((b) => <th key={b.id}>{b.name}</th>)
-                          : <th>Quantity</th>}
+                        <th>Quantity</th>
                         <th>Total</th>
                         <th>Status</th>
                         <th>Actions</th>
@@ -369,32 +364,24 @@ export default function StockInventoryPage() {
                             <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{item.name}</p>
                             <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{item.unit}</p>
                           </td>
-                          {branch.id === ALL_BRANCHES_ID
-                            ? (branches ?? []).map((b) => (
-                                <td key={b.id}>
-                                  {item.quantities.find((q) => q.branchId === b.id)?.quantity ?? "-"}
-                                </td>
-                              ))
-                            : (
-                                <td>
-                                  {item.quantities.find((q) => q.branchId === branch.id)?.quantity ?? item.total}
-                                </td>
-                              )}
+                          <td>
+                            {item.quantities.find((q) => q.branchId === branch.id)?.quantity ?? item.total}
+                          </td>
                           <td style={{ fontWeight: 600 }}>{item.total}</td>
                           <td><StatusBadge status={item.status} /></td>
                           <td>
                             <div style={{ display: "flex", gap: 6 }}>
                               <IconButton
                                 icon={<Plus size={14} strokeWidth={2} />}
-                                onClick={() => setAdjustItem(toModalItem(item, branch.id === ALL_BRANCHES_ID ? undefined : branch.id))}
+                                onClick={() => setAdjustItem(toModalItem(item, branch.id))}
                               />
                               <IconButton
                                 icon={<ArrowLeftRight size={14} strokeWidth={1.8} />}
-                                onClick={() => setTransferItem(toModalItem(item, branch.id === ALL_BRANCHES_ID ? undefined : branch.id))}
+                                onClick={() => setTransferItem(toModalItem(item, branch.id))}
                               />
                               <IconButton
                                 icon={<PackageMinus size={14} strokeWidth={1.8} />}
-                                onClick={() => setRemoveItem(toModalItem(item, branch.id === ALL_BRANCHES_ID ? undefined : branch.id))}
+                                onClick={() => setRemoveItem(toModalItem(item, branch.id))}
                               />
                             </div>
                           </td>

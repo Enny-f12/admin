@@ -22,7 +22,7 @@ import {
 import { useKitchenStore } from "@/store/useKitchenStore";
 import { OrderSource, KitchenDisplaySettings } from "@/types/kitchen.types";
 import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
-import { useBranch, ALL_BRANCHES_ID } from "../layout";
+import { useBranch } from "../layout";
 
 const SOURCE_ICON: Record<OrderSource, React.ElementType> = {
   "Mobile App": Smartphone,
@@ -44,11 +44,11 @@ export default function KitchenDisplayPage() {
 
   // Hard branch guard, same pattern as Drinks & Fridge, Reconciliation,
   // and Walk-in: a kitchen display is physically one screen at one
-  // branch -- there's no meaningful "All Branches" kitchen queue.
-  // Previously this page had no branch awareness at all.
+  // branch. "All Branches" no longer exists as a selectable option (see
+  // app/(admin)/layout.tsx), so this now just guards the brief window
+  // before a picker's initial branch selection lands.
   const branch = useBranch();
-  const isAllBranches = branch.id === ALL_BRANCHES_ID;
-  const hasUsableBranch = Boolean(branch.id) && !isAllBranches;
+  const hasUsableBranch = Boolean(branch.id);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 30000);
@@ -99,8 +99,7 @@ export default function KitchenDisplayPage() {
         <div className="card">
           <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.9rem", color: "var(--color-text)" }}>
             <AlertTriangle size={16} strokeWidth={1.8} color="#a07a00" />
-            Kitchen Display is per-branch -- pick a specific branch from the selector above to view the live
-            order queue and display settings.
+            Loading your branch...
           </p>
         </div>
       ) : view === "live" ? (

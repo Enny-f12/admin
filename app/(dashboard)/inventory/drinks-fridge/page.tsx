@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useDrinksStore } from "@/store/useDrinkStore";
 import { DrinksItem, SupplierType } from "@/types/drinks.types";
-import { useBranch, ALL_BRANCHES_ID } from "../../layout";
+import { useBranch } from "../../layout";
 
 type Tab = "receive" | "transfer" | "threshold";
 
@@ -29,8 +29,11 @@ export default function DrinksFridgePage() {
   const branch = useBranch();
   const { fetchItems, fetchSuppliers, fetchThresholds, fetchSummary } = useDrinksStore();
 
-  const isAllBranches = branch.id === ALL_BRANCHES_ID;
-  const hasUsableBranch = Boolean(branch.id) && !isAllBranches;
+  // "All Branches" no longer exists as a selectable option (see
+  // app/(admin)/layout.tsx) — a picker always resolves to a real branch
+  // id once branches have loaded, so this just guards the brief window
+  // before that initial selection lands.
+  const hasUsableBranch = Boolean(branch.id);
 
   // branchId sent on every call below now that each branch is confirmed
   // to have its own warehouse/fridge stock. Pending backend request:
@@ -53,8 +56,7 @@ export default function DrinksFridgePage() {
         <div className="card">
           <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.9rem", color: "var(--color-text)" }}>
             <AlertTriangle size={16} strokeWidth={1.8} color="#a07a00" />
-            Drinks & Fridge is per-branch -- pick a specific branch from the selector above to receive
-            deliveries, transfer stock, or manage fridge thresholds.
+            Loading your branch...
           </p>
         </div>
       ) : (

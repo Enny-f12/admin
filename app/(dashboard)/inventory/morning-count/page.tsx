@@ -11,7 +11,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useMorningCountStore } from "@/store/useMorningCountStore";
-import { useBranch, ALL_BRANCHES_ID } from "../../layout";
+import { useBranch } from "../../layout";
 
 const STATUS_CLASS: Record<string, string> = {
   Updated: "badge badge-green",
@@ -56,10 +56,11 @@ export default function MorningCountPage() {
   const [editPackSize, setEditPackSize] = useState("");
 
   // Morning Count is inherently single-branch — you physically count
-  // stock at one location, so "All Branches" isn't a valid context here
-  // the way it is for the dashboard's aggregate cards.
-  const isAllBranches = branch.id === ALL_BRANCHES_ID;
-  const hasUsableBranch = Boolean(branch.id) && !isAllBranches;
+  // stock at one location. "All Branches" no longer exists as a
+  // selectable option (see app/(admin)/layout.tsx), so this now just
+  // guards the brief window before a picker's initial branch selection
+  // lands.
+  const hasUsableBranch = Boolean(branch.id);
 
   useEffect(() => {
     if (hasUsableBranch) {
@@ -322,13 +323,13 @@ export default function MorningCountPage() {
           <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Loading…</p>
         )}
 
-        {!sheetLoading && isAllBranches && (
+        {!sheetLoading && !hasUsableBranch && (
           <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            Morning count is per-branch — pick a specific branch from the switcher above to view or start a count sheet.
+            Loading your branch...
           </p>
         )}
 
-        {!sheetLoading && !isAllBranches && (sheetError || !sheet || !category) && (
+        {!sheetLoading && hasUsableBranch && (sheetError || !sheet || !category) && (
           <p style={{ padding: 20, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
             No count sheet available
           </p>

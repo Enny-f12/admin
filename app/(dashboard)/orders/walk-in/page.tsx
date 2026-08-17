@@ -21,7 +21,7 @@ import { useOrderStore } from "@/store/useOrderStore";
 import { OrderStatus, OrderType, AdminOrder } from "@/types/orders";
 import { WalkInCustomer, MenuItem } from "@/types/walk-in.types";
 import { SkeletonText, SkeletonTableRows } from "@/components/ui/Skeleton";
-import { useBranch, ALL_BRANCHES_ID } from "../../layout";
+import { useBranch } from "../../layout";
 
 type Tab = "create" | "edit" | "blacklist";
 type CartItem = MenuItem & { qty: number };
@@ -65,9 +65,12 @@ function formatMoney(value: string | number | null | undefined) {
 export default function WalkInPage() {
   const [tab, setTab] = useState<Tab>("create");
 
+  // Hard branch guard: manual orders operate on one physical branch.
+  // "All Branches" no longer exists as a selectable option (see
+  // app/(admin)/layout.tsx), so this now just guards the brief window
+  // before a picker's initial branch selection lands.
   const branch = useBranch();
-  const isAllBranches = branch.id === ALL_BRANCHES_ID;
-  const hasUsableBranch = Boolean(branch.id) && !isAllBranches;
+  const hasUsableBranch = Boolean(branch.id);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, position: "relative" }}>
@@ -85,8 +88,7 @@ export default function WalkInPage() {
         <div className="card">
           <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.9rem", color: "var(--color-text)" }}>
             <AlertTriangle size={16} strokeWidth={1.8} color="#a07a00" />
-            Manual orders are per-branch -- pick a specific branch from the selector above to create or edit
-            walk-in orders and manage the blacklist.
+            Loading your branch...
           </p>
         </div>
       ) : (

@@ -23,7 +23,7 @@ import {
 import { useOrderStore } from "@/store/useOrderStore";
 import { OrderStatus, AdminOrder } from "@/types/orders";
 import { SkeletonText, SkeletonTableRows } from "@/components/ui/Skeleton";
-import { useBranch, ALL_BRANCHES_ID } from "../layout";
+import { useBranch } from "../layout";
 
 const STATUS_OPTIONS: ("All Status" | OrderStatus)[] = [
   "All Status", "RECEIVED", "PREPARING", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY", "DELIVERED", "COMPLETED", "CANCELLED",
@@ -105,25 +105,21 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1);
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
 
-  // Soft branch scoping, same pattern as Stock Inventory: "All Branches"
-  // still works and shows every branch's orders together (with a Branch
-  // column so it's clear which is which), a specific branch filters.
-  // Previously this page had no branch awareness at all, despite
-  // AdminOrderFilters and orderService already supporting branchId.
+  // Branch scoping, same pattern as Stock Inventory: filters orders to
+  // the selected branch. "All Branches" no longer exists as a
+  // selectable option (see app/(admin)/layout.tsx), so this page always
+  // scopes to one branch and no longer needs a Branch column.
   const branch = useBranch();
   const [branchOpen, setBranchOpen] = useState(false);
-  const branchOptions = [{ id: ALL_BRANCHES_ID, name: "All Branches" }, ...branch.branches];
-  const resolvedBranchId = branch.id === ALL_BRANCHES_ID ? undefined : branch.id;
-  const showBranchColumn = branch.id === ALL_BRANCHES_ID;
 
   const { orders, ordersLoading: isLoading, ordersError: isError, fetchOrders } = useOrderStore();
 
   useEffect(() => {
     fetchOrders({
       ...(statusFilter !== "All Status" ? { status: statusFilter } : {}),
-      branchId: resolvedBranchId,
+      branchId: branch.id,
     });
-  }, [statusFilter, resolvedBranchId, fetchOrders]);
+  }, [statusFilter, branch.id, fetchOrders]);
 
   const filtered = (orders ?? []).filter((o) => {
     const q = search.toLowerCase();
@@ -176,7 +172,7 @@ export default function OrdersPage() {
                     boxShadow: "0 8px 24px rgba(0,0,0,0.10)", overflow: "hidden", zIndex: 60,
                   }}
                 >
-                  {branchOptions.map((b) => (
+                  {branch.branches.map((b) => (
                     <button
                       key={b.id}
                       onClick={() => { branch.setBranch(b); setBranchOpen(false); setPage(1); }}
@@ -297,21 +293,17 @@ export default function OrdersPage() {
           <table>
             <thead>
               <tr>
-                {[
-                  "Order ID", "Customer",
-                  ...(showBranchColumn ? ["Branch"] : []),
-                  "Items", "Total Amount", "Type", "Status", "Time", "Action",
-                ].map((c) => (
+                {["Order ID", "Customer", "Items", "Total Amount", "Type", "Status", "Time", "Action"].map((c) => (
                   <th key={c}>{c}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {isLoading && <SkeletonTableRows rows={PAGE_SIZE} columns={showBranchColumn ? 9 : 8} />}
+              {isLoading && <SkeletonTableRows rows={PAGE_SIZE} columns={8} />}
 
               {!isLoading && isError && (
                 <tr>
-                  <td colSpan={showBranchColumn ? 9 : 8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>Could not load orders</td>
+                  <td colSpan={8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>Could not load orders</td>
                 </tr>
               )}
 
@@ -319,7 +311,6 @@ export default function OrdersPage() {
                 <tr key={order.id}>
                   <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{order.orderNumber}</td>
                   <td>{order.customer?.fullName ?? order.guestName ?? "-"}</td>
-                  {showBranchColumn && <td>{order.branch?.name ?? "-"}</td>}
                   <td>{order.items.length} {order.items.length === 1 ? "Item" : "Items"}</td>
                   <td style={{ fontWeight: 500, color: "var(--color-text)" }}>{formatMoney(order.totalAmount)}</td>
                   <td>{formatOrderType(order.orderType)}</td>
@@ -344,7 +335,7 @@ export default function OrdersPage() {
 
               {!isLoading && !isError && paged.length === 0 && (
                 <tr>
-                  <td colSpan={showBranchColumn ? 9 : 8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
+                  <td colSpan={8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
                     No orders match this filter.
                   </td>
                 </tr>

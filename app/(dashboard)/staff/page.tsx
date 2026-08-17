@@ -6,7 +6,7 @@ import {
   Plus,
   Search,
   SquarePen,
-  UserX,
+  Trash2,
   X,
   ChevronDown,
   Check,
@@ -335,6 +335,68 @@ function StaffModal({
 }
 
 /* ══════════════════════════════════════════
+   DELETE CONFIRMATION MODAL
+══════════════════════════════════════════ */
+function DeleteConfirmModal({
+  staff,
+  onClose,
+  onConfirm,
+  isDeleting,
+}: {
+  staff: StaffMember;
+  onClose: () => void;
+  onConfirm: () => void;
+  isDeleting: boolean;
+}) {
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 110, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{ background: "var(--color-bg-card)", borderRadius: 16, width: "100%", maxWidth: 400, padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+          <h3 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 600, color: "var(--color-heading)" }}>
+            Delete staff member?
+          </h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4 }}>
+            <X size={16} strokeWidth={1.8} />
+          </button>
+        </div>
+
+        <p style={{ margin: 0, fontSize: "0.855rem", fontWeight: 400, color: "var(--color-text-secondary)", lineHeight: 1.5 }}>
+          This will remove <strong style={{ color: "var(--color-text)" }}>{staff.name}</strong> from active staff. This action cannot be undone from here.
+        </p>
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            onClick={onClose}
+            style={{
+              flex: 1, padding: "10px 0", borderRadius: 8, border: "1px solid var(--color-border)",
+              background: "none", cursor: "pointer", fontSize: "0.855rem", fontWeight: 500,
+              color: "var(--color-text-secondary)", fontFamily: "var(--font-sans)",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isDeleting}
+            style={{
+              flex: 1, padding: "10px 0", borderRadius: 8, border: "none",
+              background: "var(--color-primary)", cursor: isDeleting ? "default" : "pointer",
+              fontSize: "0.855rem", fontWeight: 600, color: "#fff", fontFamily: "var(--font-sans)",
+              opacity: isDeleting ? 0.7 : 1,
+            }}
+          >
+            {isDeleting ? "Deleting…" : "Delete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════
    MAIN PAGE
 ══════════════════════════════════════════ */
 export default function StaffManagementPage() {
@@ -344,12 +406,24 @@ export default function StaffManagementPage() {
   const [search, setSearch] = useState("");
   const [modalOpen, setModal] = useState(false);
   const [editTarget, setEdit] = useState<StaffMember | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<StaffMember | null>(null);
 
   const { staff, isLoading, isError, isSaving, isDeleting, fetchStaff, createStaff, updateStaff, deleteStaff } =
     useStaffStore();
 
+  // CHANGED — was fetchStaff({ status: "ACTIVE" }), filtering the whole
+  // roster down to active staff regardless of branch. Per request: this
+  // screen should filter by branch, not status, so we now fetch the full
+  // roster once and do the branch scoping client-side below (status is
+  // still shown as a column, just no longer used to hide rows).
+  //
+  // TODO(BACKEND): there's no branchId filter on GET /admin/staff yet —
+  // we're filtering client-side against StaffMember.branches (an array
+  // of branch NAMES per the sample payload) until one exists. If/when
+  // it's added, something like GET /admin/staff?branchId=<uuid> would
+  // let us drop the client-side filter and the name-matching below.
   useEffect(() => {
-    fetchStaff({ status: "ACTIVE" });
+    fetchStaff({});
   }, [fetchStaff]);
 
   // Real branch list (same source as the branch switcher) — replaces the
@@ -364,10 +438,18 @@ export default function StaffManagementPage() {
   const branches = authBranches ?? [];
 
   const list = staff ?? [];
-  // Client-side safety net — status param to fetchStaff isn't confirmed
-  // to do anything server-side, so filter here too in case it's ignored.
+  // Branch scoping: show a staff member if the currently selected branch
+  // is one of theirs. Staff with more than one branch (e.g. a manager
+  // covering two locations) naturally show up under each of those
+  // branches this way — same list, filtered differently per branch,
+  // rather than being tied to a single "home" branch.
+  //
+  // A staff member with an empty branches array (e.g. Chukwuemeka Obi,
+  // SUPER_ADMIN, in the sample data) is treated as unrestricted / visible
+  // from every branch, since an empty list reads as "no branch scoping"
+  // rather than "scoped to nothing" for that role.
   const filtered = list
-    .filter((s) => s.status === "ACTIVE")
+    .filter((s) => s.branches.length === 0 || s.branches.includes(branch.name))
     .filter((s) =>
       s.name.toLowerCase().includes(search.toLowerCase()) ||
       s.role.toLowerCase().includes(search.toLowerCase())
@@ -406,12 +488,18 @@ export default function StaffManagementPage() {
     }
   };
 
-  // Confirmed via live testing: the DELETE endpoint deactivates (status
-  // ACTIVE -> OFFLINE) rather than removing the record — the list refetch
-  // that follows (see useStaffStore) naturally drops them since we fetch
-  // status: "ACTIVE" only.
-  const handleDeactivate = async (s: StaffMember) => {
-    await deleteStaff(s.id);
+  // Confirmed via live testing: the DELETE endpoint actually deactivates
+  // (status ACTIVE -> OFFLINE) rather than removing the record — flagging
+  // this to the backend team. Until/unless that changes, "Delete" here is
+  // the button label users see, but under the hood it's still calling the
+  // same deactivate-only endpoint, so the row stays visible with an
+  // Offline badge afterward rather than disappearing. Confirmed via a
+  // modal below since this is a destructive-looking, irreversible-from-
+  // this-screen action either way.
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    const ok = await deleteStaff(deleteTarget.id);
+    if (ok) setDeleteTarget(null);
   };
 
   return (
@@ -483,7 +571,7 @@ export default function StaffManagementPage() {
                 {!isLoading && !isError && filtered.length === 0 && (
                   <tr>
                     <td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
-                      No staff found
+                      No staff found for this branch
                     </td>
                   </tr>
                 )}
@@ -492,7 +580,7 @@ export default function StaffManagementPage() {
                       <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{s.name}</td>
                       <td style={{ fontWeight: 400, color: "var(--color-text-secondary)" }}>{roleLabel(s.role)}</td>
                       <td style={{ fontWeight: 400, color: "var(--color-text-secondary)", fontSize: "0.82rem" }}>
-                        {s.branches.length > 0 ? s.branches.join(", ") : "—"}
+                        {s.branches.length > 0 ? s.branches.join(", ") : "All branches"}
                       </td>
                       <td>
                         <span
@@ -520,15 +608,15 @@ export default function StaffManagementPage() {
                             <SquarePen size={15} strokeWidth={1.8} />
                           </button>
                           <button
-                            onClick={() => handleDeactivate(s)}
+                            onClick={() => setDeleteTarget(s)}
                             disabled={isDeleting}
-                            title="Deactivate staff member"
-                            aria-label={`Deactivate ${s.name}`}
+                            title="Delete staff member"
+                            aria-label={`Delete ${s.name}`}
                             style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6, transition: "color 0.15s" }}
                             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-primary)")}
                             onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-muted)")}
                           >
-                            <UserX size={15} strokeWidth={1.8} />
+                            <Trash2 size={15} strokeWidth={1.8} />
                           </button>
                         </div>
                       </td>
@@ -547,6 +635,15 @@ export default function StaffManagementPage() {
           onClose={() => setModal(false)}
           onSave={handleSave}
           isSaving={isSaving}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteConfirmModal
+          staff={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
+          isDeleting={isDeleting}
         />
       )}
     </>
