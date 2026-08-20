@@ -6,8 +6,10 @@ import {
   MenuCategory,
   MenuItem,
   GetItemsFilters,
+  GetCategoriesFilters,
   CreateMenuItemPayload,
   UpdateMenuItemPayload,
+  CreateCategoryPayload,
 } from '@/types/menu';
 
 function extractErrorMessage(error: unknown, fallback: string) {
@@ -28,12 +30,14 @@ interface MenuState {
   isUpdating: boolean;
   isDeleting: boolean;
   isTogglingAvailability: boolean;
+  isCreatingCategory: boolean;
 
   // keeps items in sync with whatever filter was last applied,
   // so mutations know how to refetch correctly
   lastFilters: GetItemsFilters;
 
-  fetchCategories: () => Promise<void>;
+  fetchCategories: (filters?: GetCategoriesFilters) => Promise<void>;
+  addCategory: (payload: CreateCategoryPayload) => Promise<MenuCategory | null>;
   fetchItems: (filters?: GetItemsFilters) => Promise<void>;
   createItem: (payload: CreateMenuItemPayload, files: File[]) => Promise<boolean>;
   updateItem: (id: string, payload: UpdateMenuItemPayload) => Promise<boolean>;
@@ -56,17 +60,38 @@ export const useMenuStore = create<MenuState>((set, get) => ({
   isUpdating: false,
   isDeleting: false,
   isTogglingAvailability: false,
+  isCreatingCategory: false,
 
   lastFilters: {},
 
-  fetchCategories: async () => {
+  fetchCategories: async (filters = {}) => {
     set({ categoriesLoading: true, categoriesError: false });
     try {
-      const categories = await menuService.getCategories();
+      const categories = await menuService.getCategories(filters);
       set({ categories, categoriesLoading: false });
     } catch (error) {
       set({ categoriesLoading: false, categoriesError: true });
       toast.error(extractErrorMessage(error, 'Could not load categories'));
+    }
+  },
+
+  // Inline quick-add from the Add/Edit Dish modal. Appends the new category
+  // to the in-memory list and auto-selects it rather than refetching —
+  // one POST response is enough, no need to round-trip fetchCategories.
+  addCategory: async (payload) => {
+    set({ isCreatingCategory: true });
+    try {
+      const category = await menuService.createCategory(payload);
+      set((state) => ({
+        isCreatingCategory: false,
+        categories: state.categories ? [...state.categories, category] : [category],
+      }));
+      toast.success('Category added');
+      return category;
+    } catch (error) {
+      set({ isCreatingCategory: false });
+      toast.error(extractErrorMessage(error, 'Could not add category'));
+      return null;
     }
   },
 

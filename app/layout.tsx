@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
 import { Toaster } from 'sonner';
 import './globals.css';
@@ -10,7 +10,6 @@ const figtree = localFont({
     { path: '../public/fonts/Figtree-Medium.ttf',    weight: '500', style: 'normal' },
     { path: '../public/fonts/Figtree-SemiBold.ttf',  weight: '600', style: 'normal' },
     { path: '../public/fonts/Figtree-Bold.ttf',      weight: '700', style: 'normal' },
-  
   ],
   variable: '--font-figtree',
   display: 'swap',
@@ -40,6 +39,11 @@ export const metadata: Metadata = {
     index: false,
     follow: false,
   },
+  manifest: "/manifest.json",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#000000",
 };
 
 export default function RootLayout({
@@ -51,7 +55,6 @@ export default function RootLayout({
     <html lang="en" data-theme="light" data-scroll-behavior="smooth" className={`${figtree.variable} h-full antialiased`}>
       <body className="h-full">
         <Providers>
-          
           {children}
           <Toaster position="top-right" richColors />
         </Providers>

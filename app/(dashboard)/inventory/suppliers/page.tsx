@@ -410,8 +410,13 @@ function AddSupplierModal({
 
   return (
     <ModalShell title="Add New Supplier" onClose={onClose} width={460}>
-      <Field label="Name">
-        <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+      <Field label="Brand Name">
+        <input
+          className="input"
+          placeholder="Enter brand name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
       </Field>
 
       <Field label="Type">

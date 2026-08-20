@@ -38,6 +38,7 @@ import {
   X,
 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
+import PushSetup from "@/components/PushSetup";
 import { useAuthStore } from "@/store/useAuthStore";
 
 /* ── Nav structure ── */
@@ -105,9 +106,9 @@ export interface SelectedBranch {
 }
 
 export interface BranchContextValue extends SelectedBranch {
-  /** True only for a SUPER_ADMIN with no assignedBranchId — see the two-check
-   *  logic below. Any page that wants to render its own dropdown should gate
-   *  on this instead of re-deriving role/assignedBranchId itself. */
+  /** True only for SUPER_ADMIN — see canPickBranch logic below. Any page
+   *  that wants to render its own dropdown should gate on this instead of
+   *  re-deriving role itself. */
   canPickBranch: boolean;
   /** Full branch list, for pages that render their own dropdown (mirrors
    *  what the sidebar picker already uses). Empty for locked users. */
@@ -193,26 +194,23 @@ export default function DashboardLayout({
   const { branches, branchesLoading, fetchBranches, user, loginBranchId } = useAuthStore();
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
 
-  // Two checks, in this order:
-  //  1. assignedBranchId present → locked to that branch, full stop,
-  //     regardless of role.
-  //  2. assignedBranchId is null AND role is SUPER_ADMIN → free to pick
-  //     any branch.
-  // Anything else (no assignedBranchId, not SUPER_ADMIN) is a data
-  // inconsistency — treated as "no branch assigned" below rather than
-  // silently defaulting to something.
+  // Access rule:
+  //  - SUPER_ADMIN always gets full branch-picker access, regardless of
+  //    whether they also have an assignedBranchId set.
+  //  - Everyone else is locked to their own assignedBranchId, whatever
+  //    that is. No vendorId check involved anywhere here.
   const assignedBranchId = user?.assignedBranchId ?? null;
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
-  const canPickBranch = !assignedBranchId && isSuperAdmin;
+  const canPickBranch = isSuperAdmin;
 
   useEffect(() => {
     fetchBranches();
   }, [fetchBranches]);
 
   // Initial selection. Locked users get their assigned branch straight
-  // away. Pickers default to whatever branch they chose on the login
-  // screen (loginBranchId) if any, otherwise the first branch returned
-  // by the backend once `branches` has loaded — there's no longer an
+  // away. Pickers (SUPER_ADMIN) default to whatever branch they chose on
+  // the login screen (loginBranchId) if any, otherwise the first branch
+  // returned by the backend once `branches` has loaded — there's no
   // "All Branches" fallback to reach for synchronously, so this waits
   // on the branch list for the no-loginBranchId case.
   useEffect(() => {
@@ -269,6 +267,7 @@ export default function DashboardLayout({
 
   return (
     <div className="app-shell">
+      <PushSetup />
       <style jsx global>{`
         .skeleton-shimmer {
           background: linear-gradient(
