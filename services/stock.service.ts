@@ -29,9 +29,8 @@ export const stockService = {
   adjustStock: (payload: AdjustStockPayload) =>
     apiClient.post<StockItem>('/admin/stock/adjust', payload).then((r) => r.data),
 
-  // Page-level restock flow — same response shape as adjustStock
-  // (updated StockItem for the affected branch) so the store can reuse
-  // mergeItemBranch for both.
+  // Registers a brand-new item — confirmed against the live Swagger
+  // schema for POST /admin/stock/add (see AddStockPayload comment).
   addStock: (payload: AddStockPayload) =>
     apiClient.post<StockItem>('/admin/stock/add', payload).then((r) => r.data),
 

@@ -8,12 +8,6 @@ import {
   AddToBlacklistPayload,
 } from '@/types/walk-in.types';
 
-// branchId added to every call -- walk-in order creation is physically
-// tied to one branch (order.branchId is required server-side, confirmed
-// by the Prisma create trace), so unlike Stock/Orders this whole flow
-// needs a specific branch, not an "All Branches" aggregate. Pending
-// backend confirmation these params are actually accepted -- same open
-// request as stock/drinks/suppliers/reconciliation.
 export const walkInService = {
   searchCustomers: (search: string, branchId?: string) =>
     apiClient
@@ -33,8 +27,6 @@ export const walkInService = {
       .post<{ id: string; orderNumber: string }>('/admin/walk-in/orders', payload)
       .then((r) => r.data),
 
-  // 500 on backend as of last check -- request shape matches Swagger exactly
-  // (no params). Server-side bug, not a client-side schema mismatch.
   getBlacklist: (branchId?: string) =>
     apiClient
       .get<BlacklistEntry[]>('/admin/walk-in/blacklist', { params: { branchId } })

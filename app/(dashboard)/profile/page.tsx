@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Mail,
   Phone,
@@ -160,7 +161,8 @@ function PasswordField({
 }
 
 function ChangePasswordModal({ onClose }: { onClose: () => void }) {
-  const { changePassword } = useAuthStore();
+  const { changePassword, logout } = useAuthStore();
+  const router = useRouter();
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -179,12 +181,22 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
     }
     setPwMismatch(false);
     setIsChangingPassword(true);
+
     // /auth/change-password — authenticated, separate from the code-based
     // /auth/reset-password used by the public forgot-password flow.
     // useAuthStore.changePassword already handles the success/error toast.
     const ok = await changePassword({ currentPassword, newPassword });
+
+    if (ok) {
+      // Matches the modal's own warning copy below — sign out everywhere,
+      // including this device, immediately after a successful change.
+      await logout();
+      onClose();
+      router.push("/login");
+      return;
+    }
+
     setIsChangingPassword(false);
-    if (ok) onClose();
   };
 
   const canSubmitPassword =

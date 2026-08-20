@@ -150,27 +150,28 @@ export const useStockStore = create<StockState>((set, get) => ({
     }
   },
 
+  // Registers a brand-new item (name + unit are user-entered in
+  // AddStockView, itemId is always sent as null — see AddStockPayload
+  // comment in stock.types.ts). No existing row to merge into, so this
+  // appends the item the backend hands back, guarding against a
+  // duplicate in case it somehow already exists.
   addStock: async (payload) => {
     set({ isAddingStock: true });
     try {
-      const updatedItem = await stockService.addStock(payload);
+      const newItem = await stockService.addStock(payload);
       set((state) => ({
         isAddingStock: false,
         items: state.items
-          ? state.items.some((i) => i.id === updatedItem.id)
-            ? state.items.map((i) => (i.id === updatedItem.id ? mergeItemBranch(i, updatedItem) : i))
-            // Item wasn't in the currently-loaded list (e.g. it had zero
-            // stock everywhere and was filtered out, or this is the
-            // first time it's been stocked at this branch) — append it
-            // rather than silently dropping the update.
-            : [...state.items, updatedItem]
-          : state.items,
+          ? state.items.some((i) => i.id === newItem.id)
+            ? state.items
+            : [...state.items, newItem]
+          : [newItem],
       }));
-      toast.success('Stock added.');
+      toast.success('New item added to inventory.');
       return true;
     } catch (error) {
       set({ isAddingStock: false });
-      toast.error(extractErrorMessage(error, 'Could not add stock.'));
+      toast.error(extractErrorMessage(error, 'Could not add item.'));
       return false;
     }
   },

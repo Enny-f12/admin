@@ -234,9 +234,10 @@ export default function StockInventoryPage() {
           {/* Top action row — Add Stock and Threshold Configuration are
               both page-level navigation (full-view swaps, same pattern
               as ThresholdView below), so they belong here together.
-              Adjust / Transfer / Remove stay off this row: those are
-              item-scoped actions and belong on each table row, not as
-              standalone buttons guessing at "the first item". */}
+              Adjust / Transfer / Remove stay off this row: those act on
+              an item that's already tracked, and belong on each table
+              row — Add Stock is specifically for items that AREN'T
+              tracked anywhere yet (see AddStockView below). */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
             <button
               className="btn btn-primary"
@@ -413,16 +414,19 @@ export default function StockInventoryPage() {
         </>
       ) : showAddStock ? (
         <AddStockView
-          items={items ?? []}
           suppliers={suppliers ?? []}
           branch={branch}
           isSubmitting={isAddingStock}
           onBack={() => setShowAddStock(false)}
           onOpenSupplier={() => setSupplierOpen(true)}
-          supplierModalOpen={supplierOpen}
           onSubmit={async (form) => {
             const ok = await addStock({
-              itemId: form.itemId,
+              name: form.name,
+              unit: form.unit,
+              // Not a user-facing field — the schema requires it, but
+              // there's no existing item to reference on a create call.
+              // See AddStockPayload in stock.types.ts.
+              itemId: null,
               branchId: form.branchId,
               quantity: form.qty,
               costPerUnit: form.cost,
@@ -883,23 +887,30 @@ function AddSupplierModal({
 }
 
 /* ── Add Stock view — full page, same pattern as ThresholdView ──
-   Reached only from the "Add Stock" button on the main inventory page
-   and returns there the same way (Back link), rather than being a
-   modal. Item picker searches the already-loaded `items` list (the
-   same data backing the main table) so there's no separate menu-search
-   endpoint dependency here. */
+   Registers a BRAND NEW item that has never been tracked at any
+   branch before: name, unit, initial quantity, cost, reason, and
+   optionally supplier/invoice for the first delivery. This is
+   deliberately NOT an item picker — Adjust Stock (the per-row Plus
+   icon) already covers "add quantity to an item I'm already
+   tracking," so duplicating that here would just be a worse version
+   of the same flow.
+
+   Per the live Swagger schema for POST /admin/stock/add, `itemId` is
+   part of the request body — but it is intentionally NOT a field
+   here. There's no existing item to reference on a create call, so
+   the parent page sends it as `null` without any corresponding UI
+   control. Don't add an item-id input to this form. */
 function AddStockView({
-  items, suppliers, branch, isSubmitting, onBack, onOpenSupplier, supplierModalOpen, onSubmit,
+  suppliers, branch, isSubmitting, onBack, onOpenSupplier, onSubmit,
 }: {
-  items: StockItem[];
   suppliers: { id: string; name: string }[];
   branch: { id: string; name: string; canPickBranch: boolean; branches: { id: string; name: string }[] };
   isSubmitting: boolean;
   onBack: () => void;
   onOpenSupplier: () => void;
-  supplierModalOpen: boolean;
   onSubmit: (form: {
-    itemId: string;
+    name: string;
+    unit: string;
     branchId: string;
     qty: number;
     cost: number;
@@ -908,8 +919,8 @@ function AddStockView({
     reason: string;
   }) => void;
 }) {
-  const [itemQuery, setItemQuery] = useState("");
-  const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
+  const [name, setName] = useState("");
+  const [unit, setUnit] = useState("pcs");
   const [branchId, setBranchId] = useState(branch.id);
   const [supplierId, setSupplierId] = useState("");
   const [invoice, setInvoice] = useState("");
@@ -917,21 +928,18 @@ function AddStockView({
   const [cost, setCost] = useState(0);
   const [reason, setReason] = useState("New delivery received from supplier");
 
-  const filteredItems = itemQuery.trim()
-    ? items.filter((i) => i.name.toLowerCase().includes(itemQuery.trim().toLowerCase()))
-    : [];
-
-  const currentAtBranch =
-    selectedItem?.quantities.find((q) => q.branchId === branchId)?.quantity ?? 0;
-  const newStock = currentAtBranch + qty;
   const totalCost = qty * cost;
 
-  const canSubmit = !!selectedItem && !!branchId && qty > 0 && reason.trim().length > 0 && !isSubmitting;
+  const canSubmit =
+    name.trim().length > 0 &&
+    unit.trim().length > 0 &&
+    !!branchId &&
+    qty > 0 &&
+    reason.trim().length > 0 &&
+    !isSubmitting;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, position: "relative" }}>
-      {/* Real navigation, not a decoy button — same pattern as
-          ThresholdView's back link below. */}
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <button
         onClick={onBack}
         style={{
@@ -943,70 +951,33 @@ function AddStockView({
         ← Back to Stock Inventory
       </button>
 
-      <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--color-heading)" }}>
-        Add Stock
-      </h2>
+      <div>
+        <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--color-heading)" }}>
+          Add Stock
+        </h2>
+        <p style={{ margin: "4px 0 0", fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+          Register a new item that isn&apos;t tracked in inventory yet. To restock an existing item, use the Adjust action on its row instead.
+        </p>
+      </div>
 
       <div className="card">
-        <Field label="Item">
-          {selectedItem ? (
-            <div
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "10px 14px", borderRadius: 8, background: "var(--color-bg-soft)",
-              }}
-            >
-              <div>
-                <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{selectedItem.name}</p>
-                <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{selectedItem.unit}</p>
-              </div>
-              <button
-                onClick={() => { setSelectedItem(null); setItemQuery(""); }}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-primary)", fontSize: "0.8rem", fontWeight: 600, fontFamily: "var(--font-sans)" }}
-              >
-                Change
-              </button>
-            </div>
-          ) : (
-            <div style={{ position: "relative" }}>
-              <Search size={16} strokeWidth={1.8} color="var(--color-text-muted)" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
-              <input
-                className="input"
-                placeholder="Search item to restock..."
-                value={itemQuery}
-                onChange={(e) => setItemQuery(e.target.value)}
-                style={{ width: "100%", paddingLeft: 38 }}
-                autoFocus
-              />
-              {filteredItems.length > 0 && (
-                <div
-                  style={{
-                    marginTop: 6, border: "1px solid var(--color-border)", borderRadius: 8,
-                    maxHeight: 220, overflowY: "auto", background: "#fff",
-                  }}
-                >
-                  {filteredItems.slice(0, 8).map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => { setSelectedItem(item); setCost(item.costPerUnit || 0); }}
-                      style={{
-                        display: "block", width: "100%", textAlign: "left", padding: "10px 14px",
-                        background: "none", border: "none", borderBottom: "1px solid var(--color-border)",
-                        fontSize: "0.85rem", color: "var(--color-text)", cursor: "pointer", fontFamily: "var(--font-sans)",
-                      }}
-                    >
-                      {item.name} <span style={{ color: "var(--color-text-muted)" }}>· {item.unit}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {itemQuery.trim() && filteredItems.length === 0 && (
-                <p style={{ margin: "6px 0 0", fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-                  No matching items in this branch&apos;s inventory.
-                </p>
-              )}
-            </div>
-          )}
+        <Field label="Item name">
+          <input
+            className="input"
+            placeholder="e.g. Basmati Rice"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+          />
+        </Field>
+
+        <Field label="Unit">
+          <input
+            className="input"
+            placeholder="e.g. kg, pcs, bottles"
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+          />
         </Field>
 
         {branch.canPickBranch && (
@@ -1019,7 +990,7 @@ function AddStockView({
           </Field>
         )}
 
-        <Field label="Supplier">
+        <Field label="Supplier (optional)">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <select className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} style={{ flex: 1, minWidth: 160 }}>
               <option value="">Select supplier</option>
@@ -1040,30 +1011,19 @@ function AddStockView({
           </div>
         </Field>
 
-        <Field label="Invoice Number">
+        <Field label="Invoice Number (optional)">
           <input className="input" placeholder="INV-12345....." value={invoice} onChange={(e) => setInvoice(e.target.value)} />
         </Field>
 
-        {selectedItem && (
-          <p style={{ margin: "0 0 6px", fontSize: "0.85rem", color: "var(--color-text)" }}>
-            Current at {branch.branches.find((b) => b.id === branchId)?.name ?? branch.name}: <strong>{currentAtBranch} {selectedItem.unit}</strong>
-          </p>
-        )}
-        <div style={{ marginBottom: 16 }}>
+        <Field label="Initial quantity">
           <Stepper value={qty} onChange={setQty} />
-        </div>
-
-        {selectedItem && (
-          <p style={{ margin: "0 0 16px", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>
-            New Stock: {newStock} {selectedItem.unit}
-          </p>
-        )}
+        </Field>
 
         <Field label="Cost price per unit">
           <input className="input" type="number" value={cost} onChange={(e) => setCost(Number(e.target.value) || 0)} />
         </Field>
 
-        <p style={{ margin: "-6px 0 16px", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>
+        <p style={{ margin: "-6px 0 20px", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>
           Total cost: ₦{totalCost.toLocaleString()}
         </p>
 
@@ -1077,22 +1037,12 @@ function AddStockView({
             className="btn btn-primary"
             style={{ padding: "9px 18px", fontSize: "0.85rem", opacity: canSubmit ? 1 : 0.6 }}
             disabled={!canSubmit}
-            onClick={() =>
-              selectedItem &&
-              onSubmit({ itemId: selectedItem.id, branchId, qty, cost, supplierId, invoice, reason })
-            }
+            onClick={() => onSubmit({ name, unit, branchId, qty, cost, supplierId, invoice, reason })}
           >
-            {isSubmitting ? "Adding…" : "Add Stock"}
+            {isSubmitting ? "Adding…" : "Add Item"}
           </button>
         </div>
       </div>
-
-      {supplierModalOpen && (
-        // Rendered by the parent page (shares the same AddSupplierModal
-        // instance used elsewhere) — this component just triggers it via
-        // onOpenSupplier and doesn't own the modal itself.
-        <></>
-      )}
     </div>
   );
 }
@@ -1139,10 +1089,6 @@ function ThresholdView({ onBack }: { onBack: () => void }) {
 
   return (
     <>
-      {/* Real navigation, not a decoy button row — this view is reached
-          from one place (Threshold Configuration) and should return
-          there the same way, not fake Adjust/Transfer/Remove buttons
-          that just call onBack regardless of which was clicked. */}
       <button
         onClick={onBack}
         style={{

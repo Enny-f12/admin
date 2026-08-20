@@ -8,22 +8,26 @@ import {
   UpdateMenuItemPayload,
   CreateCategoryPayload,
   UpdateCategoryPayload,
+  GetCategoriesFilters,
 } from '@/types/menu';
 
 export const menuService = {
   // ── Public ──
-  getCategories: () =>
-    apiClient.get<MenuCategory[]>('/menu/categories').then((r) => r.data),
+  getCategories: (filters: GetCategoriesFilters = {}) =>
+  apiClient
+    .get<MenuCategory[]>('/menu/categories', { params: { branchId: filters.branchId } })
+    .then((r) => r.data),
 
-  getItems: (filters: GetItemsFilters = {}) =>
-    apiClient
-      .get<MenuItem[]>('/menu/items', {
-        params: {
-          categoryId: filters.categoryId,
-          dietaryTags: filters.dietaryTags?.join(','),
-        },
-      })
-      .then((r) => r.data),
+getItems: (filters: GetItemsFilters = {}) =>
+  apiClient
+    .get<MenuItem[]>('/menu/items', {
+      params: {
+        categoryId: filters.categoryId,
+        branchId: filters.branchId,
+        dietaryTags: filters.dietaryTags?.join(','),
+      },
+    })
+    .then((r) => r.data),
 
   getItem: (id: string) =>
     apiClient.get<MenuItem>(`/menu/items/${id}`).then((r) => r.data),

@@ -37,6 +37,10 @@ const PAGE_SIZE = 10;
 
 export default function MenuPage() {
   const branch = useBranch();
+  // Both /menu/items and /menu/categories accept branchId as an optional
+  // query filter (confirmed via Swagger) — pass it through when available
+  // so the admin only sees categories/items relevant to the active branch.
+  const branchId = branch?.id;
   const vendorId = useAuthStore((s) => s.user?.vendorId);
 
   const [search, setSearch] = useState("");
@@ -53,6 +57,11 @@ export default function MenuPage() {
   // Images already saved on the item (edit flow only).
   const [existingImages, setExistingImages] = useState<MenuItemImage[]>([]);
   const [removingImageId, setRemovingImageId] = useState<string | null>(null);
+  // Inline "quick-add category" state, shown inside the Add/Edit Dish modal
+  // so the user doesn't have to leave the flow to create a missing category.
+  const [showCategoryForm, setShowCategoryForm] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryDesc, setNewCategoryDesc] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ── Live data ──
@@ -65,7 +74,9 @@ export default function MenuPage() {
     isCreating,
     isUpdating,
     isDeleting,
+    isCreatingCategory,
     fetchCategories,
+    addCategory,
     fetchItems,
     createItem,
     updateItem,
@@ -75,12 +86,15 @@ export default function MenuPage() {
   } = useMenuStore();
 
   useEffect(() => {
-    fetchCategories();
-  }, [fetchCategories]);
+    fetchCategories(branchId ? { branchId } : {});
+  }, [branchId, fetchCategories]);
 
   useEffect(() => {
-    fetchItems(categoryFilter !== "all" ? { categoryId: categoryFilter } : {});
-  }, [categoryFilter, fetchItems]);
+    fetchItems({
+      ...(categoryFilter !== "all" ? { categoryId: categoryFilter } : {}),
+      ...(branchId ? { branchId } : {}),
+    });
+  }, [categoryFilter, branchId, fetchItems]);
 
   const categoryList = categories ?? [];
   const categoryName = (id: string) => categoryList.find((c) => c.id === id)?.name ?? "—";
@@ -104,12 +118,19 @@ export default function MenuPage() {
 
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  const resetCategoryForm = () => {
+    setShowCategoryForm(false);
+    setNewCategoryName("");
+    setNewCategoryDesc("");
+  };
+
   const openAdd = () => {
     setEditItem(null);
     setForm(EMPTY_FORM);
     setNewFiles([]);
     setNewPreviews([]);
     setExistingImages([]);
+    resetCategoryForm();
     setModalOpen(true);
   };
 
@@ -125,6 +146,7 @@ export default function MenuPage() {
     setNewFiles([]);
     setNewPreviews([]);
     setExistingImages(item.images ?? []);
+    resetCategoryForm();
     setModalOpen(true);
   };
 
@@ -182,6 +204,32 @@ export default function MenuPage() {
         newFiles
       );
       if (success) setModalOpen(false);
+    }
+  };
+
+  // Quick-add category, inline from the modal. Only asks for name +
+  // optional description — parentId/imageUrl/sortOrder/isActive are left
+  // to whatever a dedicated category-management screen ends up being;
+  // this is meant to unblock "I forgot to make a category first", not
+  // replace full category CRUD.
+  const handleAddCategory = async () => {
+    if (!vendorId) {
+      toast.error("No vendor found on this account — try logging in again");
+      return;
+    }
+    if (!newCategoryName.trim()) {
+      toast.error("Category name is required");
+      return;
+    }
+    const category = await addCategory({
+      vendorId,
+      name: newCategoryName.trim(),
+      slug: slugify(newCategoryName),
+      description: newCategoryDesc.trim() || undefined,
+    });
+    if (category) {
+      setForm((f) => ({ ...f, categoryId: category.id }));
+      resetCategoryForm();
     }
   };
 
@@ -522,30 +570,79 @@ export default function MenuPage() {
                   onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
                 />
               </div>
+
+              {/* Category — select or inline quick-add */}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
-                  Category <span style={{ color: "var(--color-primary)" }}>*</span>
-                </label>
-                <div style={{ position: "relative" }}>
-                  <select
-                    className="input appearance-none"
-                    value={form.categoryId}
-                    onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
-                    style={{ paddingRight: "2.5rem", color: "var(--color-text)" }}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
+                    Category <span style={{ color: "var(--color-primary)" }}>*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => (showCategoryForm ? resetCategoryForm() : setShowCategoryForm(true))}
+                    style={{ background: "none", border: "none", color: "var(--color-primary)", fontSize: "0.76rem", fontWeight: 500, cursor: "pointer", padding: 0 }}
                   >
-                    <option value="" disabled>Select category</option>
-                    {categoryList.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    size={14}
-                    strokeWidth={1.8}
-                    style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--color-text-muted)" }}
-                  />
+                    {showCategoryForm ? "Cancel" : "+ New"}
+                  </button>
                 </div>
+
+                {!showCategoryForm ? (
+                  <div style={{ position: "relative" }}>
+                    <select
+                      className="input appearance-none"
+                      value={form.categoryId}
+                      onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
+                      style={{ paddingRight: "2.5rem", color: "var(--color-text)" }}
+                    >
+                      <option value="" disabled>
+                        {categoryList.length === 0 ? "No categories yet" : "Select category"}
+                      </option>
+                      {categoryList.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={14}
+                      strokeWidth={1.8}
+                      style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--color-text-muted)" }}
+                    />
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>
+                    Fill in the form below to create one.
+                  </p>
+                )}
               </div>
             </div>
+
+            {showCategoryForm && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 12, border: "1px solid var(--color-border)", borderRadius: 10, background: "var(--color-bg-soft)" }}>
+                <p style={{ margin: 0, fontSize: "0.78rem", fontWeight: 500, color: "var(--color-text)" }}>
+                  New category
+                </p>
+                <input
+                  className="input"
+                  placeholder="Category name"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                />
+                <input
+                  className="input"
+                  placeholder="Description (optional)"
+                  value={newCategoryDesc}
+                  onChange={(e) => setNewCategoryDesc(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleAddCategory}
+                  disabled={isCreatingCategory}
+                  style={{ justifyContent: "center", padding: "8px", fontSize: "0.82rem", opacity: isCreatingCategory ? 0.6 : 1 }}
+                >
+                  {isCreatingCategory ? "Adding…" : "Add category"}
+                </button>
+              </div>
+            )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
