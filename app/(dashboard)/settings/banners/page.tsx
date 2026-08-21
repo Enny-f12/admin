@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import Image from "next/image";
+import { toast } from "sonner";
 import {
   Plus, Trash2, SquarePen, UploadCloud, CalendarDays, Eye, Check,
 } from "lucide-react";
@@ -15,6 +16,32 @@ const EMPTY_BANNER_FORM: BannerFormData = {
   title: "", subtitle: "", ctaText: "", ctaLink: "", startDate: "", endDate: "", active: true, imageFile: null,
 };
 
+const MAX_IMAGE_MB = 5;
+
+// Backend returns dates as full ISO strings (e.g. "2026-08-16T00:00:00.000Z").
+// <input type="date"> only accepts the "YYYY-MM-DD" portion, so slicing is
+// enough here — no Date() round-trip, which is what causes off-by-one-day
+// bugs in timezones behind UTC.
+function toInputDate(iso: string) {
+  return iso ? iso.slice(0, 10) : "";
+}
+
+// For display, parse the Y/M/D parts directly instead of `new Date(iso)`.
+// Going through Date() interprets a date-only string as UTC midnight, and
+// formatting that in a local timezone behind UTC rolls it back a day —
+// that's the "ooz"-looking date bug. Parsing the parts avoids the TZ step
+// entirely.
+function formatDisplayDate(iso: string) {
+  if (!iso) return "—";
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return "—";
+  return new Date(y, m - 1, d).toLocaleDateString("en-NG", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 export default function BannersPage() {
   const { banners, bannersLoading, bannersError, fetchBanners, createBanner, updateBanner, deleteBanner, isSavingBanner } = useSettingsStore();
 
@@ -25,26 +52,75 @@ export default function BannersPage() {
   const [success, setSuccess] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Tracks whether previewUrl is a local blob: URL we created (and must
+  // revoke) vs. a remote Cloudinary URL from an existing banner.
+  const localPreviewRef = useRef(false);
 
   useEffect(() => {
     fetchBanners();
   }, [fetchBanners]);
 
-  const openAdd = () => { setEditBanner(null); setForm(EMPTY_BANNER_FORM); setPreviewUrl(""); setModalOpen(true); };
+  // Revoke any local preview blob on unmount so we don't leak it.
+  useEffect(() => {
+    return () => {
+      if (localPreviewRef.current && previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const openAdd = () => {
+    if (localPreviewRef.current && previewUrl) URL.revokeObjectURL(previewUrl);
+    localPreviewRef.current = false;
+    setEditBanner(null);
+    setForm(EMPTY_BANNER_FORM);
+    setPreviewUrl("");
+    setModalOpen(true);
+  };
+
   const openEdit = (b: Banner) => {
+    if (localPreviewRef.current && previewUrl) URL.revokeObjectURL(previewUrl);
+    localPreviewRef.current = false;
     setEditBanner(b);
-    setForm({ title: b.title, subtitle: b.subtitle, ctaText: b.ctaText, ctaLink: b.ctaLink, startDate: b.startDate, endDate: b.endDate, active: b.active, imageFile: null });
-    setPreviewUrl(b.imageUrl);
+    setForm({
+      title: b.title,
+      subtitle: b.subtitle,
+      ctaText: b.ctaText,
+      ctaLink: b.ctaLink,
+      startDate: toInputDate(b.startDate),
+      endDate: toInputDate(b.endDate),
+      active: b.active,
+      imageFile: null,
+    });
+    setPreviewUrl(b.imageUrl); // remote Cloudinary URL — not ours to revoke
     setModalOpen(true);
   };
 
   const handleFile = (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please choose an image file");
+      return;
+    }
+    if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
+      toast.error(`Image must be under ${MAX_IMAGE_MB}MB`);
+      return;
+    }
+    if (localPreviewRef.current && previewUrl) URL.revokeObjectURL(previewUrl);
+    localPreviewRef.current = true;
     setForm((f) => ({ ...f, imageFile: file }));
     setPreviewUrl(URL.createObjectURL(file));
   };
 
   const handleSave = async () => {
-    if (!form.title) return;
+    if (!form.title.trim()) {
+      toast.error("Title is required");
+      return;
+    }
+    // Create requires an image (nothing to fall back to); edit can keep
+    // the existing Cloudinary image if the user didn't pick a new one.
+    if (!editBanner && !form.imageFile) {
+      toast.error("Please add a banner image");
+      return;
+    }
+
     if (editBanner) {
       const ok = await updateBanner(editBanner.id, form);
       if (ok) setModalOpen(false);
@@ -86,7 +162,6 @@ export default function BannersPage() {
 
         {!bannersLoading && (bannersError || !banners?.length) && (
           <p style={{ padding: 20, margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/banners not implemented — see request doc #1 */}
             No banners configured
           </p>
         )}
@@ -107,7 +182,8 @@ export default function BannersPage() {
               <p style={{ margin: 0, fontSize: "0.78rem", fontWeight: 400, color: "var(--color-text-muted)" }}>{b.subtitle}</p>
               <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 5 }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
-                  <CalendarDays size={11} strokeWidth={1.8} />{b.startDate} - {b.endDate}
+                  <CalendarDays size={11} strokeWidth={1.8} />
+                  {formatDisplayDate(b.startDate)} – {formatDisplayDate(b.endDate)}
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
                   <Eye size={11} strokeWidth={1.8} />{b.clicks.toLocaleString()} clicks
@@ -138,7 +214,9 @@ export default function BannersPage() {
           onClose={() => setModalOpen(false)}
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>Banner Image</label>
+            <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
+              Banner Image {!editBanner && <span style={{ color: "var(--color-primary)" }}>*</span>}
+            </label>
             <div
               onClick={() => fileRef.current?.click()}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -159,8 +237,11 @@ export default function BannersPage() {
                   </>
               }
             </div>
+            <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
+              JPG or PNG, up to {MAX_IMAGE_MB}MB{editBanner ? " — leave blank to keep the current image" : ""}.
+            </p>
             <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

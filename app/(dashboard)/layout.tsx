@@ -36,6 +36,8 @@ import {
   ClipboardList,
   Menu,
   X,
+  BadgePercent,
+  Star,
 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
 import PushSetup from "@/components/PushSetup";
@@ -75,6 +77,8 @@ const NAV_SECTIONS = [
       { label: "Menu", href: "/menu", icon: UtensilsCrossed },
       { label: "Customers", href: "/customers", icon: Users },
       { label: "Staff", href: "/staff", icon: UserCog },
+      { label: "Promo Codes", href: "/promo-codes", icon: BadgePercent },
+{ label: "Reviews", href: "/reviews", icon: Star },
     ],
   },
   {
