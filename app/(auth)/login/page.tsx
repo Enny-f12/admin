@@ -119,13 +119,40 @@ export default function LoginPage() {
         >
           <div className="w-full max-w-sm flex flex-col gap-8">
             <div className="card flex flex-col gap-6">
-              <div className="flex flex-col gap-1 text-center">
-                <h1 className="text-xl font-bold" style={{ color: "var(--color-primary)" }}>
-                  Admin Dashboard
-                </h1>
-                <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-                  Sign in to manage your restaurant
-                </p>
+              {/* Logo — same file as the admin sidebar (/logo/foodies1.png),
+                  placed inside the card itself rather than only on the left
+                  carousel panel, since that panel is hidden below the `lg`
+                  breakpoint (`hidden lg:flex` above). Without this, mobile
+                  and tablet users would see zero branding above the form. */}
+              <div className="flex flex-col items-center gap-5">
+                {/* fill + object-fit:contain instead of fixed width/height
+                    props — the previous version guessed the source file's
+                    native aspect ratio (96x35, a wide/short ratio based on
+                    how it's used in the sidebar), but the actual file looks
+                    closer to square/tall (stacked wordmark over badge).
+                    Guessing wrong forces Next.js to squish it to match the
+                    wrong ratio, which is why it rendered differently — not
+                    just smaller — at different screen sizes. This box
+                    approach doesn't need to know the real dimensions: it
+                    scales to fit and letterboxes rather than distorting. */}
+                <div className="lg:hidden" style={{ position: "relative", width: 140, height: 64 }}>
+                  <Image
+                    src="/logo/foodies1.png"
+                    alt="Foodies Hot & Spicy"
+                    fill
+                    sizes="140px"
+                    style={{ objectFit: "contain" }}
+                    priority
+                  />
+                </div>
+                <div className="flex flex-col gap-1 text-center">
+                  <h1 className="text-xl font-bold" style={{ color: "var(--color-primary)" }}>
+                    Admin Dashboard
+                  </h1>
+                  <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+                    Sign in to manage your restaurant
+                  </p>
+                </div>
               </div>
 
               <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">

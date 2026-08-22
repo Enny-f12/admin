@@ -18,6 +18,27 @@ const EMPTY_BANNER_FORM: BannerFormData = {
 
 const MAX_IMAGE_MB = 5;
 
+// Carousel banners are rendered in a fixed 2:1 frame — 1200×600 is the
+// recommended export size. Enforced as a soft warning, not a hard block:
+// an image that's close (e.g. 1200×620) shouldn't get rejected, but
+// something clearly off-ratio (a square product photo) should get
+// flagged before it goes live and gets awkwardly cropped by the carousel.
+const RECOMMENDED_BANNER_SIZE = { width: 1200, height: 600 };
+const BANNER_ASPECT_RATIO = RECOMMENDED_BANNER_SIZE.width / RECOMMENDED_BANNER_SIZE.height; // 2
+const ASPECT_RATIO_TOLERANCE = 0.08; // ~8% slack before warning
+
+// Reads actual pixel dimensions from an already-created object URL (the
+// same one used for the preview), rather than creating a second blob URL
+// just to measure it.
+function getImageDimensions(url: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => reject(new Error("Could not read image dimensions"));
+    img.src = url;
+  });
+}
+
 // Backend returns dates as full ISO strings (e.g. "2026-08-16T00:00:00.000Z").
 // <input type="date"> only accepts the "YYYY-MM-DD" portion, so slicing is
 // enough here — no Date() round-trip, which is what causes off-by-one-day
@@ -94,7 +115,7 @@ export default function BannersPage() {
     setModalOpen(true);
   };
 
-  const handleFile = (file: File) => {
+  const handleFile = async (file: File) => {
     if (!file.type.startsWith("image/")) {
       toast.error("Please choose an image file");
       return;
@@ -103,10 +124,28 @@ export default function BannersPage() {
       toast.error(`Image must be under ${MAX_IMAGE_MB}MB`);
       return;
     }
+
     if (localPreviewRef.current && previewUrl) URL.revokeObjectURL(previewUrl);
+    const url = URL.createObjectURL(file);
     localPreviewRef.current = true;
     setForm((f) => ({ ...f, imageFile: file }));
-    setPreviewUrl(URL.createObjectURL(file));
+    setPreviewUrl(url);
+
+    // Soft check, fired after the preview is already showing — doesn't
+    // block the upload, just flags banners likely to get cropped oddly by
+    // the carousel's fixed 2:1 frame.
+    try {
+      const { width, height } = await getImageDimensions(url);
+      const ratio = width / height;
+      if (Math.abs(ratio - BANNER_ASPECT_RATIO) > ASPECT_RATIO_TOLERANCE) {
+        toast.warning(
+          `This image is ${width}×${height} — recommended size is ${RECOMMENDED_BANNER_SIZE.width}×${RECOMMENDED_BANNER_SIZE.height} (2:1) for the banner carousel.`
+        );
+      }
+    } catch {
+      // Couldn't read dimensions for some reason — not worth blocking the
+      // upload over a measurement failure.
+    }
   };
 
   const handleSave = async () => {
@@ -135,12 +174,69 @@ export default function BannersPage() {
 
   return (
     <>
+      {/* ─────────────────────────────────────────────────────────────
+          Mobile responsiveness notes:
+          - .action-btn-label hides under 420px (matches the breakpoint
+            already used in (admin)/layout.tsx for the branch-selector
+            label), collapsing "Add Banner" to an icon-only button so it
+            can never wrap onto two lines and collide with SubHeader's
+            subtitle underneath it. This fixes the button itself rather
+            than SubHeader's internals, since that component's source
+            isn't available here — if the header still overlaps after
+            this, the wrapping needs to happen inside SubHeader itself.
+          - .form-grid-2 collapses from 2 columns to 1 under 560px. Uses
+            !important because the base grid-template-columns is set via
+            inline style, which always wins over a plain class rule
+            regardless of media query — same technique already used in
+            (admin)/layout.tsx's own mobile overrides.
+          - .banner-row switches to flex-wrap under 480px; .banner-thumb
+            goes full-width there so it naturally pushes the text below
+            it onto its own line, and .banner-actions becomes a
+            full-width, right-aligned row of its own rather than getting
+            squeezed onto the same line as the thumbnail and text.
+         ───────────────────────────────────────────────────────────── */}
+      <style jsx>{`
+        @media (max-width: 420px) {
+          .action-btn-label {
+            display: none;
+          }
+          .action-btn {
+            padding: 10px !important;
+          }
+        }
+        @media (max-width: 560px) {
+          .form-grid-2 {
+            grid-template-columns: 1fr !important;
+          }
+        }
+        @media (max-width: 480px) {
+          .banner-row {
+            flex-wrap: wrap !important;
+            align-items: flex-start !important;
+          }
+          .banner-thumb {
+            width: 100% !important;
+            aspect-ratio: 2 / 1 !important;
+            height: auto !important;
+          }
+          .banner-content {
+            flex: 1 1 100% !important;
+          }
+          .banner-actions {
+            width: 100% !important;
+            justify-content: flex-end !important;
+            margin-top: 8px !important;
+          }
+        }
+      `}</style>
+
       <SubHeader
         title="Banner Management"
         subtitle="Create and manage promotional banners"
         action={
-          <button className="btn btn-primary" onClick={openAdd} style={{ gap: 6 }}>
-            <Plus size={14} strokeWidth={2.2} /> Add Banner
+          <button className="btn btn-primary action-btn" onClick={openAdd} style={{ gap: 6 }}>
+            <Plus size={14} strokeWidth={2.2} />
+            <span className="action-btn-label">Add Banner</span>
           </button>
         }
       />
@@ -150,7 +246,7 @@ export default function BannersPage() {
           <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} style={{ display: "flex", gap: 16 }}>
-                <Skeleton width={72} height={56} radius={8} />
+                <Skeleton width={96} height={48} radius={8} />
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
                   <SkeletonText width="40%" height={14} />
                   <SkeletonText width="60%" height={12} />
@@ -167,20 +263,24 @@ export default function BannersPage() {
         )}
 
         {!bannersLoading && !bannersError && banners?.map((b, i) => (
-          <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 16, padding: "18px 20px", borderBottom: i < banners.length - 1 ? "1px solid var(--color-border)" : "none" }}>
-            <div style={{ width: 72, height: 56, borderRadius: 8, overflow: "hidden", flexShrink: 0, border: "1px solid var(--color-border)" }}>
-              <Image src={b.imageUrl} alt={b.title} width={72} height={56} style={{ objectFit: "cover", width: "100%", height: "100%" }} />
+          <div
+            key={b.id}
+            className="banner-row"
+            style={{ display: "flex", alignItems: "center", gap: 16, padding: "18px 20px", borderBottom: i < banners.length - 1 ? "1px solid var(--color-border)" : "none" }}
+          >
+            <div className="banner-thumb" style={{ width: 96, height: 48, borderRadius: 8, overflow: "hidden", flexShrink: 0, border: "1px solid var(--color-border)" }}>
+              <Image src={b.imageUrl} alt={b.title} width={96} height={48} style={{ objectFit: "cover", width: "100%", height: "100%" }} />
             </div>
 
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3 }}>
+            <div className="banner-content" style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3, flexWrap: "wrap" }}>
                 <p style={{ margin: 0, fontWeight: 600, fontSize: "0.875rem", color: "var(--color-heading)" }}>{b.title}</p>
                 <span className="badge" style={{ background: b.active ? "rgba(34,197,94,0.12)" : "var(--color-bg-soft)", color: b.active ? "#16a34a" : "var(--color-text-muted)" }}>
                   {b.active ? "Active" : "Offline"}
                 </span>
               </div>
               <p style={{ margin: 0, fontSize: "0.78rem", fontWeight: 400, color: "var(--color-text-muted)" }}>{b.subtitle}</p>
-              <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 5 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 5, flexWrap: "wrap" }}>
                 <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
                   <CalendarDays size={11} strokeWidth={1.8} />
                   {formatDisplayDate(b.startDate)} – {formatDisplayDate(b.endDate)}
@@ -191,7 +291,7 @@ export default function BannersPage() {
               </div>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <div className="banner-actions" style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
               <button onClick={() => openEdit(b)}
                 style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 6, borderRadius: 6 }}
               >
@@ -224,13 +324,26 @@ export default function BannersPage() {
               onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
               style={{
                 border: `1.5px dashed ${dragOver ? "var(--color-primary)" : "var(--color-border)"}`,
-                borderRadius: 10, padding: "24px 20px", display: "flex", flexDirection: "column",
+                borderRadius: 10, display: "flex", flexDirection: "column",
                 alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer",
-                background: dragOver ? "rgba(225,11,28,0.03)" : "var(--color-bg-soft)", minHeight: 100,
+                background: dragOver ? "rgba(225,11,28,0.03)" : "var(--color-bg-soft)",
+                // Actual 2:1 box, not an arbitrary fixed height — shows the
+                // real target shape before a file's even picked, and the
+                // preview image (below) fills exactly this frame.
+                width: "100%", aspectRatio: "2 / 1", maxHeight: 220,
+                position: "relative", overflow: "hidden",
               }}
             >
               {previewUrl
-                ? <Image src={previewUrl} alt="Preview" width={80} height={60} style={{ borderRadius: 8, objectFit: "cover" }} />
+                ? (
+                  <Image
+                    src={previewUrl}
+                    alt="Preview"
+                    fill
+                    sizes="(max-width: 600px) 100vw, 560px"
+                    style={{ objectFit: "cover", borderRadius: 8 }}
+                  />
+                )
                 : <>
                     <UploadCloud size={22} strokeWidth={1.6} color="var(--color-text-muted)" />
                     <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--color-text-muted)" }}>Click or drag to upload image</p>
@@ -238,13 +351,13 @@ export default function BannersPage() {
               }
             </div>
             <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
-              JPG or PNG, up to {MAX_IMAGE_MB}MB{editBanner ? " — leave blank to keep the current image" : ""}.
+              JPG or PNG, up to {MAX_IMAGE_MB}MB. Recommended size: {RECOMMENDED_BANNER_SIZE.width}×{RECOMMENDED_BANNER_SIZE.height}px (2:1){editBanner ? " — leave blank to keep the current image." : "."}
             </p>
             <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="form-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             {([
               { label: "Title", key: "title" as const, placeholder: "Summer Special 30% Off" },
               { label: "Subtitle", key: "subtitle" as const, placeholder: "Hot deals on all combos" },
@@ -257,7 +370,7 @@ export default function BannersPage() {
             ))}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="form-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             {([
               { label: "CTA Button Text", key: "ctaText" as const, placeholder: "Order Now" },
               { label: "CTA Link", key: "ctaLink" as const, placeholder: "/menu" },
@@ -270,7 +383,7 @@ export default function BannersPage() {
             ))}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="form-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             {([
               { label: "Start Date", key: "startDate" as const },
               { label: "End Date", key: "endDate" as const },

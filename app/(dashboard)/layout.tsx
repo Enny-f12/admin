@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -42,6 +42,8 @@ import {
 import { NotificationBell } from "@/components/NotificationBell";
 import PushSetup from "@/components/PushSetup";
 import { useAuthStore } from "@/store/useAuthStore";
+import RouteGuard from "@/components/auth/RouteGuard";
+import { filterNavSections, Role } from "@/lib/permissions";
 
 /* ── Nav structure ── */
 const NAV_SECTIONS = [
@@ -78,7 +80,7 @@ const NAV_SECTIONS = [
       { label: "Customers", href: "/customers", icon: Users },
       { label: "Staff", href: "/staff", icon: UserCog },
       { label: "Promo Codes", href: "/promo-codes", icon: BadgePercent },
-{ label: "Reviews", href: "/reviews", icon: Star },
+      { label: "Reviews", href: "/reviews", icon: Star },
     ],
   },
   {
@@ -110,12 +112,16 @@ export interface SelectedBranch {
 }
 
 export interface BranchContextValue extends SelectedBranch {
-  /** True only for SUPER_ADMIN — see canPickBranch logic below. Any page
-   *  that wants to render its own dropdown should gate on this instead of
-   *  re-deriving role itself. */
+  /** True for SUPER_ADMIN (sees every branch), and also true for anyone
+   *  whose preferences.assignedBranchIds has more than one entry (sees
+   *  only their own assigned branches). See canPickBranch logic below.
+   *  Any page that wants to render its own dropdown should gate on this
+   *  instead of re-deriving role/branch-count itself. */
   canPickBranch: boolean;
-  /** Full branch list, for pages that render their own dropdown (mirrors
-   *  what the sidebar picker already uses). Empty for locked users. */
+  /** The branches this specific user is allowed to pick between — NOT
+   *  necessarily every branch in the system. SUPER_ADMIN gets the full
+   *  list; everyone else (even pickers) is scoped to their own
+   *  preferences.assignedBranchIds. Empty for locked single-branch users. */
   branches: SelectedBranch[];
   /** Changes the active branch. No-ops meaningfully for locked users since
    *  their UI never exposes a way to call this, but it's always safe to call. */
@@ -198,44 +204,89 @@ export default function DashboardLayout({
   const { branches, branchesLoading, fetchBranches, user, loginBranchId } = useAuthStore();
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
 
-  // Access rule:
-  //  - SUPER_ADMIN always gets full branch-picker access, regardless of
-  //    whether they also have an assignedBranchId set.
-  //  - Everyone else is locked to their own assignedBranchId, whatever
-  //    that is. No vendorId check involved anywhere here.
-  const assignedBranchId = user?.assignedBranchId ?? null;
+  // Access rule (updated to use preferences.assignedBranchIds, confirmed
+  // present on the real login response — e.g. a Manager with
+  // assignedBranchId: "3ee8..." also had
+  // preferences.assignedBranchIds: ["3ee8...", "adf6..."], meaning they're
+  // actually scoped to TWO branches, not the one the singular field
+  // suggested):
+  //  - SUPER_ADMIN always gets full branch-picker access to every branch,
+  //    regardless of what's in preferences.
+  //  - Anyone else with 2+ ids in preferences.assignedBranchIds gets a
+  //    picker too, but scoped ONLY to those branches — never the full list.
+  //  - Anyone with exactly 1 assigned branch (via preferences, or via the
+  //    singular assignedBranchId as a fallback for accounts where
+  //    preferences isn't populated) is locked, same as before.
+  //  - Zero assigned branches → "No branch assigned" state, unchanged.
+  const assignedBranchIds = useMemo(() => {
+    const prefs = user?.preferences?.assignedBranchIds;
+    if (prefs && prefs.length > 0) return prefs;
+    // Fallback for any account that predates preferences being populated,
+    // or where it's missing for some other reason — don't silently lock
+    // someone out just because this newer field isn't set yet.
+    return user?.assignedBranchId ? [user.assignedBranchId] : [];
+    // Dependency is the whole `user` object, not the two narrower property
+    // paths — React Compiler infers `user` as the dependency for this body
+    // regardless of how granular the array is written, so matching that
+    // exactly avoids the "could not preserve manual memoization" bailout.
+  }, [user]);
+
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
-  const canPickBranch = isSuperAdmin;
+  const canPickBranch = isSuperAdmin || assignedBranchIds.length > 1;
+
+  // The branches this user is actually allowed to choose between.
+  // SUPER_ADMIN sees everything GET /auth/branches returns; everyone else
+  // — including multi-branch pickers — only sees their own assigned set.
+  // This is deliberately NOT the same as canPickBranch: a locked
+  // single-branch user still needs their one branch resolvable here so
+  // the header chip can show its real name instead of a fallback string.
+  const pickableBranches = useMemo(() => {
+    if (isSuperAdmin) return branches ?? [];
+    return (branches ?? []).filter((b) => assignedBranchIds.includes(b.id));
+  }, [isSuperAdmin, branches, assignedBranchIds]);
+
+  // Sidebar nav filtered to what this role can actually open. Deliberately
+  // renders as an empty section list (not the full NAV_SECTIONS) until
+  // `user` has loaded, rather than briefly showing every link and then
+  // shrinking the list once the role is known — showing a link that
+  // immediately redirects the moment it's clicked is worse than a nav
+  // that populates a beat after the rest of the shell.
+  const visibleSections = user?.role
+    ? filterNavSections(NAV_SECTIONS, user.role as Role)
+    : [];
 
   useEffect(() => {
     fetchBranches();
   }, [fetchBranches]);
 
-  // Initial selection. Locked users get their assigned branch straight
-  // away. Pickers (SUPER_ADMIN) default to whatever branch they chose on
-  // the login screen (loginBranchId) if any, otherwise the first branch
-  // returned by the backend once `branches` has loaded — there's no
-  // "All Branches" fallback to reach for synchronously, so this waits
-  // on the branch list for the no-loginBranchId case.
+  // Initial selection. Locked users (exactly one assigned branch) get it
+  // straight away. Pickers — SUPER_ADMIN or a multi-branch user — default
+  // to whatever branch they chose on the login screen (loginBranchId), but
+  // ONLY if that branch is actually one they're allowed to see; a
+  // multi-branch Manager's loginBranchId should never let them land on a
+  // branch outside their own preferences.assignedBranchIds. Otherwise,
+  // falls back to the first branch in their pickable set once it's loaded.
   useEffect(() => {
     if (selectedBranchId !== null) return;
     if (!canPickBranch) {
-      if (assignedBranchId) {
+      if (assignedBranchIds[0]) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
-        setSelectedBranchId(assignedBranchId);
+        setSelectedBranchId(assignedBranchIds[0]);
       }
       return;
     }
-    if (loginBranchId) {
+    const loginBranchIsAllowed =
+      loginBranchId && (isSuperAdmin || assignedBranchIds.includes(loginBranchId));
+    if (loginBranchIsAllowed) {
        
       setSelectedBranchId(loginBranchId);
       return;
     }
-    if (branches && branches.length > 0) {
+    if (pickableBranches.length > 0) {
        
-      setSelectedBranchId(branches[0].id);
+      setSelectedBranchId(pickableBranches[0].id);
     }
-  }, [canPickBranch, assignedBranchId, loginBranchId, selectedBranchId, branches]);
+  }, [canPickBranch, assignedBranchIds, isSuperAdmin, loginBranchId, selectedBranchId, pickableBranches]);
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -243,7 +294,7 @@ export default function DashboardLayout({
     setMobileNavOpen(false);
   }, [pathname]);
 
-  const effectiveBranchId = canPickBranch ? selectedBranchId : assignedBranchId;
+  const effectiveBranchId = canPickBranch ? selectedBranchId : assignedBranchIds[0] ?? null;
 
   const selectedBranch = branches?.find((b) => b.id === effectiveBranchId) ?? null;
 
@@ -256,15 +307,20 @@ export default function DashboardLayout({
             ? ""
             : canPickBranch
               ? "Select branch"
-              : assignedBranchId
+              : assignedBranchIds.length > 0
                 ? "Your Branch"
                 : "No branch assigned",
         }),
     canPickBranch,
-    branches: branches ?? [],
+    branches: pickableBranches,
     setBranch: (b) => setSelectedBranchId(b.id),
   };
 
+  // Title lookup intentionally still uses the full NAV_SECTIONS, not
+  // visibleSections — if a role-restricted page briefly renders before
+  // RouteGuard's redirect fires, the header should still show a real
+  // title rather than falling back to "Dashboard" for a page that isn't
+  // actually the dashboard.
   const pageTitle =
     NAV_SECTIONS.flatMap((s) => s.items).find((n) => n.href === pathname)
       ?.label ?? "Dashboard";
@@ -437,7 +493,7 @@ export default function DashboardLayout({
           </button>
         </div>
 
-        {/* Nav items */}
+        {/* Nav items — filtered by role, see visibleSections above */}
         <nav
           style={{
             flex: 1,
@@ -450,7 +506,7 @@ export default function DashboardLayout({
           }}
           className="no-scrollbar"
         >
-          {NAV_SECTIONS.map((section) => (
+          {visibleSections.map((section) => (
             <div key={section.title} style={{ marginBottom: 8 }}>
               {!collapsed && (
                 <p
@@ -791,7 +847,7 @@ export default function DashboardLayout({
                     zIndex: 60,
                   }}
                 >
-                  {(branches ?? []).map((b) => {
+                  {pickableBranches.map((b) => {
                     const selected = b.id === effectiveBranchId;
                     return (
                       <button
@@ -877,13 +933,15 @@ export default function DashboardLayout({
           />
         )}
 
-        {/* Page content */}
+        {/* Page content — gated by RouteGuard so a page a role can't
+            access never actually renders, even briefly, before the
+            redirect fires. */}
         <main
           className="page-content no-scrollbar"
           style={{ flex: 1, overflowY: "auto", padding: "28px" }}
         >
           <BranchContext.Provider value={branchContextValue}>
-            {children}
+            <RouteGuard>{children}</RouteGuard>
           </BranchContext.Provider>
         </main>
       </div>

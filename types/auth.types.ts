@@ -1,16 +1,11 @@
 // types/auth.types.ts
 
-/**
- * CONFIRMED — matches the real POST /auth/login response body exactly
- * (verified against a live login response). Previous version was missing
- * assignedBranchId, status, permissions, invPermissions, vendorId,
- * createdAt/updatedAt, lastLoginAt/lastSeenAt, marketingOptIn,
- * whatsappOptIn, and preferences — those are now added below.
- *
- * `permissions` / `invPermissions` came back as empty arrays in the sample
- * response — element type is a guess (string) until we see a populated
- * array. `preferences` came back null — shape unknown, left as unknown.
- */
+
+export interface UserPreferences {
+  assignedBranchIds?: string[];
+  [key: string]: unknown;
+}
+
 export interface User {
   id: string;
   email: string | null;
@@ -28,7 +23,7 @@ export interface User {
   lastSeenAt: string | null;
   marketingOptIn: boolean;
   whatsappOptIn: boolean;
-  preferences: unknown | null;
+  preferences: UserPreferences | null;
   permissions: string[];
   invPermissions: string[];
   createdAt: string;
