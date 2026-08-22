@@ -20,12 +20,46 @@ export default function BranchesPage() {
 
   return (
     <>
+      {/* ─────────────────────────────────────────────────────────────
+          Mobile responsiveness — same technique as banners/page.tsx:
+          - .action-btn-label hides under 420px so "Add Location" can't
+            wrap onto two lines and collide with SubHeader's subtitle.
+            Matches the 420px breakpoint already used for the branch
+            selector label in (admin)/layout.tsx.
+          - .branch-form-grid collapses from 2 columns to 1 under 560px.
+            Needs !important since the base grid-template-columns comes
+            from an inline style, which a plain class rule can't override
+            regardless of media query specificity.
+         ───────────────────────────────────────────────────────────── */}
+      <style jsx>{`
+        @media (max-width: 420px) {
+          .action-btn-label {
+            display: none;
+          }
+          .action-btn {
+            padding: 10px !important;
+          }
+        }
+        @media (max-width: 560px) {
+          .branch-form-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+        @media (max-width: 480px) {
+          .save-changes-btn {
+            width: 100% !important;
+            justify-content: center !important;
+          }
+        }
+      `}</style>
+
       <SubHeader
         title="Branch Locations"
         subtitle="Manage branch"
         action={
-          <button className="btn btn-primary" onClick={() => setAddOpen(true)} style={{ gap: 6 }}>
-            <Plus size={14} strokeWidth={2.2} /> Add Location
+          <button className="btn btn-primary action-btn" onClick={() => setAddOpen(true)} style={{ gap: 6 }}>
+            <Plus size={14} strokeWidth={2.2} />
+            <span className="action-btn-label">Add Location</span>
           </button>
         }
       />
@@ -34,7 +68,7 @@ export default function BranchesPage() {
         {branchesLoading && Array.from({ length: 2 }).map((_, i) => (
           <div key={i} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <SkeletonText width={80} height={14} />
-            <div className="card" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="card branch-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               {Array.from({ length: 4 }).map((_, j) => <Skeleton key={j} width="100%" height={38} radius={8} />)}
             </div>
           </div>
@@ -51,7 +85,7 @@ export default function BranchesPage() {
           <div key={b.id} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <p style={{ margin: 0, fontWeight: 600, fontSize: "0.875rem", color: "var(--color-heading)" }}>{b.label}</p>
             <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="branch-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 {([
                   { label: "Location Name", key: "name" as const },
                   { label: "Location", key: "location" as const },
@@ -69,7 +103,7 @@ export default function BranchesPage() {
         ))}
 
         <button
-          className="btn btn-primary"
+          className="btn btn-primary save-changes-btn"
           onClick={saveBranches}
           disabled={isSavingBranch || !branches?.length}
           style={{ alignSelf: "flex-start", padding: "10px 24px", opacity: isSavingBranch || !branches?.length ? 0.6 : 1 }}
@@ -80,7 +114,7 @@ export default function BranchesPage() {
 
       {addOpen && (
         <Modal title="Add New Location" subtitle="Set up a new restaurant branch" onClose={() => setAddOpen(false)}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="branch-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             {([
               { label: "Location Name", key: "name" as const, placeholder: "Lekki Main Branch" },
               { label: "Location", key: "location" as const, placeholder: "enter address..." },
