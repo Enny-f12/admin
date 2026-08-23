@@ -14,6 +14,7 @@ import { PromoCode, PromoDiscountType, CreatePromoCodePayload } from "@/types/pr
 
 const EMPTY_FORM = {
   code: "",
+  branchId: "",
   description: "",
   discountType: "PERCENTAGE" as PromoDiscountType,
   discountValue: "",
@@ -91,6 +92,7 @@ export default function PromoCodesPage() {
     setEditItem(item);
     setForm({
       code: item.code,
+      branchId: item.branchId ?? "",
       description: item.description,
       discountType: item.discountType,
       discountValue: String(item.discountValue),
@@ -116,6 +118,7 @@ export default function PromoCodesPage() {
     }
 
     const shared = {
+      branchId: form.branchId,
       description: form.description,
       discountType: form.discountType,
       discountValue: Number(form.discountValue),
@@ -186,6 +189,7 @@ export default function PromoCodesPage() {
               <thead>
                 <tr>
                   <th>Code</th>
+                  <th>Branch</th>
                   <th>Discount</th>
                   <th>Min Order</th>
                   <th>Usage Limit</th>
@@ -197,21 +201,21 @@ export default function PromoCodesPage() {
               <tbody>
                 {promoCodesLoading && (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
+                    <td colSpan={8} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
                       Loading…
                     </td>
                   </tr>
                 )}
                 {!promoCodesLoading && promoCodesError && (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
+                    <td colSpan={8} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
                       Could not load promo codes
                     </td>
                   </tr>
                 )}
                 {!promoCodesLoading && !promoCodesError && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
+                    <td colSpan={8} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
                       No promo codes found
                     </td>
                   </tr>
@@ -225,6 +229,9 @@ export default function PromoCodesPage() {
                         <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "var(--color-text-muted)", maxWidth: 260 }}>
                           {p.description || "—"}
                         </p>
+                      </td>
+                      <td style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+                        {p.branchId || "—"}
                       </td>
                       <td style={{ fontWeight: 500, color: "var(--color-primary)" }}>
                         {formatDiscount(p.discountType, p.discountValue)}
@@ -349,6 +356,16 @@ export default function PromoCodesPage() {
                   Code can&apos;t be changed after creation.
                 </p>
               )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>Branch ID</label>
+              <input
+                className="input"
+                placeholder="e.g. branch-001"
+                value={form.branchId}
+                onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))}
+              />
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

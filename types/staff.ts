@@ -7,12 +7,9 @@ export interface StaffMember {
   phone: string;
   role: string;
   status: StaffStatus;
-  lastSeenAt: string | null; // ISO date string; null if never logged in
-  // CONFIRMED via live response: these are branch NAMES ("Victoria
-  // Island"), not IDs, despite what the old comment here said. The
-  // create/update DTO wants IDs instead — see staff/page.tsx for the
-  // name<->id mapping this requires.
+  lastSeenAt: string | null; 
   branches: string[];
+  
   invPermissions: string[];
   permissions: string[];
 }
@@ -39,9 +36,23 @@ export interface UpdateStaffPayload {
 }
 
 export interface StaffFilters {
-  // NOT confirmed via Swagger — added defensively, same pattern used for
-  // customers' branchId filter. Confirm the backend actually applies this
-  // before relying on it; if it's ignored, the client-side fallback in
-  // the page still hides OFFLINE (deactivated) staff either way.
+  
   status?: StaffStatus;
+}
+
+
+export interface PermissionsResponse {
+  permissions: string[];
+  invPermissions: string[];
+}
+
+export interface RoleDefaultEntry {
+  permissions: string[];
+  invPermissions: string[];
+}
+
+
+export interface RoleDefaultsResponse {
+  roles: string[];
+  defaults: Record<string, RoleDefaultEntry>;
 }

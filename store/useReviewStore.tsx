@@ -22,7 +22,9 @@ interface ReviewState {
   // buttons while it's in flight).
   updatingStatusId: string | null;
 
-  fetchReviews: (status?: ReviewStatus) => Promise<void>;
+  // `branchId` added as a second optional filter — GET /admin/reviews
+  // confirmed it as a query param alongside `status` in Swagger.
+  fetchReviews: (status?: ReviewStatus, branchId?: string) => Promise<void>;
   updateReviewStatus: (id: string, status: ReviewStatus) => Promise<boolean>;
 }
 
@@ -33,10 +35,10 @@ export const useReviewStore = create<ReviewState>((set, get) => ({
 
   updatingStatusId: null,
 
-  fetchReviews: async (status) => {
+  fetchReviews: async (status, branchId) => {
     set({ reviewsLoading: true, reviewsError: false });
     try {
-      const reviews = await reviewService.getReviews(status);
+      const reviews = await reviewService.getReviews(status, branchId);
       set({ reviews, reviewsLoading: false });
     } catch {
       set({ reviewsLoading: false, reviewsError: true });

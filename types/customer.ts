@@ -5,17 +5,14 @@ export interface AdminCustomer {
   phone: string;
   totalOrders: number;
   totalSpent: number;
-  lastOrderAt: string | null; // ISO date string, null if customer has never ordered
-  createdAt: string;          // ISO date string — used as "Joined"
+  lastOrderAt: string | null; 
+  createdAt: string;          
 }
 
 export interface AdminCustomersFilters {
   search?: string;
   page?: number;
   limit?: number;
-  // NOT confirmed via Swagger — added defensively, same pattern as the
-  // confirmed branch-filtered endpoints. Verify backend actually applies
-  // this filter before relying on it.
   branchId?: string;
 }
 

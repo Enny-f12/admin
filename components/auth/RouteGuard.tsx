@@ -4,7 +4,7 @@
 import { useEffect, useState, ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
-import { isPathAllowed, getDefaultRoute, Role } from "@/lib/permissions";
+import { isPathAllowed, getDefaultRoute, AccessSubject } from "@/lib/permissions";
 
 // ─────────────────────────────────────────────────────────────
 // IMPORTANT — what this component can and can't do:
@@ -18,14 +18,15 @@ import { isPathAllowed, getDefaultRoute, Role } from "@/lib/permissions";
 //
 // What it DOES stop: an honest user hitting a page they shouldn't via a
 // typed URL, browser back button, or a stale bookmark from before their
-// role changed — cases where the nav correctly hid the link but the page
-// itself had no guard of its own.
+// role/permissions changed — cases where the nav correctly hid the link
+// but the page itself had no guard of its own.
 //
 // What it does NOT stop: someone deliberately editing localStorage or
-// intercepting requests to fake a role. No frontend-only mechanism can
-// prevent that. The only real fix is the backend rejecting API calls a
-// role isn't authorized for — this component doesn't replace that, it
-// just closes the obvious UX gap until backend enforcement exists.
+// intercepting requests to fake a role or permission grant. No
+// frontend-only mechanism can prevent that. The only real fix is the
+// backend rejecting API calls a role/permission isn't authorized for —
+// this component doesn't replace that, it just closes the obvious UX gap
+// until backend enforcement exists.
 // ─────────────────────────────────────────────────────────────
 export default function RouteGuard({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -33,7 +34,7 @@ export default function RouteGuard({ children }: { children: ReactNode }) {
   const user = useAuthStore((s) => s.user);
 
   // zustand persist hasn't necessarily rehydrated from localStorage on
-  // first render — checking role before that finishes would read `user`
+  // first render — checking access before that finishes would read `user`
   // as null and incorrectly redirect a legitimately logged-in user.
   const [hydrated, setHydrated] = useState(
     () => useAuthStore.persist?.hasHydrated?.() ?? true
@@ -59,14 +60,25 @@ export default function RouteGuard({ children }: { children: ReactNode }) {
       return;
     }
 
-    const role = user.role as Role;
-    if (!isPathAllowed(role, pathname)) {
-      // Redirects to the role's own first allowed route rather than a
-      // hardcoded /dashboard, since a couple of roles' allow-lists here
-      // don't actually include it in every configuration you might change
-      // later. Swap for a dedicated /unauthorized page if you'd rather
-      // show an explicit "not allowed" message than silently redirect.
-      router.replace(getDefaultRoute(role));
+    // Built from the user's live permission grants, not just their role
+    // name — matches lib/permissions.ts's hasAccess/isPathAllowed, which
+    // now gate on actual permissions/invPermissions so an admin editing
+    // someone's checkboxes in the staff modal changes what they can reach
+    // here too, without a redeploy.
+    const subject: AccessSubject = {
+      role: user.role,
+      permissions: user.permissions,
+      invPermissions: user.invPermissions,
+    };
+
+    if (!isPathAllowed(subject, pathname)) {
+      // Redirects to this staff member's own first allowed route rather
+      // than a hardcoded /dashboard, since dashboard is always allowed
+      // in lib/permissions.ts today but that's not guaranteed to stay
+      // true if that rule ever changes. Swap for a dedicated
+      // /unauthorized page if you'd rather show an explicit "not
+      // allowed" message than silently redirect.
+      router.replace(getDefaultRoute(subject));
       return;
     }
 

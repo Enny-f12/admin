@@ -1,8 +1,14 @@
-// store/useStaffStore.ts
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { staffService } from '@/services/staff.service';
-import { StaffMember, CreateStaffPayload, UpdateStaffPayload, StaffFilters } from '@/types/staff';
+import {
+  StaffMember,
+  CreateStaffPayload,
+  UpdateStaffPayload,
+  StaffFilters,
+  PermissionsResponse,
+  RoleDefaultsResponse,
+} from '@/types/staff';
 
 function extractErrorMessage(error: unknown, fallback: string) {
   const anyErr = error as any;
@@ -17,16 +23,21 @@ interface StaffState {
   isSaving: boolean;
   isDeleting: boolean;
 
-  // keeps the list in sync with whatever filter was last applied, so
-  // create/update/deactivate know how to refetch correctly
+  // Fetched once and cached — same pattern as branches in useAuthStore.
+  // Null means "not loaded yet"; the page decides when to fetch.
+  permissions: PermissionsResponse | null;
+  isLoadingPermissions: boolean;
+
+  roleDefaults: RoleDefaultsResponse | null;
+  isLoadingRoleDefaults: boolean;
+
   lastFilters: StaffFilters;
 
   fetchStaff: (filters?: StaffFilters) => Promise<void>;
+  fetchPermissions: () => Promise<void>;
+  fetchRoleDefaults: () => Promise<void>;
   createStaff: (payload: CreateStaffPayload) => Promise<boolean>;
   updateStaff: (id: string, payload: UpdateStaffPayload) => Promise<boolean>;
-  // NOTE: name kept as "deleteStaff" to match the existing DELETE call,
-  // but confirmed via a live response that this deactivates (status flips
-  // ACTIVE -> OFFLINE) rather than removing the record.
   deleteStaff: (id: string) => Promise<boolean>;
 }
 
@@ -36,6 +47,13 @@ export const useStaffStore = create<StaffState>((set, get) => ({
   isError: false,
   isSaving: false,
   isDeleting: false,
+
+  permissions: null,
+  isLoadingPermissions: false,
+
+  roleDefaults: null,
+  isLoadingRoleDefaults: false,
+
   lastFilters: {},
 
   fetchStaff: async (filters = {}) => {
@@ -46,6 +64,30 @@ export const useStaffStore = create<StaffState>((set, get) => ({
     } catch (error) {
       set({ isLoading: false, isError: true });
       toast.error(extractErrorMessage(error, 'Could not load staff'));
+    }
+  },
+
+  fetchPermissions: async () => {
+    set({ isLoadingPermissions: true });
+    try {
+      const permissions = await staffService.getPermissions();
+      set({ permissions, isLoadingPermissions: false });
+    } catch (error) {
+      // Left null on failure — the modal falls back to empty checkbox
+      // lists rather than blocking staff creation entirely.
+      set({ isLoadingPermissions: false });
+      toast.error(extractErrorMessage(error, 'Could not load permissions'));
+    }
+  },
+
+  fetchRoleDefaults: async () => {
+    set({ isLoadingRoleDefaults: true });
+    try {
+      const roleDefaults = await staffService.getRoleDefaults();
+      set({ roleDefaults, isLoadingRoleDefaults: false });
+    } catch (error) {
+      set({ isLoadingRoleDefaults: false });
+      toast.error(extractErrorMessage(error, 'Could not load roles'));
     }
   },
 

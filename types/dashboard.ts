@@ -93,9 +93,9 @@ export interface AdminOrderItem {
   menuItemId: string;
   nameSnapshot: string;
   descriptionSnapshot: string | null;
-  unitPrice: string; // numeric string, e.g. "4000" — parse with Number() before formatting
+  unitPrice: string; 
   quantity: number;
-  totalPrice: string; // numeric string
+  totalPrice: string; 
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -180,7 +180,6 @@ export interface AdminOrdersFilters {
   dateTo?: string;
   branchId?: string;
   page?: number;
-  // `limit` is NOT accepted by GET /admin/orders — confirmed via live 400:
-  // { "message": ["property limit should not exist"], "error": "Bad Request" }
+  
   
 }

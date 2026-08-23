@@ -50,9 +50,7 @@ export interface GetItemsFilters {
 export interface GetCategoriesFilters {
   branchId?: string;
 }
-// NOTE: no branchId anywhere in this file — confirmed via Swagger that
-// Menu Admin (categories + items) is scoped by vendorId, not branch.
-// A dish's isAvailable is vendor-wide, not per-branch, as of this schema.
+
 
 export interface CreateMenuItemPayload {
   vendorId: string;

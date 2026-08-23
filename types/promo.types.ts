@@ -1,11 +1,9 @@
-// types/promo-code.types.ts
-
 export type PromoDiscountType = 'PERCENTAGE' | 'FIXED';
-
 
 export interface PromoCode {
   id: string;
   code: string;
+  branchId: string;
   description: string;
   discountType: PromoDiscountType;
   discountValue: number;
@@ -16,14 +14,15 @@ export interface PromoCode {
   startDate: string; // ISO date string
   endDate: string; // ISO date string
   isActive: boolean;
-  currentUses?: number; // UNCONFIRMED — not in Swagger, guessed for a "12/100 used" style column
-  createdAt?: string; // UNCONFIRMED
-  updatedAt?: string; // UNCONFIRMED
+  currentUses?: number; 
+  createdAt?: string;
+  updatedAt?: string; 
 }
 
-// Matches the POST /admin/promo-codes example body exactly.
+// POST /admin/promo-codes 
 export interface CreatePromoCodePayload {
   code: string;
+  branchId: string;
   description: string;
   discountType: PromoDiscountType;
   discountValue: number;
@@ -39,8 +38,8 @@ export interface CreatePromoCodePayload {
 
 export type UpdatePromoCodePayload = Partial<Omit<CreatePromoCodePayload, 'code'>>;
 
-
 export interface PromoCodeFilters {
-  search?: string; 
+  search?: string;
   isActive?: boolean;
+  branchId?: string; 
 }

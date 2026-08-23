@@ -5,7 +5,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Star, Eye, EyeOff, Flag, ChevronDown } from "lucide-react";
+import { Star, Eye, EyeOff, Flag, ChevronDown, Search } from "lucide-react";
 import { useReviewStore } from "@/store/useReviewStore";
 import { Review, ReviewStatus } from "@/types/review.types";
 
@@ -37,10 +37,21 @@ export default function ReviewsPage() {
 
   const [statusFilter, setStatusFilter] = useState<ReviewStatus | "all">("all");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [branchId, setBranchId] = useState("");
 
+  // Debounce the branchId text input so we're not firing a request on
+  // every keystroke — branchId is a server-side query param here (unlike
+  // promo-codes' code/description search which filters an already-fetched
+  // in-memory list), so each change means a real network call.
   useEffect(() => {
-    fetchReviews(statusFilter === "all" ? undefined : statusFilter);
-  }, [statusFilter, fetchReviews]);
+    const handle = setTimeout(() => {
+      fetchReviews(
+        statusFilter === "all" ? undefined : statusFilter,
+        branchId.trim() || undefined
+      );
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [statusFilter, branchId, fetchReviews]);
 
   const handleModerate = (review: Review, status: ReviewStatus) => {
     if (review.status === status) return;
@@ -60,43 +71,60 @@ export default function ReviewsPage() {
       </div>
 
       <div className="card" style={{ padding: "16px 20px" }}>
-        <div style={{ position: "relative", maxWidth: 220 }}>
-          <button
-            onClick={() => setFilterOpen((v) => !v)}
-            style={{
-              width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-              padding: "9px 12px", border: "1px solid var(--color-border)", borderRadius: 8,
-              background: "var(--color-bg-input)", fontSize: "0.875rem", color: "var(--color-text)",
-              cursor: "pointer", fontFamily: "var(--font-sans)", gap: 8,
-            }}
-          >
-            <span>{STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label}</span>
-            <ChevronDown size={14} strokeWidth={1.8} color="var(--color-text-muted)" />
-          </button>
-          {filterOpen && (
-            <div
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ position: "relative", maxWidth: 220, width: "100%" }}>
+            <button
+              onClick={() => setFilterOpen((v) => !v)}
               style={{
-                position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
-                background: "var(--color-bg-card)", border: "1px solid var(--color-border)",
-                borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 50, overflow: "hidden",
+                width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "9px 12px", border: "1px solid var(--color-border)", borderRadius: 8,
+                background: "var(--color-bg-input)", fontSize: "0.875rem", color: "var(--color-text)",
+                cursor: "pointer", fontFamily: "var(--font-sans)", gap: 8,
               }}
             >
-              {STATUS_OPTIONS.map((o) => (
-                <button
-                  key={o.value}
-                  onClick={() => { setStatusFilter(o.value); setFilterOpen(false); }}
-                  style={{
-                    width: "100%", textAlign: "left", padding: "9px 14px", border: "none",
-                    background: o.value === statusFilter ? "var(--color-bg-soft)" : "transparent",
-                    color: o.value === statusFilter ? "var(--color-primary)" : "var(--color-text)",
-                    fontFamily: "var(--font-sans)", fontSize: "0.85rem", cursor: "pointer",
-                  }}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-          )}
+              <span>{STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label}</span>
+              <ChevronDown size={14} strokeWidth={1.8} color="var(--color-text-muted)" />
+            </button>
+            {filterOpen && (
+              <div
+                style={{
+                  position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+                  background: "var(--color-bg-card)", border: "1px solid var(--color-border)",
+                  borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 50, overflow: "hidden",
+                }}
+              >
+                {STATUS_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    onClick={() => { setStatusFilter(o.value); setFilterOpen(false); }}
+                    style={{
+                      width: "100%", textAlign: "left", padding: "9px 14px", border: "none",
+                      background: o.value === statusFilter ? "var(--color-bg-soft)" : "transparent",
+                      color: o.value === statusFilter ? "var(--color-primary)" : "var(--color-text)",
+                      fontFamily: "var(--font-sans)", fontSize: "0.85rem", cursor: "pointer",
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ position: "relative", maxWidth: 220, width: "100%" }}>
+            <Search
+              size={14}
+              strokeWidth={1.8}
+              style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--color-text-muted)", pointerEvents: "none" }}
+            />
+            <input
+              className="input"
+              placeholder="Filter by branch ID..."
+              value={branchId}
+              onChange={(e) => setBranchId(e.target.value)}
+              style={{ paddingLeft: 36 }}
+            />
+          </div>
         </div>
       </div>
 
@@ -144,6 +172,9 @@ export default function ReviewsPage() {
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
                 {r.menuItemName && (
                   <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>on {r.menuItemName}</span>
+                )}
+                {r.branchId && (
+                  <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>branch: {r.branchId}</span>
                 )}
                 {r.createdAt && (
                   <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>{formatDisplayDate(r.createdAt)}</span>
