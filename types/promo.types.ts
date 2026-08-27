@@ -3,7 +3,8 @@ export type PromoDiscountType = 'PERCENTAGE' | 'FIXED';
 export interface PromoCode {
   id: string;
   code: string;
-  branchId: string;
+  branchId: string | null;
+  branch: { id: string; name: string } | null;
   description: string;
   discountType: PromoDiscountType;
   discountValue: number;
@@ -14,12 +15,12 @@ export interface PromoCode {
   startDate: string; // ISO date string
   endDate: string; // ISO date string
   isActive: boolean;
-  currentUses?: number; 
+  currentUses?: number;
   createdAt?: string;
-  updatedAt?: string; 
+  updatedAt?: string;
 }
 
-// POST /admin/promo-codes 
+// POST /admin/promo-codes
 export interface CreatePromoCodePayload {
   code: string;
   branchId: string;
@@ -35,11 +36,10 @@ export interface CreatePromoCodePayload {
   isActive: boolean;
 }
 
-
 export type UpdatePromoCodePayload = Partial<Omit<CreatePromoCodePayload, 'code'>>;
 
 export interface PromoCodeFilters {
   search?: string;
   isActive?: boolean;
-  branchId?: string; 
+  branchId?: string;
 }

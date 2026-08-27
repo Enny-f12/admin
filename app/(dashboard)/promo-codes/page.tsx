@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import {
   Plus, Search, ChevronLeft, ChevronRight, X, SquarePen, Trash2, ChevronDown,
 } from "lucide-react";
+import { useBranch } from "../layout";
 import { usePromoCodeStore } from "@/store/usePromoCodeStore";
 import { PromoCode, PromoDiscountType, CreatePromoCodePayload } from "@/types/promo.types";
 
@@ -29,10 +30,6 @@ const EMPTY_FORM = {
 
 const PAGE_SIZE = 10;
 
-// GET /admin/promo-codes returned no example response body in Swagger, so
-// dates here are assumed ISO strings (same convention as banners). If the
-// real payload sends plain "YYYY-MM-DD", these still work unchanged since
-// slice(0, 10) is a no-op on an already-short string.
 function toInputDate(iso: string) {
   return iso ? iso.slice(0, 10) : "";
 }
@@ -48,6 +45,7 @@ function formatDiscount(type: PromoDiscountType, value: number) {
 }
 
 export default function PromoCodesPage() {
+  const branch = useBranch();
   const {
     promoCodes, promoCodesLoading, promoCodesError,
     isSavingPromoCode, deletingPromoCodeId,
@@ -60,9 +58,13 @@ export default function PromoCodesPage() {
   const [editItem, setEditItem] = useState<PromoCode | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
 
+  // Re-fetch whenever the active branch changes — mirrors CustomersPage.
+  // branch.id is "" until useAuthStore resolves it, so skip until we
+  // actually have one to avoid firing a request with an empty branchId.
   useEffect(() => {
-    fetchPromoCodes();
-  }, [fetchPromoCodes]);
+    if (!branch?.id) return;
+    fetchPromoCodes(branch.id);
+  }, [branch?.id, fetchPromoCodes]);
 
   const filtered = (promoCodes ?? []).filter(
     (p) =>
@@ -84,7 +86,11 @@ export default function PromoCodesPage() {
 
   const openAdd = () => {
     setEditItem(null);
-    setForm(EMPTY_FORM);
+    // Default the new promo to the currently active branch instead of
+    // leaving it blank — avoids a Super Admin accidentally creating a
+    // promo scoped to no branch (or typing an invalid id) while viewing
+    // a specific branch.
+    setForm({ ...EMPTY_FORM, branchId: branch?.id ?? "" });
     setModalOpen(true);
   };
 
@@ -131,15 +137,21 @@ export default function PromoCodesPage() {
       isActive: form.isActive,
     };
 
+    let success: boolean;
     if (editItem) {
-      // `code` intentionally omitted — see UpdatePromoCodePayload note in
-      // the types file, PATCH's Swagger example doesn't include it.
-      const success = await updatePromoCode(editItem.id, shared);
-      if (success) setModalOpen(false);
+      success = await updatePromoCode(editItem.id, shared);
     } else {
       const payload: CreatePromoCodePayload = { code: form.code.trim().toUpperCase(), ...shared };
-      const success = await createPromoCode(payload);
-      if (success) setModalOpen(false);
+      success = await createPromoCode(payload);
+    }
+
+    // Re-sync the list against the active branch after a mutation, since
+    // the store just appends/patches the item it got back — if a Super
+    // Admin created a promo for a *different* branch than the one they're
+    // currently viewing, it'd otherwise show up in the wrong branch's list.
+    if (success) {
+      setModalOpen(false);
+      if (branch?.id) fetchPromoCodes(branch.id);
     }
   };
 
@@ -153,7 +165,10 @@ export default function PromoCodesPage() {
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
+            <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
+              {branch?.name ?? "—"}
+            </p>
+            <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
               PROMO CODES
             </h1>
             <p style={{ fontSize: "0.875rem", fontWeight: 400, color: "var(--color-text-muted)", margin: "4px 0 0" }}>
@@ -231,7 +246,7 @@ export default function PromoCodesPage() {
                         </p>
                       </td>
                       <td style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-                        {p.branchId || "—"}
+                        {p.branch?.name ?? "—"}
                       </td>
                       <td style={{ fontWeight: 500, color: "var(--color-primary)" }}>
                         {formatDiscount(p.discountType, p.discountValue)}
@@ -359,13 +374,24 @@ export default function PromoCodesPage() {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>Branch ID</label>
-              <input
-                className="input"
-                placeholder="e.g. branch-001"
-                value={form.branchId}
-                onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))}
-              />
+              <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>Branch</label>
+              {branch?.canPickBranch ? (
+                <div style={{ position: "relative" }}>
+                  <select
+                    className="input appearance-none"
+                    value={form.branchId}
+                    onChange={(e) => setForm((f) => ({ ...f, branchId: e.target.value }))}
+                    style={{ paddingRight: "2.5rem" }}
+                  >
+                    {branch.branches.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} strokeWidth={1.8} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--color-text-muted)" }} />
+                </div>
+              ) : (
+                <input className="input" value={branch?.name ?? ""} disabled style={{ opacity: 0.6 }} />
+              )}
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

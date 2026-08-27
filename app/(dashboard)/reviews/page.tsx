@@ -5,7 +5,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Star, Eye, EyeOff, Flag, ChevronDown, Search } from "lucide-react";
+import { Star, Eye, EyeOff, Flag, ChevronDown } from "lucide-react";
+import { useBranch } from "../layout";
 import { useReviewStore } from "@/store/useReviewStore";
 import { Review, ReviewStatus } from "@/types/review.types";
 
@@ -22,10 +23,7 @@ function statusBadgeClass(status: ReviewStatus) {
   return "badge badge-gray";
 }
 
-// UNCONFIRMED — see review.types.ts. createdAt isn't guaranteed to exist
-// on the real response yet, so this falls back gracefully instead of
-// crashing on a missing field.
-function formatDisplayDate(iso?: string) {
+function formatDisplayDate(iso?: string | null) {
   if (!iso) return "—";
   const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
   if (!y || !m || !d) return "—";
@@ -33,25 +31,19 @@ function formatDisplayDate(iso?: string) {
 }
 
 export default function ReviewsPage() {
+  const branch = useBranch();
   const { reviews, reviewsLoading, reviewsError, updatingStatusId, fetchReviews, updateReviewStatus } = useReviewStore();
 
   const [statusFilter, setStatusFilter] = useState<ReviewStatus | "all">("all");
   const [filterOpen, setFilterOpen] = useState(false);
-  const [branchId, setBranchId] = useState("");
 
-  // Debounce the branchId text input so we're not firing a request on
-  // every keystroke — branchId is a server-side query param here (unlike
-  // promo-codes' code/description search which filters an already-fetched
-  // in-memory list), so each change means a real network call.
+  // branchId now comes from the active branch context, not a free-text
+  // field — matches how Customers and Promo Codes filter. Re-fetch
+  // whenever the status filter or the active branch changes.
   useEffect(() => {
-    const handle = setTimeout(() => {
-      fetchReviews(
-        statusFilter === "all" ? undefined : statusFilter,
-        branchId.trim() || undefined
-      );
-    }, 300);
-    return () => clearTimeout(handle);
-  }, [statusFilter, branchId, fetchReviews]);
+    if (!branch?.id) return;
+    fetchReviews(statusFilter === "all" ? undefined : statusFilter, branch.id);
+  }, [statusFilter, branch?.id, fetchReviews]);
 
   const handleModerate = (review: Review, status: ReviewStatus) => {
     if (review.status === status) return;
@@ -62,7 +54,10 @@ export default function ReviewsPage() {
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
       <div>
-        <h1 style={{ margin: 0, fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
+        <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
+          {branch?.name ?? "—"}
+        </p>
+        <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
           REVIEWS
         </h1>
         <p style={{ fontSize: "0.875rem", fontWeight: 400, color: "var(--color-text-muted)", margin: "4px 0 0" }}>
@@ -71,60 +66,43 @@ export default function ReviewsPage() {
       </div>
 
       <div className="card" style={{ padding: "16px 20px" }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-          <div style={{ position: "relative", maxWidth: 220, width: "100%" }}>
-            <button
-              onClick={() => setFilterOpen((v) => !v)}
+        <div style={{ position: "relative", maxWidth: 220, width: "100%" }}>
+          <button
+            onClick={() => setFilterOpen((v) => !v)}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "9px 12px", border: "1px solid var(--color-border)", borderRadius: 8,
+              background: "var(--color-bg-input)", fontSize: "0.875rem", color: "var(--color-text)",
+              cursor: "pointer", fontFamily: "var(--font-sans)", gap: 8,
+            }}
+          >
+            <span>{STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label}</span>
+            <ChevronDown size={14} strokeWidth={1.8} color="var(--color-text-muted)" />
+          </button>
+          {filterOpen && (
+            <div
               style={{
-                width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "9px 12px", border: "1px solid var(--color-border)", borderRadius: 8,
-                background: "var(--color-bg-input)", fontSize: "0.875rem", color: "var(--color-text)",
-                cursor: "pointer", fontFamily: "var(--font-sans)", gap: 8,
+                position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+                background: "var(--color-bg-card)", border: "1px solid var(--color-border)",
+                borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 50, overflow: "hidden",
               }}
             >
-              <span>{STATUS_OPTIONS.find((o) => o.value === statusFilter)?.label}</span>
-              <ChevronDown size={14} strokeWidth={1.8} color="var(--color-text-muted)" />
-            </button>
-            {filterOpen && (
-              <div
-                style={{
-                  position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
-                  background: "var(--color-bg-card)", border: "1px solid var(--color-border)",
-                  borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 50, overflow: "hidden",
-                }}
-              >
-                {STATUS_OPTIONS.map((o) => (
-                  <button
-                    key={o.value}
-                    onClick={() => { setStatusFilter(o.value); setFilterOpen(false); }}
-                    style={{
-                      width: "100%", textAlign: "left", padding: "9px 14px", border: "none",
-                      background: o.value === statusFilter ? "var(--color-bg-soft)" : "transparent",
-                      color: o.value === statusFilter ? "var(--color-primary)" : "var(--color-text)",
-                      fontFamily: "var(--font-sans)", fontSize: "0.85rem", cursor: "pointer",
-                    }}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div style={{ position: "relative", maxWidth: 220, width: "100%" }}>
-            <Search
-              size={14}
-              strokeWidth={1.8}
-              style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--color-text-muted)", pointerEvents: "none" }}
-            />
-            <input
-              className="input"
-              placeholder="Filter by branch ID..."
-              value={branchId}
-              onChange={(e) => setBranchId(e.target.value)}
-              style={{ paddingLeft: 36 }}
-            />
-          </div>
+              {STATUS_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  onClick={() => { setStatusFilter(o.value); setFilterOpen(false); }}
+                  style={{
+                    width: "100%", textAlign: "left", padding: "9px 14px", border: "none",
+                    background: o.value === statusFilter ? "var(--color-bg-soft)" : "transparent",
+                    color: o.value === statusFilter ? "var(--color-primary)" : "var(--color-text)",
+                    fontFamily: "var(--font-sans)", fontSize: "0.85rem", cursor: "pointer",
+                  }}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -154,9 +132,9 @@ export default function ReviewsPage() {
             }}
           >
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 5 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 5, flexWrap: "wrap" }}>
                 <p style={{ margin: 0, fontWeight: 600, fontSize: "0.875rem", color: "var(--color-heading)" }}>
-                  {r.customerName ?? "Anonymous"}
+                  {r.user?.fullName ?? "Anonymous"}
                 </p>
                 <span className={statusBadgeClass(r.status)}>{r.status}</span>
                 {typeof r.rating === "number" && (
@@ -166,16 +144,26 @@ export default function ReviewsPage() {
                   </span>
                 )}
               </div>
+
+              {r.title && (
+                <p style={{ margin: "0 0 2px", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)" }}>
+                  {r.title}
+                </p>
+              )}
               <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text)", lineHeight: 1.5 }}>
                 {r.comment ?? <span style={{ color: "var(--color-text-muted)" }}>No comment text</span>}
               </p>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6 }}>
-                {r.menuItemName && (
-                  <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>on {r.menuItemName}</span>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+                {r.menuItem?.name && (
+                  <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>on {r.menuItem.name}</span>
                 )}
-                {r.branchId && (
-                  <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>branch: {r.branchId}</span>
+                {r.order?.orderNumber && (
+                  <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>{r.order.orderNumber}</span>
                 )}
+                <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
+                  {r.branch?.name ?? "—"}
+                </span>
                 {r.createdAt && (
                   <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>{formatDisplayDate(r.createdAt)}</span>
                 )}
