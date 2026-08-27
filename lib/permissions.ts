@@ -1,29 +1,28 @@
-
-
 export type Role =
   | "SUPER_ADMIN"
   | "MANAGER"
   | "ORDER_TAKER"
-  | "INVENTORY_COUNTER"
+  | "INVENTORY_COUNTER_STAFF"
   | "CUSTOMER_CARE"
   | "CASHIER"
   | "ACCOUNTANT"
-  | "KITCHEN_STAFF";
+  | "KITCHEN_STAFF"
+  | "DELIVERY_COORDINATOR";
 
+// Order matches GET /admin/staff/role-defaults `roles`, purely so a diff
+// against that response is easy to eyeball.
 export const ROLES: Role[] = [
   "SUPER_ADMIN",
   "MANAGER",
-  "ORDER_TAKER",
-  "INVENTORY_COUNTER",
-  "CUSTOMER_CARE",
-  "CASHIER",
-  "ACCOUNTANT",
   "KITCHEN_STAFF",
+  "CASHIER",
+  "ORDER_TAKER",
+  "DELIVERY_COORDINATOR",
+  "INVENTORY_COUNTER_STAFF",
+  "ACCOUNTANT",
+  "CUSTOMER_CARE",
 ];
 
-// Every href that currently exists in NAV_SECTIONS. Kept as a typed const
-// object (not raw strings) so a typo in ROLE_PERMISSIONS below is a
-// compile error, not a silent bug.
 export const ROUTES = {
   dashboard: "/dashboard",
   morningCount: "/inventory/morning-count",
@@ -52,83 +51,134 @@ export const ROUTES = {
 export type RouteKey = keyof typeof ROUTES;
 export type Route = (typeof ROUTES)[RouteKey];
 
-const ALL_ROUTES = Object.values(ROUTES) as Route[];
-
-const FINANCE_SYSTEM_ROUTES: Route[] = [
-  ROUTES.accounting,
-  ROUTES.analytics,
-  ROUTES.auditLogs,
-  ROUTES.settings,
-];
+// A permission key that deliberately matches nothing real. Used for
+// routes below that have no corresponding key in
+// GET /admin/staff/permissions yet — see ROUTE_PERMISSIONS comment.
+const UNMAPPED = "__no_backend_permission_key__";
 
 // ─────────────────────────────────────────────────────────────
-// ROLE_PERMISSIONS — explicit allow-list per role. A role not listed
-// here, or a route not in its list, means NO access.
+// ROUTE_PERMISSIONS — which granular permission key(s) unlock each
+// route. A staff member needs AT LEAST ONE of the listed keys (in either
+// their `permissions` or `invPermissions` grant) to see/reach that route.
+//
+// Dashboard is a special case, NOT gated by permission keys — see
+// ROLE_RESTRICTED_ROUTES below, which overrides this entirely for it.
+// Left as [] here only as the "no restriction" fallback shape; the real
+// rule lives in ROLE_RESTRICTED_ROUTES.
+//
+// Two routes — Reviews and Audit Logs — have NO matching permission key
+// in the backend's response at all, so they're pinned to UNMAPPED, which
+// nothing will ever satisfy except the SUPER_ADMIN bypass below.
+// Flagging for backend: either add reviews:view / audit:view keys, or
+// tell us which existing key should gate these.
 // ─────────────────────────────────────────────────────────────
-export const ROLE_PERMISSIONS: Record<Role, Route[]> = {
-  SUPER_ADMIN: ALL_ROUTES,
-
-  // "all except staff, finance and system ui's section"
-  
-  MANAGER: ALL_ROUTES.filter(
-    (r) => r !== ROUTES.staff && !FINANCE_SYSTEM_ROUTES.includes(r)
-  ),
-
-  // "only orders" — taken literally. Walk-in/Phone included since it's a
-  // sub-page of Orders and matches the ERP table's "create manual orders
-  // for walk-in/phone customers." Drop ROUTES.walkIn if Order Taker
-  // should be locked to /orders alone.
-  ORDER_TAKER: [ROUTES.orders, ROUTES.walkIn],
-
-  // "food inventory and morning count"
-  INVENTORY_COUNTER: [ROUTES.foodInventory, ROUTES.morningCount],
-
-  // "food inventory, orders, reservations"
-  CUSTOMER_CARE: [ROUTES.foodInventory, ROUTES.orders, ROUTES.reservations],
-
-  // "orders, payment"
-  CASHIER: [ROUTES.orders, ROUTES.payments],
-
-  // "accounting" — the ERP table's Accountant also gets read-only
-  // sales/COGS/wastage/profit-loss reports with CSV/Excel export, which
-  // more plausibly lives under Analytics than Accounting alone. Not in
-  // your shorthand though, so left out until confirmed.
-  ACCOUNTANT: [ROUTES.accounting],
-
-  // Not in the ERP table at all — new role from your shorthand list.
-  KITCHEN_STAFF: [ ROUTES.kitchen],
+export const ROUTE_PERMISSIONS: Record<Route, string[]> = {
+  [ROUTES.dashboard]: [],
+  [ROUTES.morningCount]: ["inventory:stock_count", "inventory:add_stock"],
+  [ROUTES.stockInventory]: ["inventory:view"],
+  [ROUTES.drinksFridge]: ["inventory:manage_drinks"],
+  [ROUTES.suppliers]: ["inventory:manage_suppliers"],
+  [ROUTES.foodInventory]: ["inventory:manage_food"],
+  [ROUTES.reconciliation]: ["inventory:adjust", "inventory:view_movements"],
+  [ROUTES.orders]: ["orders:view"],
+  [ROUTES.walkIn]: ["walkin:create_order"],
+  [ROUTES.kitchen]: ["kitchen:view_orders"],
+  [ROUTES.payments]: ["payments:view"],
+  [ROUTES.reservations]: ["reservations:view"],
+  [ROUTES.delivery]: ["drivers:view", "drivers:assign"],
+  [ROUTES.menu]: ["menu:view"],
+  [ROUTES.customers]: ["customers:view"],
+  [ROUTES.staff]: ["staff:view"],
+  [ROUTES.promoCodes]: ["promos:view"],
+  [ROUTES.reviews]: [UNMAPPED], // TODO(BACKEND): no reviews:* key exists
+  [ROUTES.accounting]: ["accounting:view"],
+  [ROUTES.analytics]: ["analytics:view"],
+  [ROUTES.auditLogs]: [UNMAPPED], // TODO(BACKEND): no audit:* key exists
+  [ROUTES.settings]: ["settings:view"],
 };
 
-export function hasAccess(role: Role, route: Route): boolean {
-  return ROLE_PERMISSIONS[role]?.includes(route) ?? false;
+// ─────────────────────────────────────────────────────────────
+// ROLE_RESTRICTED_ROUTES — routes gated by ROLE membership instead of
+// granular permission grants. Checked BEFORE ROUTE_PERMISSIONS in
+// hasAccess() below; if a route appears here, its ROUTE_PERMISSIONS
+// entry is ignored entirely for that route.
+//
+// Currently just the dashboard, restricted to Manager + Super Admin per
+// product decision — there's no dashboard:view key in
+// GET /admin/staff/permissions to hang this on, and "only these two
+// roles" isn't really a grantable permission anyway, so a role allowlist
+// is the right tool here rather than stretching the permission model to
+// fit it.
+// ─────────────────────────────────────────────────────────────
+const ROLE_RESTRICTED_ROUTES: Partial<Record<Route, string[]>> = {
+  [ROUTES.dashboard]: ["SUPER_ADMIN", "MANAGER"],
+};
+
+const ALL_ROUTES = Object.values(ROUTES) as Route[];
+
+/**
+ * The shape route-gating actually needs from a staff member: their two
+ * granted-permission arrays plus their role (role drives the
+ * SUPER_ADMIN full-access bypass and any ROLE_RESTRICTED_ROUTES checks;
+ * everything else is gated purely on live permission grants, which is
+ * what makes this dynamic — editing someone's checkboxes in the staff
+ * modal changes their nav immediately, no redeploy needed).
+ */
+export interface AccessSubject {
+  role: string;
+  permissions: string[];
+  invPermissions: string[];
 }
 
-// Filters a NAV_SECTIONS-shaped array down to what a role can see, and
-// drops a whole section if it ends up with zero visible items.
-export function filterNavSections<
-  T extends { title: string; items: { href: string }[] }
->(sections: T[], role: Role): T[] {
+export function hasAccess(subject: AccessSubject, route: Route): boolean {
+  if (subject.role === "SUPER_ADMIN") return true;
+
+  const roleAllowlist = ROLE_RESTRICTED_ROUTES[route];
+  if (roleAllowlist) return roleAllowlist.includes(subject.role);
+
+  const required = ROUTE_PERMISSIONS[route];
+  if (!required || required.length === 0) return true;
+  // Defensive fallback: if permissions/invPermissions ever come back
+  // undefined (e.g. an endpoint that doesn't populate them the way
+  // login does), treat it as "no extra grants" rather than throwing on
+  // the spread below.
+  const granted = new Set([...(subject.permissions ?? []), ...(subject.invPermissions ?? [])]);
+  return required.some((key) => granted.has(key));
+}
+
+// Filters a NAV_SECTIONS-shaped array down to what this staff member can
+// actually see, and drops a whole section if it ends up with zero
+// visible items.
+export function filterNavSections<T extends { title: string; items: { href: string }[] }>(
+  sections: T[],
+  subject: AccessSubject
+): T[] {
   return sections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => hasAccess(role, item.href as Route)),
+      items: section.items.filter((item) => hasAccess(subject, item.href as Route)),
     }))
     .filter((section) => section.items.length > 0);
 }
 
-// First accessible route for a role — used by RouteGuard (see
-// components/auth/RouteGuard.tsx) to redirect somewhere valid instead of
-// a hardcoded /dashboard every role may not actually have.
-export function getDefaultRoute(role: Role): Route {
-  return ROLE_PERMISSIONS[role]?.[0] ?? ROUTES.dashboard;
+// First accessible route for this staff member — used by RouteGuard to
+// redirect somewhere valid instead of a hardcoded /dashboard they may
+// not actually have. For most non-Manager/Super-Admin roles this
+// deliberately skips dashboard (see ROLE_RESTRICTED_ROUTES) and lands on
+// their first permitted operational route instead.
+export function getDefaultRoute(subject: AccessSubject): Route {
+  return ALL_ROUTES.find((r) => hasAccess(subject, r)) ?? ROUTES.dashboard;
 }
 
-// True if `pathname` is inside an allowed route for this role. Matches by
-// prefix, not exact string — /orders/12345 should count as allowed for
-// any role that has /orders, without every dynamic order-detail path
-// needing its own entry in ROUTES.
-export function isPathAllowed(role: Role, pathname: string): boolean {
-  const allowed = ROLE_PERMISSIONS[role];
-  if (!allowed) return false;
-  return allowed.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+// True if `pathname` is inside a route this staff member can access.
+// Matches by prefix — /orders/12345 counts as allowed for anyone with
+// access to /orders. No always-allowed-paths bypass anymore: /profile
+// was the only one and that page no longer exists (change password now
+// lives in a header modal, not a routed page).
+export function isPathAllowed(subject: AccessSubject, pathname: string): boolean {
+  return ALL_ROUTES.some(
+    (route) =>
+      hasAccess(subject, route) &&
+      (pathname === route || pathname.startsWith(`${route}/`))
+  );
 }

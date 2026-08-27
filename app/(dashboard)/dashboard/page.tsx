@@ -4,7 +4,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  DollarSign,
   ClipboardList,
   Users,
   Activity,
@@ -24,6 +23,7 @@ import {
   X,
   MapPin,
   User as UserIcon,
+  HashIcon,
 } from "lucide-react";
 import { useBranch } from "../layout";
 import { useDashboardStore } from "@/store/useDashboardStore";
@@ -242,7 +242,7 @@ export default function DashboardPage() {
       value: `₦${(summary?.revenueToday ?? 0).toLocaleString()}`,
       change: summary?.revenueChangePercent != null ? `${summary.revenueChangePercent}%` : "–",
       up: (summary?.revenueChangePercent ?? 0) >= 0,
-      icon: DollarSign,
+      icon: HashIcon,
     },
     {
       label: "Orders Today",

@@ -51,8 +51,8 @@ export const paymentsAdminService = {
   // "Unknown argument" Prisma error pattern) if the backend doesn't
   // accept it yet.
   createManualSale: (payload: CreateManualSalePayload & { branchId?: string }) =>
-    apiClient.post<CreateManualSaleResponse>('/admin/manual-sales', payload).then((r) => r.data),
+    apiClient.post<CreateManualSaleResponse>('/admin/sales/manual', payload).then((r) => r.data),
 
-  emailReceipt: (saleId: string) =>
-    apiClient.post<{ success: boolean }>(`/admin/manual-sales/${saleId}/email-receipt`).then((r) => r.data),
+  emailReceipt: (Id: string) =>
+    apiClient.post<{ success: boolean }>(`/admin/sales/{Id}/email-receipt`).then((r) => r.data),
 };

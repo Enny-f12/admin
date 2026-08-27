@@ -34,7 +34,7 @@ export interface StockAlert {
 export interface Supplier {
   id: string;
   name: string;
-  type: string; // TODO: confirm enum values via Swagger "Schema" tab (currently free text — see AddSupplierModal)
+  type: string; 
   contactPerson: string;
   phone: string;
   address: string;
@@ -95,16 +95,7 @@ export interface SaveStockThresholdsPayload {
   items: { itemId: string; threshold: number; notify: boolean; autoReorder: boolean }[];
 }
 
-// Registers a brand-new item into inventory tracking (POST
-// /admin/stock/add). Confirmed against the live Swagger schema on
-// 20-Aug-26: name, unit, itemId, branchId, quantity, costPerUnit,
-// supplierId, invoiceNumber, reason. `itemId` is part of the schema
-// but is NOT user-provided here — there's no item to reference yet,
-// since this call is what creates one. It is always sent as `null`
-// and deliberately has no corresponding field in AddStockView; if the
-// backend turns out to want something else in that slot (an empty
-// string, an omitted key), that's a one-line change once it's
-// reachable again to confirm.
+
 export interface AddStockPayload {
   name: string;
   unit: string;

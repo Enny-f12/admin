@@ -1,6 +1,12 @@
-// services/staff.service.ts
 import { apiClient } from '@/lib/api-client';
-import { StaffMember, CreateStaffPayload, UpdateStaffPayload, StaffFilters } from '@/types/staff';
+import {
+  StaffMember,
+  CreateStaffPayload,
+  UpdateStaffPayload,
+  StaffFilters,
+  PermissionsResponse,
+  RoleDefaultsResponse,
+} from '@/types/staff';
 
 export const staffService = {
   getStaff: (filters: StaffFilters = {}) =>
@@ -16,4 +22,10 @@ export const staffService = {
   // rather than deleting the record.
   deleteStaff: (id: string) =>
     apiClient.delete(`/admin/staff/${id}`).then((r) => r.data),
+
+  getPermissions: () =>
+    apiClient.get<PermissionsResponse>('/admin/staff/permissions').then((r) => r.data),
+
+  getRoleDefaults: () =>
+    apiClient.get<RoleDefaultsResponse>('/admin/staff/role-defaults').then((r) => r.data),
 };

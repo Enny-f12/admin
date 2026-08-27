@@ -1,4 +1,6 @@
-// types/menu.ts
+// types/fm.ts
+// Full-menu types — same shapes as types/menu.ts but with branchId removed
+// entirely (no per-branch filtering anywhere in this variant).
 
 export interface MenuCategory {
   id: string;
@@ -42,15 +44,14 @@ export interface MenuItem {
 
 export interface GetItemsFilters {
   categoryId?: string;
-  branchId?: string;
   dietaryTags?: string[];
 }
 
-
-export interface GetCategoriesFilters {
-  branchId?: string;
-}
-
+// No branch-based filtering for categories in this variant — categories
+// are fetched vendor-wide, so there's nothing left to put in this filter.
+// Kept as an (empty) type rather than deleted so call sites that pass
+// `{}` don't need to change if filters are added back later.
+export type GetCategoriesFilters = Record<string, never>;
 
 export interface CreateMenuItemPayload {
   vendorId: string;

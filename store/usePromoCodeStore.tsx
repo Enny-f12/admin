@@ -22,13 +22,10 @@ interface PromoCodeState {
   promoCodesError: boolean;
 
   isSavingPromoCode: boolean;
-  // Per-row id rather than a single shared boolean — with a shared flag,
-  // deleting one row disables the delete button on every row while the
-  // request is in flight. Same gap that was flagged (and left as-is) on
-  // the menu items table; worth fixing here since it's cheap up front.
   deletingPromoCodeId: string | null;
 
-  fetchPromoCodes: () => Promise<void>;
+  // branchId is now required — GET /admin/promo-codes needs it.
+  fetchPromoCodes: (branchId: string) => Promise<void>;
   createPromoCode: (payload: CreatePromoCodePayload) => Promise<boolean>;
   updatePromoCode: (id: string, payload: UpdatePromoCodePayload) => Promise<boolean>;
   deletePromoCode: (id: string) => Promise<void>;
@@ -42,10 +39,10 @@ export const usePromoCodeStore = create<PromoCodeState>((set, get) => ({
   isSavingPromoCode: false,
   deletingPromoCodeId: null,
 
-  fetchPromoCodes: async () => {
+  fetchPromoCodes: async (branchId) => {
     set({ promoCodesLoading: true, promoCodesError: false });
     try {
-      const promoCodes = await promoCodeService.getPromoCodes();
+      const promoCodes = await promoCodeService.getPromoCodes(branchId);
       set({ promoCodes, promoCodesLoading: false });
     } catch {
       set({ promoCodesLoading: false, promoCodesError: true });
@@ -100,8 +97,6 @@ export const usePromoCodeStore = create<PromoCodeState>((set, get) => ({
       set({ deletingPromoCodeId: null });
       toast.success('Promo code deleted.');
     } catch (error) {
-      // Roll back the optimistic removal — the row reappears if the
-      // backend rejected the delete (e.g. code in use on an order).
       set({ promoCodes: previous, deletingPromoCodeId: null });
       toast.error(extractErrorMessage(error, 'Could not delete promo code.'));
     }

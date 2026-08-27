@@ -38,12 +38,14 @@ import {
   X,
   BadgePercent,
   Star,
+  KeyRound,
 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
 import PushSetup from "@/components/PushSetup";
+import ChangePasswordModal from "@/components/ChangePasswordModal";
 import { useAuthStore } from "@/store/useAuthStore";
 import RouteGuard from "@/components/auth/RouteGuard";
-import { filterNavSections, Role } from "@/lib/permissions";
+import { filterNavSections, AccessSubject } from "@/lib/permissions";
 
 /* ── Nav structure ── */
 const NAV_SECTIONS = [
@@ -198,74 +200,48 @@ export default function DashboardLayout({
   const [collapsed, setCollapsed] = useState(false);
   const [branchOpen, setBranchOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // NEW — change-password modal, triggerable from the desktop padlock
+  // icon or the mobile avatar dropdown below. Replaces the old /profile
+  // page entirely, which called GET /admin/staff (needs staff:view) and
+  // 403'd for most roles just to reach a page whose only real function
+  // was this same modal.
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  // NEW — mobile-only dropdown anchored to the avatar, consolidating
+  // notifications + change password into one menu since there isn't
+  // room for three separate header icons at narrow widths.
+  const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const pathname = usePathname();
   const sidebarW = collapsed ? 72 : 240;
 
   const { branches, branchesLoading, fetchBranches, user, loginBranchId } = useAuthStore();
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
 
-  // Access rule (updated to use preferences.assignedBranchIds, confirmed
-  // present on the real login response — e.g. a Manager with
-  // assignedBranchId: "3ee8..." also had
-  // preferences.assignedBranchIds: ["3ee8...", "adf6..."], meaning they're
-  // actually scoped to TWO branches, not the one the singular field
-  // suggested):
-  //  - SUPER_ADMIN always gets full branch-picker access to every branch,
-  //    regardless of what's in preferences.
-  //  - Anyone else with 2+ ids in preferences.assignedBranchIds gets a
-  //    picker too, but scoped ONLY to those branches — never the full list.
-  //  - Anyone with exactly 1 assigned branch (via preferences, or via the
-  //    singular assignedBranchId as a fallback for accounts where
-  //    preferences isn't populated) is locked, same as before.
-  //  - Zero assigned branches → "No branch assigned" state, unchanged.
   const assignedBranchIds = useMemo(() => {
     const prefs = user?.preferences?.assignedBranchIds;
     if (prefs && prefs.length > 0) return prefs;
-    // Fallback for any account that predates preferences being populated,
-    // or where it's missing for some other reason — don't silently lock
-    // someone out just because this newer field isn't set yet.
     return user?.assignedBranchId ? [user.assignedBranchId] : [];
-    // Dependency is the whole `user` object, not the two narrower property
-    // paths — React Compiler infers `user` as the dependency for this body
-    // regardless of how granular the array is written, so matching that
-    // exactly avoids the "could not preserve manual memoization" bailout.
   }, [user]);
 
   const isSuperAdmin = user?.role === "SUPER_ADMIN";
   const canPickBranch = isSuperAdmin || assignedBranchIds.length > 1;
 
-  // The branches this user is actually allowed to choose between.
-  // SUPER_ADMIN sees everything GET /auth/branches returns; everyone else
-  // — including multi-branch pickers — only sees their own assigned set.
-  // This is deliberately NOT the same as canPickBranch: a locked
-  // single-branch user still needs their one branch resolvable here so
-  // the header chip can show its real name instead of a fallback string.
   const pickableBranches = useMemo(() => {
     if (isSuperAdmin) return branches ?? [];
     return (branches ?? []).filter((b) => assignedBranchIds.includes(b.id));
   }, [isSuperAdmin, branches, assignedBranchIds]);
 
-  // Sidebar nav filtered to what this role can actually open. Deliberately
-  // renders as an empty section list (not the full NAV_SECTIONS) until
-  // `user` has loaded, rather than briefly showing every link and then
-  // shrinking the list once the role is known — showing a link that
-  // immediately redirects the moment it's clicked is worse than a nav
-  // that populates a beat after the rest of the shell.
-  const visibleSections = user?.role
-    ? filterNavSections(NAV_SECTIONS, user.role as Role)
+  const accessSubject: AccessSubject | null = user
+    ? { role: user.role, permissions: user.permissions, invPermissions: user.invPermissions }
+    : null;
+
+  const visibleSections = accessSubject
+    ? filterNavSections(NAV_SECTIONS, accessSubject)
     : [];
 
   useEffect(() => {
     fetchBranches();
   }, [fetchBranches]);
 
-  // Initial selection. Locked users (exactly one assigned branch) get it
-  // straight away. Pickers — SUPER_ADMIN or a multi-branch user — default
-  // to whatever branch they chose on the login screen (loginBranchId), but
-  // ONLY if that branch is actually one they're allowed to see; a
-  // multi-branch Manager's loginBranchId should never let them land on a
-  // branch outside their own preferences.assignedBranchIds. Otherwise,
-  // falls back to the first branch in their pickable set once it's loaded.
   useEffect(() => {
     if (selectedBranchId !== null) return;
     if (!canPickBranch) {
@@ -288,7 +264,6 @@ export default function DashboardLayout({
     }
   }, [canPickBranch, assignedBranchIds, isSuperAdmin, loginBranchId, selectedBranchId, pickableBranches]);
 
-  // Close the mobile drawer whenever the route changes.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMobileNavOpen(false);
@@ -316,11 +291,6 @@ export default function DashboardLayout({
     setBranch: (b) => setSelectedBranchId(b.id),
   };
 
-  // Title lookup intentionally still uses the full NAV_SECTIONS, not
-  // visibleSections — if a role-restricted page briefly renders before
-  // RouteGuard's redirect fires, the header should still show a real
-  // title rather than falling back to "Dashboard" for a page that isn't
-  // actually the dashboard.
   const pageTitle =
     NAV_SECTIONS.flatMap((s) => s.items).find((n) => n.href === pathname)
       ?.label ?? "Dashboard";
@@ -378,6 +348,18 @@ export default function DashboardLayout({
         .mobile-nav-overlay {
           display: none;
         }
+        /* NEW — desktop shows bell + padlock + static avatar as separate
+           icons; mobile consolidates them into a single avatar dropdown
+           trigger. Same 860px breakpoint the rest of the mobile layout
+           already switches on. */
+        .navbar-desktop-actions {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+        }
+        .navbar-mobile-trigger {
+          display: none;
+        }
         @media (max-width: 860px) {
           .sidebar {
             position: fixed;
@@ -416,6 +398,12 @@ export default function DashboardLayout({
           }
           .page-content {
             padding: 16px !important;
+          }
+          .navbar-desktop-actions {
+            display: none;
+          }
+          .navbar-mobile-trigger {
+            display: flex;
           }
         }
         @media (max-width: 420px) {
@@ -475,7 +463,6 @@ export default function DashboardLayout({
           >
             {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
           </button>
-          {/* Close button for the mobile drawer */}
           <button
             onClick={() => setMobileNavOpen(false)}
             aria-label="Close menu"
@@ -493,7 +480,7 @@ export default function DashboardLayout({
           </button>
         </div>
 
-        {/* Nav items — filtered by role, see visibleSections above */}
+        {/* Nav items — filtered by permission grants */}
         <nav
           style={{
             flex: 1,
@@ -591,7 +578,6 @@ export default function DashboardLayout({
             flexShrink: 0,
           }}
         >
-          {/* Logout */}
           <Link href="/login">
             <button
               style={{
@@ -628,11 +614,11 @@ export default function DashboardLayout({
             </button>
           </Link>
 
-          {/* User row — pulled from useAuthStore().user (fullName, role).
-              Shows a skeleton until the store has hydrated a user.
-              Links to /profile, same as the navbar avatar below. */}
-          <Link
-            href="/profile"
+          {/* User row — no longer a Link (there's no /profile page to send
+              it to anymore). Purely informational display now; ping me if
+              you'd rather this also open the change-password modal on
+              click for consistency with the navbar avatar. */}
+          <div
             style={{
               display: "flex",
               alignItems: "center",
@@ -640,16 +626,8 @@ export default function DashboardLayout({
               padding: collapsed ? "8px 0" : "8px 12px",
               justifyContent: collapsed ? "center" : "flex-start",
               marginTop: 4,
-              textDecoration: "none",
               borderRadius: 8,
-              transition: "background 0.15s",
             }}
-            onMouseEnter={(e) =>
-              ((e.currentTarget as HTMLAnchorElement).style.background = SB.hoverBg)
-            }
-            onMouseLeave={(e) =>
-              ((e.currentTarget as HTMLAnchorElement).style.background = "transparent")
-            }
           >
             <div
               style={{
@@ -706,11 +684,10 @@ export default function DashboardLayout({
                 )}
               </div>
             )}
-          </Link>
+          </div>
         </div>
       </aside>
 
-      {/* Backdrop for mobile drawer */}
       <div
         className={`mobile-nav-overlay${mobileNavOpen ? " open" : ""}`}
         onClick={() => setMobileNavOpen(false)}
@@ -718,7 +695,6 @@ export default function DashboardLayout({
 
       {/* ── Main area ── */}
       <div className="main-area">
-        {/* Navbar */}
         <header
           className="navbar-inner"
           style={{
@@ -770,11 +746,7 @@ export default function DashboardLayout({
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
-            {/* Branch selector — a picker (canPickBranch) sees the full
-                list of individual branches returned by the backend.
-                Everyone else is pinned to their own assignedBranchId and
-                sees a static, non-interactive chip — no dropdown,
-                nothing to switch. */}
+            {/* Branch selector — always visible at any width */}
             <div style={{ position: "relative" }}>
               {canPickBranch ? (
                 <button
@@ -890,40 +862,154 @@ export default function DashboardLayout({
               )}
             </div>
 
-            {/* Notifications — live, wired to GET /notifications */}
-            <NotificationBell />
+            {/* DESKTOP: bell + padlock + static avatar, all as separate
+                icons — hidden below 860px via .navbar-desktop-actions */}
+            <div className="navbar-desktop-actions">
+              <NotificationBell />
 
-            {/* Profile avatar — initials from useAuthStore().user, links
-                to /profile. Full details there are pulled from the staff
-                endpoint since useAuthStore().user only carries
-                fullName/role. */}
-            <Link
-              href="/profile"
-              title="Profile"
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: "50%",
-                background: "var(--color-primary)",
-                color: "#fff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "0.72rem",
-                fontWeight: 700,
-                textDecoration: "none",
-                flexShrink: 0,
-              }}
-            >
-              {user ? getInitials(user.fullName) : <Skeleton width={16} height={10} radius={4} />}
-            </Link>
+              <button
+                onClick={() => setPasswordModalOpen(true)}
+                title="Change password"
+                aria-label="Change password"
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--color-text-muted)",
+                  display: "flex",
+                  padding: 4,
+                  borderRadius: 6,
+                  transition: "color 0.15s",
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-muted)")}
+              >
+                <KeyRound size={18} strokeWidth={1.8} />
+              </button>
+
+              {/* Static — no longer a link to /profile. Purely a visual
+                  identity marker in the header now. */}
+              <div
+                title={user?.fullName ?? undefined}
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: "50%",
+                  background: "var(--color-primary)",
+                  color: "#fff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "0.72rem",
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {user ? getInitials(user.fullName) : <Skeleton width={16} height={10} radius={4} />}
+              </div>
+            </div>
+
+            {/* MOBILE: avatar becomes a dropdown trigger consolidating
+                notifications + change password — hidden above 860px via
+                .navbar-mobile-trigger */}
+            <div className="navbar-mobile-trigger" style={{ position: "relative" }}>
+              <button
+                onClick={() => setAvatarMenuOpen((v) => !v)}
+                aria-label="Account menu"
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: "50%",
+                  background: "var(--color-primary)",
+                  color: "#fff",
+                  border: "none",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "0.72rem",
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {user ? getInitials(user.fullName) : <Skeleton width={16} height={10} radius={4} />}
+              </button>
+
+              {avatarMenuOpen && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 8px)",
+                    right: 0,
+                    width: 220,
+                    background: "#fff",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: 10,
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
+                    overflow: "hidden",
+                    zIndex: 70,
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  {/* Embedding NotificationBell as-is inside the dropdown
+                      row — I don't have its internal markup, so whatever
+                      popover/click behavior it already has should carry
+                      over unchanged, just visually relocated here. If it
+                      looks cramped at this width, share that component
+                      and I'll adjust the row styling specifically. */}
+                  <div
+                    style={{
+                      padding: "10px 14px",
+                      borderBottom: "1px solid var(--color-border)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      fontSize: "0.85rem",
+                      color: "var(--color-text)",
+                    }}
+                  >
+                    <span>Notifications</span>
+                    <NotificationBell />
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setAvatarMenuOpen(false);
+                      setPasswordModalOpen(true);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      width: "100%",
+                      padding: "10px 14px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: "0.85rem",
+                      color: "var(--color-text)",
+                      textAlign: "left",
+                      fontFamily: "var(--font-sans)",
+                    }}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)")}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+                  >
+                    <KeyRound size={15} strokeWidth={1.8} />
+                    Change password
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
-        {/* Dimming overlay while branch dropdown is open */}
-        {canPickBranch && branchOpen && (
+        {(canPickBranch && branchOpen) || avatarMenuOpen ? (
           <div
-            onClick={() => setBranchOpen(false)}
+            onClick={() => {
+              setBranchOpen(false);
+              setAvatarMenuOpen(false);
+            }}
             style={{
               position: "fixed",
               inset: 0,
@@ -931,11 +1017,8 @@ export default function DashboardLayout({
               zIndex: 20,
             }}
           />
-        )}
+        ) : null}
 
-        {/* Page content — gated by RouteGuard so a page a role can't
-            access never actually renders, even briefly, before the
-            redirect fires. */}
         <main
           className="page-content no-scrollbar"
           style={{ flex: 1, overflowY: "auto", padding: "28px" }}
@@ -945,6 +1028,8 @@ export default function DashboardLayout({
           </BranchContext.Provider>
         </main>
       </div>
+
+      {passwordModalOpen && <ChangePasswordModal onClose={() => setPasswordModalOpen(false)} />}
     </div>
   );
 }

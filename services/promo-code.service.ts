@@ -9,23 +9,21 @@ import {
   UpdatePromoCodePayload,
 } from '@/types/promo.types';
 
-// All four endpoints below are confirmed live in Swagger under
-// "Admin Promo Codes" (GET/POST/PATCH/DELETE all returned 2xx codes in the
-// screenshots — no "not yet built" caveat needed like audit logs).
 export const promoCodeService = {
-  // GET /admin/promo-codes — no query params shown in Swagger, so this
-  // assumes it returns the full list unpaginated (unlike audit logs' {
-  // items, total }). If the list grows large enough to need pagination,
-  // that'll be a backend addition, not a frontend guess.
-  getPromoCodes: () =>
-    apiClient.get<PromoCode[]>('/admin/promo-codes').then((r) => r.data),
+  // GET /admin/promo-codes — branchId is a required query param.
+  getPromoCodes: (branchId: string) =>
+    apiClient
+      .get<PromoCode[]>('/admin/promo-codes', {
+        params: { branchId },
+      })
+      .then((r) => r.data),
 
-  // POST /admin/promo-codes
+  // POST /admin/promo-codes — branchId required in body (see payload type)
   createPromoCode: (payload: CreatePromoCodePayload) =>
     apiClient.post<PromoCode>('/admin/promo-codes', payload).then((r) => r.data),
 
-  // PATCH /admin/promo-codes/{id} — body omits `code` in the Swagger
-  // example, so `UpdatePromoCodePayload` excludes it too (see types file).
+  // PATCH /admin/promo-codes/{id} — body omits `code` but requires
+  // branchId, matching the Swagger example.
   updatePromoCode: (id: string, payload: UpdatePromoCodePayload) =>
     apiClient.patch<PromoCode>(`/admin/promo-codes/${id}`, payload).then((r) => r.data),
 

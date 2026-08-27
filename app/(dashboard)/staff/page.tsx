@@ -1,4 +1,3 @@
-// app/(admin)/staff/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -14,7 +13,7 @@ import {
 import { useBranch } from "../layout";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useStaffStore } from "@/store/useStaffStore";
-import { StaffMember, CreateStaffPayload } from "@/types/staff";
+import { StaffMember, CreateStaffPayload, RoleDefaultsResponse, PermissionsResponse } from "@/types/staff";
 import { Branch } from "@/types/auth.types";
 
 type StaffForm = {
@@ -28,46 +27,14 @@ type StaffForm = {
   sendWelcome: boolean;
 };
 
-// CONFIRMED via a live 400 — "role must be one of the following values:
-// CUSTOMER, SUPER_ADMIN, MANAGER, KITCHEN_STAFF, DELIVERY_COORDINATOR,
-// DRIVER". The old ROLES list ("Admin", "Cashier", "Waiter") sent values
-// that don't exist on the backend at all. CUSTOMER is intentionally
-// excluded — that's the customer-app role, not something this staff
-// screen should ever assign.
-const ROLE_OPTIONS: { value: string; label: string }[] = [
-  { value: "MANAGER", label: "Manager" },
-  { value: "KITCHEN_STAFF", label: "Kitchen Staff" },
-  { value: "DELIVERY_COORDINATOR", label: "Delivery Coordinator" },
-  { value: "DRIVER", label: "Driver" },
-  // TODO(BACKEND): confirm SUPER_ADMIN is actually meant to be assignable
-  // from this modal, vs. reserved for a separate/protected flow. Included
-  // for now since the backend didn't say otherwise, but worth a product
-  // check before this ships.
-  { value: "SUPER_ADMIN", label: "Super Admin" },
-];
-
-function roleLabel(value: string) {
-  return ROLE_OPTIONS.find((r) => r.value === value)?.label ?? value.replace(/_/g, " ");
-}
-
-const INV_PERMISSIONS = [
-  "View inventory (all items)",
-  "Adjust manual items only",
-  "Override feed items (emergency only)",
-  "Configure feed settings (super admin only)",
-];
-
-const PERMISSIONS = [
-  "Orders - View",
-  "Orders - Update Status",
-  "Menu - Edit",
-  "Customers - View",
-];
-
 const EMPTY_FORM: StaffForm = {
   name: "", email: "", phone: "", role: "",
-  branches: [], invPermissions: ["Adjust manual items only"],
-  permissions: ["Orders - Update Status"], sendWelcome: true,
+  branches: [],
+  // No hardcoded defaults anymore — picking a role in the modal now
+  // auto-fills these from GET /admin/staff/role-defaults. Starts empty
+  // so "no role selected yet" doesn't imply any permissions.
+  invPermissions: [], permissions: [],
+  sendWelcome: true,
 };
 
 function formatLastSeen(iso: string | null) {
@@ -82,24 +49,54 @@ function formatLastSeen(iso: string | null) {
 }
 
 /* ══════════════════════════════════════════
+   LABEL FORMATTERS
+   Both endpoints return raw enum/permission keys with no display label
+   attached, so these do the prettifying client-side.
+══════════════════════════════════════════ */
+function titleCase(s: string) {
+  return s
+    .split("_")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+// "KITCHEN_STAFF" -> "Kitchen Staff", "CUSTOMER_CARE" -> "Customer Care"
+function roleLabel(value: string) {
+  return value ? titleCase(value) : value;
+}
+
+// "orders:update_status" -> "Orders - Update Status"
+// "inventory:stock_count" -> "Inventory - Stock Count"
+function permissionLabel(key: string) {
+  const [domain, action] = key.split(":");
+  if (!action) return titleCase(domain);
+  return `${titleCase(domain)} - ${titleCase(action)}`;
+}
+
+/* ══════════════════════════════════════════
    HELPERS
 ══════════════════════════════════════════ */
-function RoleDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function RoleDropdown({
+  value, onChange, roles, isLoading,
+}: { value: string; onChange: (v: string) => void; roles: string[]; isLoading: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{ position: "relative" }}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => roles.length > 0 && setOpen((v) => !v)}
         style={{
           width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "9px 12px", border: "1px solid var(--color-border)", borderRadius: 8,
           background: "var(--color-bg-input)", fontSize: "0.855rem",
           color: value ? "var(--color-text)" : "var(--color-text-muted)",
-          cursor: "pointer", fontFamily: "var(--font-sans)", gap: 8,
+          cursor: roles.length > 0 ? "pointer" : "default", fontFamily: "var(--font-sans)", gap: 8,
         }}
       >
-        <span>{value ? roleLabel(value) : "Select role"}</span>
+        <span>
+          {value ? roleLabel(value) : isLoading ? "Loading roles…" : roles.length === 0 ? "No roles available" : "Select role"}
+        </span>
         <ChevronDown size={14} strokeWidth={1.8} color="var(--color-text-muted)" />
       </button>
       {open && (
@@ -107,25 +104,26 @@ function RoleDropdown({ value, onChange }: { value: string; onChange: (v: string
           position: "absolute", bottom: "calc(100% + 4px)", left: 0, right: 0, zIndex: 200,
           background: "var(--color-bg-card)", border: "1px solid var(--color-border)",
           borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", overflow: "hidden",
+          maxHeight: 260, overflowY: "auto",
         }}>
-          {ROLE_OPTIONS.map((r) => (
+          {roles.map((r) => (
             <button
-              key={r.value}
+              key={r}
               type="button"
-              onClick={() => { onChange(r.value); setOpen(false); }}
+              onClick={() => { onChange(r); setOpen(false); }}
               style={{
                 width: "100%", textAlign: "left", padding: "9px 14px", border: "none",
-                background: r.value === value ? "var(--color-bg-soft)" : "transparent",
-                color: r.value === value ? "var(--color-primary)" : "var(--color-text)",
+                background: r === value ? "var(--color-bg-soft)" : "transparent",
+                color: r === value ? "var(--color-primary)" : "var(--color-text)",
                 fontFamily: "var(--font-sans)", fontSize: "0.85rem",
-                fontWeight: r.value === value ? 500 : 400, cursor: "pointer",
+                fontWeight: r === value ? 500 : 400, cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "space-between",
               }}
-              onMouseEnter={(e) => { if (r.value !== value) (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)"; }}
-              onMouseLeave={(e) => { if (r.value !== value) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+              onMouseEnter={(e) => { if (r !== value) (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)"; }}
+              onMouseLeave={(e) => { if (r !== value) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
-              {r.label}
-              {r.value === value && <Check size={13} strokeWidth={2.2} color="var(--color-primary)" />}
+              {roleLabel(r)}
+              {r === value && <Check size={13} strokeWidth={2.2} color="var(--color-primary)" />}
             </button>
           ))}
         </div>
@@ -166,12 +164,16 @@ function toggleArr(arr: string[], val: string): string[] {
 function StaffModal({
   editStaff,
   branches,
+  roleDefaults,
+  permissionsData,
   onClose,
   onSave,
   isSaving,
 }: {
   editStaff: StaffMember | null;
   branches: Branch[];
+  roleDefaults: RoleDefaultsResponse | null;
+  permissionsData: PermissionsResponse | null;
   onClose: () => void;
   onSave: (form: StaffForm) => void;
   isSaving: boolean;
@@ -194,6 +196,30 @@ function StaffModal({
         }
       : EMPTY_FORM
   );
+
+  const roles = roleDefaults?.roles ?? [];
+  const permissionOptions = permissionsData?.permissions ?? [];
+  const invPermissionOptions = permissionsData?.invPermissions ?? [];
+
+  // Picking a role auto-applies that role's default permission set from
+  // GET /admin/staff/role-defaults. Guarded so re-clicking the currently
+  // selected role doesn't wipe out permissions the user has since
+  // hand-edited. ASSUMPTION worth confirming with product: this overwrites
+  // existing checkbox state on every genuine role change, including when
+  // editing an existing staff member — if the intent is "only suggest
+  // defaults for brand-new staff", this needs a `!editStaff` guard added.
+  const handleRoleChange = (v: string) => {
+    setForm((f) => {
+      if (v === f.role) return f;
+      const roleDefault = roleDefaults?.defaults[v];
+      return {
+        ...f,
+        role: v,
+        permissions: roleDefault ? roleDefault.permissions : f.permissions,
+        invPermissions: roleDefault ? roleDefault.invPermissions : f.invPermissions,
+      };
+    });
+  };
 
   return (
     <div
@@ -238,7 +264,7 @@ function StaffModal({
         {/* Role */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>Role</label>
-          <RoleDropdown value={form.role} onChange={(v) => setForm((f) => ({ ...f, role: v }))} />
+          <RoleDropdown value={form.role} onChange={handleRoleChange} roles={roles} isLoading={!roleDefaults} />
         </div>
 
         {/* Branch Access */}
@@ -268,14 +294,20 @@ function StaffModal({
           <div
             style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10, background: "var(--color-bg-soft)" }}
           >
-            {INV_PERMISSIONS.map((p) => (
-              <Checkbox
-                key={p}
-                label={p}
-                checked={form.invPermissions.includes(p)}
-                onChange={() => setForm((f) => ({ ...f, invPermissions: toggleArr(f.invPermissions, p) }))}
-              />
-            ))}
+            {invPermissionOptions.length === 0 ? (
+              <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+                {permissionsData ? "No inventory permissions available." : "Loading…"}
+              </p>
+            ) : (
+              invPermissionOptions.map((p) => (
+                <Checkbox
+                  key={p}
+                  label={permissionLabel(p)}
+                  checked={form.invPermissions.includes(p)}
+                  onChange={() => setForm((f) => ({ ...f, invPermissions: toggleArr(f.invPermissions, p) }))}
+                />
+              ))
+            )}
           </div>
         </div>
 
@@ -285,14 +317,20 @@ function StaffModal({
           <div
             style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10, background: "var(--color-bg-soft)" }}
           >
-            {PERMISSIONS.map((p) => (
-              <Checkbox
-                key={p}
-                label={p}
-                checked={form.permissions.includes(p)}
-                onChange={() => setForm((f) => ({ ...f, permissions: toggleArr(f.permissions, p) }))}
-              />
-            ))}
+            {permissionOptions.length === 0 ? (
+              <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+                {permissionsData ? "No permissions available." : "Loading…"}
+              </p>
+            ) : (
+              permissionOptions.map((p) => (
+                <Checkbox
+                  key={p}
+                  label={permissionLabel(p)}
+                  checked={form.permissions.includes(p)}
+                  onChange={() => setForm((f) => ({ ...f, permissions: toggleArr(f.permissions, p) }))}
+                />
+              ))
+            )}
           </div>
         </div>
 
@@ -408,46 +446,33 @@ export default function StaffManagementPage() {
   const [editTarget, setEdit] = useState<StaffMember | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<StaffMember | null>(null);
 
-  const { staff, isLoading, isError, isSaving, isDeleting, fetchStaff, createStaff, updateStaff, deleteStaff } =
-    useStaffStore();
+  const {
+    staff, isLoading, isError, isSaving, isDeleting,
+    fetchStaff, createStaff, updateStaff, deleteStaff,
+    permissions, fetchPermissions,
+    roleDefaults, fetchRoleDefaults,
+  } = useStaffStore();
 
-  // CHANGED — was fetchStaff({ status: "ACTIVE" }), filtering the whole
-  // roster down to active staff regardless of branch. Per request: this
-  // screen should filter by branch, not status, so we now fetch the full
-  // roster once and do the branch scoping client-side below (status is
-  // still shown as a column, just no longer used to hide rows).
-  //
-  // TODO(BACKEND): there's no branchId filter on GET /admin/staff yet —
-  // we're filtering client-side against StaffMember.branches (an array
-  // of branch NAMES per the sample payload) until one exists. If/when
-  // it's added, something like GET /admin/staff?branchId=<uuid> would
-  // let us drop the client-side filter and the name-matching below.
   useEffect(() => {
     fetchStaff({});
   }, [fetchStaff]);
 
-  // Real branch list (same source as the branch switcher) — replaces the
-  // old hardcoded, mismatched BRANCHES array ("Lekki" vs the real "Lekki
-  // Phase 1", etc). Kept as full {id, name} objects: the update payload
-  // needs branch IDs (confirmed via a live 22P02 "invalid uuid" error
-  // when names were sent), but the checkboxes need names to display and
-  // to match against editStaff.branches (which come back as names).
   useEffect(() => {
     if (!authBranches) fetchBranches();
   }, [authBranches, fetchBranches]);
   const branches = authBranches ?? [];
 
+  // Loaded once, same lazy pattern as branches — the modal falls back to
+  // "Loading…" / empty states until these resolve.
+  useEffect(() => {
+    if (!permissions) fetchPermissions();
+  }, [permissions, fetchPermissions]);
+
+  useEffect(() => {
+    if (!roleDefaults) fetchRoleDefaults();
+  }, [roleDefaults, fetchRoleDefaults]);
+
   const list = staff ?? [];
-  // Branch scoping: show a staff member if the currently selected branch
-  // is one of theirs. Staff with more than one branch (e.g. a manager
-  // covering two locations) naturally show up under each of those
-  // branches this way — same list, filtered differently per branch,
-  // rather than being tied to a single "home" branch.
-  //
-  // A staff member with an empty branches array (e.g. Chukwuemeka Obi,
-  // SUPER_ADMIN, in the sample data) is treated as unrestricted / visible
-  // from every branch, since an empty list reads as "no branch scoping"
-  // rather than "scoped to nothing" for that role.
   const filtered = list
     .filter((s) => s.branches.length === 0 || s.branches.includes(branch.name))
     .filter((s) =>
@@ -488,14 +513,6 @@ export default function StaffManagementPage() {
     }
   };
 
-  // Confirmed via live testing: the DELETE endpoint actually deactivates
-  // (status ACTIVE -> OFFLINE) rather than removing the record — flagging
-  // this to the backend team. Until/unless that changes, "Delete" here is
-  // the button label users see, but under the hood it's still calling the
-  // same deactivate-only endpoint, so the row stays visible with an
-  // Offline badge afterward rather than disappearing. Confirmed via a
-  // modal below since this is a destructive-looking, irreversible-from-
-  // this-screen action either way.
   const handleDelete = async () => {
     if (!deleteTarget) return;
     const ok = await deleteStaff(deleteTarget.id);
@@ -632,6 +649,8 @@ export default function StaffManagementPage() {
         <StaffModal
           editStaff={editTarget}
           branches={branches}
+          roleDefaults={roleDefaults}
+          permissionsData={permissions}
           onClose={() => setModal(false)}
           onSave={handleSave}
           isSaving={isSaving}
