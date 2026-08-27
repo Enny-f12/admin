@@ -10,6 +10,7 @@ import { useBranch } from "../layout";
 import { useAnalyticsStore } from "@/store/useAnalyticsStore";
 import { AnalyticsRange, AnalyticsMetric } from "@/types/analytics.types";
 import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
+import { HashIcon } from "lucide-react";
 
 const RANGE_OPTS: { key: AnalyticsRange; label: string }[] = [
   { key: "today", label: "Today" },
@@ -24,14 +25,7 @@ const fmt = (n: number) => "₦" + n.toLocaleString("en-NG");
 const fmtShort = (n: number) => (n >= 1000 ? "₦" + Math.round(n / 1000) + "k" : "₦" + n);
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
-function IconRevenue() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E05C2A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="12" y1="1" x2="12" y2="23" />
-      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-    </svg>
-  );
-}
+
 function IconOrders() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F5A623" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -71,6 +65,7 @@ function TrendDown() {
 }
 
 // ── Custom Tooltip ────────────────────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ChartTooltipProps = TooltipProps<ValueType, NameType> & { metric: AnalyticsMetric; label?: string | number; payload?: any; active?: boolean };
 
 function ChartTooltip({ active, payload, label, metric }: ChartTooltipProps) {
@@ -174,7 +169,7 @@ export default function AnalyticsPage() {
       {/* Stat cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
         <StatCard
-          icon={<IconRevenue />} iconBg="#FFF0EB" label="Total Revenue" loading={summaryLoading}
+          icon={<HashIcon />} iconBg="#FFF0EB" label="Total Revenue" loading={summaryLoading}
           value={summary ? fmt(summary.totalRevenue.amount) : "–"}
           change={summary?.totalRevenue.changePercent ?? 0}
         />

@@ -1,4 +1,4 @@
-// app/(admin)/menu/page.tsx
+// app/(admin)/full-menu/page.tsx
 "use client";
 
 import { useState, useRef, useEffect } from "react";
@@ -15,12 +15,10 @@ import {
   SquarePen,
   Trash2,
   UploadCloud,
-  Loader2,
 } from "lucide-react";
-import { useBranch } from "../layout";
 import { useAuthStore } from "@/store/useAuthStore";
-import { useMenuStore } from "@/store/useMenuStore";
-import { MenuItem, MenuItemImage } from "@/types/menu";
+import { useFmStore } from "@/store/useFmStore";
+import { MenuItem, MenuItemImage } from "@/types/fm.types";
 
 function slugify(name: string) {
   return name
@@ -36,15 +34,11 @@ const EMPTY_FORM = { name: "", description: "", price: "", categoryId: "", dieta
 // yet, so we're paginating the already-fetched list, not the request.
 const PAGE_SIZE = 10;
 
-// Hard cap on individual image uploads for the dish form.
-const MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024; // 1MB
+const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
 
-export default function MenuPage() {
-  const branch = useBranch();
-  // Both /menu/items and /menu/categories accept branchId as an optional
-  // query filter (confirmed via Swagger) — pass it through when available
-  // so the admin only sees categories/items relevant to the active branch.
-  const branchId = branch?.id;
+export default function FullMenuPage() {
+  // No branch context here — this view always operates on the vendor's
+  // full, unfiltered catalog across every branch.
   const vendorId = useAuthStore((s) => s.user?.vendorId);
 
   const [search, setSearch] = useState("");
@@ -52,6 +46,7 @@ export default function MenuPage() {
   const [page, setPage] = useState(1);
   const [catOpen, setCatOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
   const [editItem, setEditItem] = useState<MenuItem | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [dragOver, setDragOver] = useState(false);
@@ -87,18 +82,32 @@ export default function MenuPage() {
     updateItemImage,
     deleteItemImage,
     deleteItem,
-  } = useMenuStore();
+  } = useFmStore();
 
   useEffect(() => {
-    fetchCategories(branchId ? { branchId } : {});
-  }, [branchId, fetchCategories]);
+    fetchCategories();
+  }, [fetchCategories]);
 
   useEffect(() => {
-    fetchItems({
-      ...(categoryFilter !== "all" ? { categoryId: categoryFilter } : {}),
-      ...(branchId ? { branchId } : {}),
-    });
-  }, [categoryFilter, branchId, fetchItems]);
+    fetchItems(categoryFilter !== "all" ? { categoryId: categoryFilter } : {});
+  }, [categoryFilter, fetchItems]);
+
+  // Mount the modal, then flip a frame later so the enter transition runs
+  // (mounting with the "visible" styles already applied skips the fade/slide).
+  useEffect(() => {
+    if (modalOpen) {
+      const raf = requestAnimationFrame(() => setModalVisible(true));
+      return () => cancelAnimationFrame(raf);
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setModalVisible(false);
+  }, [modalOpen]);
+
+  const closeModal = () => {
+    setModalVisible(false);
+    // Let the exit transition play before unmounting.
+    setTimeout(() => setModalOpen(false), 180);
+  };
 
   const categoryList = categories ?? [];
   const categoryName = (id: string) => categoryList.find((c) => c.id === id)?.name ?? "—";
@@ -188,7 +197,7 @@ export default function MenuPage() {
         categoryId: form.categoryId,
         dietaryTags,
       });
-      if (success) setModalOpen(false);
+      if (success) closeModal();
     } else {
       if (!vendorId) {
         toast.error("No vendor found on this account — try logging in again");
@@ -207,7 +216,7 @@ export default function MenuPage() {
         },
         newFiles
       );
-      if (success) setModalOpen(false);
+      if (success) closeModal();
     }
   };
 
@@ -237,36 +246,11 @@ export default function MenuPage() {
     }
   };
 
-  // Enforces the 1MB-per-image cap. Oversized files are skipped with a
-  // toast rather than silently dropped, so the user knows why their
-  // selection came up short.
   const handleFiles = (files: FileList | File[]) => {
     const list = Array.from(files);
     if (list.length === 0) return;
-
-    const accepted: File[] = [];
-    const rejected: string[] = [];
-
-    for (const file of list) {
-      if (file.size > MAX_FILE_SIZE_BYTES) {
-        rejected.push(file.name);
-      } else {
-        accepted.push(file);
-      }
-    }
-
-    if (rejected.length > 0) {
-      toast.error(
-        rejected.length === 1
-          ? `"${rejected[0]}" is over 1MB and was skipped`
-          : `${rejected.length} images are over 1MB and were skipped`
-      );
-    }
-
-    if (accepted.length === 0) return;
-
-    setNewFiles((prev) => [...prev, ...accepted]);
-    setNewPreviews((prev) => [...prev, ...accepted.map((f) => URL.createObjectURL(f))]);
+    setNewFiles((prev) => [...prev, ...list]);
+    setNewPreviews((prev) => [...prev, ...list.map((f) => URL.createObjectURL(f))]);
   };
 
   const removeNewImage = (index: number) => {
@@ -278,7 +262,7 @@ export default function MenuPage() {
   };
 
   // Only meaningful in the edit flow — removes an already-saved image via
-  // the API (see deleteItemImage note in the service re: unconfirmed endpoint).
+  // the API (see deleteItemImage note in fm.service.ts re: unconfirmed endpoint).
   const removeExistingImage = async (image: MenuItemImage) => {
     if (!editItem) return;
     setRemovingImageId(image.id);
@@ -299,16 +283,23 @@ export default function MenuPage() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-              {branch?.name ?? "—"}
+              All Branches
             </p>
             <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, color: "var(--color-heading)" }}>
-              MENU
+              FULL MENU
             </h1>
             <p style={{ fontSize: "0.875rem", fontWeight: 400, color: "var(--color-text-muted)", margin: 0 }}>
-              Add, edit, and manage menu items
+              Add, edit, and manage the full menu catalog
             </p>
           </div>
-          <button className="btn btn-primary" onClick={openAdd} style={{ gap: 6 }}>
+          <button
+            className="btn btn-primary"
+            onClick={openAdd}
+            style={{ gap: 6, transition: `transform 0.15s ${EASE}, opacity 0.15s ${EASE}` }}
+            onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.97)")}
+            onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+          >
             <Plus size={15} strokeWidth={2.2} />
             Add Dish
           </button>
@@ -332,7 +323,7 @@ export default function MenuPage() {
                 placeholder="Search menu items..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                style={{ paddingLeft: 36 }}
+                style={{ paddingLeft: 36, transition: `border-color 0.15s ${EASE}, box-shadow 0.15s ${EASE}` }}
               />
             </div>
 
@@ -344,10 +335,16 @@ export default function MenuPage() {
                   padding: "9px 12px", border: "1px solid var(--color-border)", borderRadius: 8,
                   background: "var(--color-bg-input)", fontSize: "0.875rem", color: "var(--color-text)",
                   cursor: "pointer", fontFamily: "var(--font-sans)", gap: 8,
+                  transition: `border-color 0.15s ${EASE}`,
                 }}
               >
                 <span>{categoryFilter === "all" ? "All Categories" : categoryName(categoryFilter)}</span>
-                <ChevronDown size={14} strokeWidth={1.8} color="var(--color-text-muted)" />
+                <ChevronDown
+                  size={14}
+                  strokeWidth={1.8}
+                  color="var(--color-text-muted)"
+                  style={{ transition: `transform 0.18s ${EASE}`, transform: catOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+                />
               </button>
               {catOpen && (
                 <div
@@ -355,6 +352,8 @@ export default function MenuPage() {
                     position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
                     background: "var(--color-bg-card)", border: "1px solid var(--color-border)",
                     borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 50, overflow: "hidden",
+                    animation: `fm-dropdown-in 0.16s ${EASE}`,
+                    transformOrigin: "top",
                   }}
                 >
                   <button
@@ -364,7 +363,10 @@ export default function MenuPage() {
                       background: categoryFilter === "all" ? "var(--color-bg-soft)" : "transparent",
                       color: categoryFilter === "all" ? "var(--color-primary)" : "var(--color-text)",
                       fontFamily: "var(--font-sans)", fontSize: "0.85rem", cursor: "pointer",
+                      transition: `background 0.12s ${EASE}`,
                     }}
+                    onMouseEnter={(e) => { if (categoryFilter !== "all") e.currentTarget.style.background = "var(--color-bg-soft)"; }}
+                    onMouseLeave={(e) => { if (categoryFilter !== "all") e.currentTarget.style.background = "transparent"; }}
                   >
                     All Categories
                   </button>
@@ -377,7 +379,10 @@ export default function MenuPage() {
                         background: c.id === categoryFilter ? "var(--color-bg-soft)" : "transparent",
                         color: c.id === categoryFilter ? "var(--color-primary)" : "var(--color-text)",
                         fontFamily: "var(--font-sans)", fontSize: "0.85rem", cursor: "pointer",
+                        transition: `background 0.12s ${EASE}`,
                       }}
+                      onMouseEnter={(e) => { if (c.id !== categoryFilter) e.currentTarget.style.background = "var(--color-bg-soft)"; }}
+                      onMouseLeave={(e) => { if (c.id !== categoryFilter) e.currentTarget.style.background = "transparent"; }}
                     >
                       {c.name}
                     </button>
@@ -427,7 +432,12 @@ export default function MenuPage() {
                 {!itemsLoading &&
                   !itemsError &&
                   paginated.map((dish) => (
-                    <tr key={dish.id}>
+                    <tr
+                      key={dish.id}
+                      style={{ transition: `background 0.15s ${EASE}` }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--color-bg-soft)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                           <div style={{ width: 56, height: 56, borderRadius: 10, overflow: "hidden", flexShrink: 0, border: "1px solid var(--color-border)", background: "var(--color-bg-soft)" }}>
@@ -472,7 +482,9 @@ export default function MenuPage() {
                           <button
                             aria-label={`Edit ${dish.name}`}
                             onClick={() => openEdit(dish)}
-                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6 }}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6, transition: `color 0.15s ${EASE}, background 0.15s ${EASE}` }}
+                            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--color-primary)"; e.currentTarget.style.background = "var(--color-bg-soft)"; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--color-text-muted)"; e.currentTarget.style.background = "none"; }}
                           >
                             <SquarePen size={15} strokeWidth={1.8} />
                           </button>
@@ -480,7 +492,9 @@ export default function MenuPage() {
                             aria-label={`Delete ${dish.name}`}
                             onClick={() => handleDelete(dish)}
                             disabled={isDeleting}
-                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6 }}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6, transition: `color 0.15s ${EASE}, background 0.15s ${EASE}`, opacity: isDeleting ? 0.5 : 1 }}
+                            onMouseEnter={(e) => { if (!isDeleting) { e.currentTarget.style.color = "var(--color-primary)"; e.currentTarget.style.background = "var(--color-bg-soft)"; } }}
+                            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--color-text-muted)"; e.currentTarget.style.background = "none"; }}
                           >
                             <Trash2 size={15} strokeWidth={1.8} />
                           </button>
@@ -511,7 +525,10 @@ export default function MenuPage() {
                     display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30,
                     border: "1px solid var(--color-border)", borderRadius: 6, background: "var(--color-bg-card)",
                     color: "var(--color-text)", cursor: page === 1 ? "default" : "pointer", opacity: page === 1 ? 0.4 : 1,
+                    transition: `opacity 0.15s ${EASE}, background 0.15s ${EASE}`,
                   }}
+                  onMouseEnter={(e) => { if (page !== 1) e.currentTarget.style.background = "var(--color-bg-soft)"; }}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "var(--color-bg-card)")}
                 >
                   <ChevronLeft size={15} strokeWidth={1.8} />
                 </button>
@@ -526,7 +543,10 @@ export default function MenuPage() {
                     display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30,
                     border: "1px solid var(--color-border)", borderRadius: 6, background: "var(--color-bg-card)",
                     color: "var(--color-text)", cursor: page === totalPages ? "default" : "pointer", opacity: page === totalPages ? 0.4 : 1,
+                    transition: `opacity 0.15s ${EASE}, background 0.15s ${EASE}`,
                   }}
+                  onMouseEnter={(e) => { if (page !== totalPages) e.currentTarget.style.background = "var(--color-bg-soft)"; }}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "var(--color-bg-card)")}
                 >
                   <ChevronRight size={15} strokeWidth={1.8} />
                 </button>
@@ -539,11 +559,22 @@ export default function MenuPage() {
       {/* ── Modal ── */}
       {modalOpen && (
         <div
-          style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
-          onClick={(e) => e.target === e.currentTarget && setModalOpen(false)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 100,
+            background: modalVisible ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+            transition: `background 0.18s ${EASE}`,
+          }}
+          onClick={(e) => e.target === e.currentTarget && closeModal()}
         >
           <div
-            style={{ background: "var(--color-bg-card)", borderRadius: 16, width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto", padding: 28, display: "flex", flexDirection: "column", gap: 20 }}
+            style={{
+              background: "var(--color-bg-card)", borderRadius: 16, width: "100%", maxWidth: 560,
+              maxHeight: "90vh", overflowY: "auto", padding: 28, display: "flex", flexDirection: "column", gap: 20,
+              opacity: modalVisible ? 1 : 0,
+              transform: modalVisible ? "translateY(0) scale(1)" : "translateY(12px) scale(0.98)",
+              transition: `opacity 0.2s ${EASE}, transform 0.2s ${EASE}`,
+            }}
             className="no-scrollbar"
           >
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -555,7 +586,12 @@ export default function MenuPage() {
                   {editItem ? "Update the dish details below." : "Fill in the details to add a new dish to the menu."}
                 </p>
               </div>
-              <button onClick={() => setModalOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6 }}>
+              <button
+                onClick={closeModal}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6, transition: `color 0.15s ${EASE}, background 0.15s ${EASE}` }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--color-primary)"; e.currentTarget.style.background = "var(--color-bg-soft)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--color-text-muted)"; e.currentTarget.style.background = "none"; }}
+              >
                 <X size={18} strokeWidth={1.8} />
               </button>
             </div>
@@ -569,6 +605,7 @@ export default function MenuPage() {
                 placeholder="e.g. Jam Doughnut"
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                style={{ transition: `border-color 0.15s ${EASE}, box-shadow 0.15s ${EASE}` }}
               />
             </div>
 
@@ -582,7 +619,7 @@ export default function MenuPage() {
                 rows={3}
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                style={{ resize: "vertical", lineHeight: 1.5 }}
+                style={{ resize: "vertical", lineHeight: 1.5, transition: `border-color 0.15s ${EASE}, box-shadow 0.15s ${EASE}` }}
               />
             </div>
 
@@ -597,6 +634,7 @@ export default function MenuPage() {
                   placeholder="0.00"
                   value={form.price}
                   onChange={(e) => setForm((f) => ({ ...f, price: e.target.value }))}
+                  style={{ transition: `border-color 0.15s ${EASE}, box-shadow 0.15s ${EASE}` }}
                 />
               </div>
 
@@ -609,7 +647,9 @@ export default function MenuPage() {
                   <button
                     type="button"
                     onClick={() => (showCategoryForm ? resetCategoryForm() : setShowCategoryForm(true))}
-                    style={{ background: "none", border: "none", color: "var(--color-primary)", fontSize: "0.76rem", fontWeight: 500, cursor: "pointer", padding: 0 }}
+                    style={{ background: "none", border: "none", color: "var(--color-primary)", fontSize: "0.76rem", fontWeight: 500, cursor: "pointer", padding: 0, transition: `opacity 0.15s ${EASE}` }}
+                    onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.7")}
+                    onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
                   >
                     {showCategoryForm ? "Cancel" : "+ New"}
                   </button>
@@ -621,7 +661,7 @@ export default function MenuPage() {
                       className="input appearance-none"
                       value={form.categoryId}
                       onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
-                      style={{ paddingRight: "2.5rem", color: "var(--color-text)" }}
+                      style={{ paddingRight: "2.5rem", color: "var(--color-text)", transition: `border-color 0.15s ${EASE}` }}
                     >
                       <option value="" disabled>
                         {categoryList.length === 0 ? "No categories yet" : "Select category"}
@@ -645,7 +685,13 @@ export default function MenuPage() {
             </div>
 
             {showCategoryForm && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 12, border: "1px solid var(--color-border)", borderRadius: 10, background: "var(--color-bg-soft)" }}>
+              <div
+                style={{
+                  display: "flex", flexDirection: "column", gap: 8, padding: 12,
+                  border: "1px solid var(--color-border)", borderRadius: 10, background: "var(--color-bg-soft)",
+                  animation: `fm-fade-in 0.18s ${EASE}`,
+                }}
+              >
                 <p style={{ margin: 0, fontSize: "0.78rem", fontWeight: 500, color: "var(--color-text)" }}>
                   New category
                 </p>
@@ -654,26 +700,25 @@ export default function MenuPage() {
                   placeholder="Category name"
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
+                  style={{ transition: `border-color 0.15s ${EASE}, box-shadow 0.15s ${EASE}` }}
                 />
                 <input
                   className="input"
                   placeholder="Description (optional)"
                   value={newCategoryDesc}
                   onChange={(e) => setNewCategoryDesc(e.target.value)}
+                  style={{ transition: `border-color 0.15s ${EASE}, box-shadow 0.15s ${EASE}` }}
                 />
                 <button
                   type="button"
                   className="btn btn-primary"
                   onClick={handleAddCategory}
                   disabled={isCreatingCategory}
-                  style={{
-                    justifyContent: "center", padding: "8px", fontSize: "0.82rem",
-                    opacity: isCreatingCategory ? 0.7 : 1,
-                    transition: "opacity 0.15s ease",
-                    display: "flex", alignItems: "center", gap: 6,
-                  }}
+                  style={{ justifyContent: "center", padding: "8px", fontSize: "0.82rem", opacity: isCreatingCategory ? 0.6 : 1, transition: `opacity 0.15s ${EASE}, transform 0.15s ${EASE}` }}
+                  onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.98)")}
+                  onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
                 >
-                  {isCreatingCategory && <Loader2 size={14} strokeWidth={2.2} style={{ animation: "spin 0.7s linear infinite" }} />}
                   {isCreatingCategory ? "Adding…" : "Add category"}
                 </button>
               </div>
@@ -688,23 +733,19 @@ export default function MenuPage() {
                 placeholder="e.g. Gluten-free, Contains Egg"
                 value={form.dietary}
                 onChange={(e) => setForm((f) => ({ ...f, dietary: e.target.value }))}
+                style={{ transition: `border-color 0.15s ${EASE}, box-shadow 0.15s ${EASE}` }}
               />
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-                <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
-                  Dish Images
-                </label>
-                <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
-                  Max 1MB per image
-                </span>
-              </div>
+              <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
+                Dish Images
+              </label>
 
               {(existingImages.length > 0 || newPreviews.length > 0) && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                   {existingImages.map((img) => (
-                    <div key={img.id} style={{ position: "relative", width: 72, height: 72 }}>
+                    <div key={img.id} style={{ position: "relative", width: 72, height: 72, animation: `fm-fade-in 0.18s ${EASE}` }}>
                       <Image
                         src={img.url}
                         alt="Dish"
@@ -722,19 +763,17 @@ export default function MenuPage() {
                           background: "var(--color-primary)", border: "2px solid var(--color-bg-card)", color: "#fff",
                           display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
                           opacity: removingImageId === img.id ? 0.5 : 1,
-                          transition: "opacity 0.15s ease, transform 0.15s ease",
+                          transition: `transform 0.15s ${EASE}, opacity 0.15s ${EASE}`,
                         }}
+                        onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.12)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
                       >
-                        {removingImageId === img.id ? (
-                          <Loader2 size={11} strokeWidth={2.5} style={{ animation: "spin 0.7s linear infinite" }} />
-                        ) : (
-                          <X size={11} strokeWidth={2.5} />
-                        )}
+                        <X size={11} strokeWidth={2.5} />
                       </button>
                     </div>
                   ))}
                   {newPreviews.map((src, i) => (
-                    <div key={src} style={{ position: "relative", width: 72, height: 72 }}>
+                    <div key={src} style={{ position: "relative", width: 72, height: 72, animation: `fm-fade-in 0.18s ${EASE}` }}>
                       <Image
                         src={src}
                         alt="New upload preview"
@@ -750,8 +789,10 @@ export default function MenuPage() {
                           position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%",
                           background: "var(--color-primary)", border: "2px solid var(--color-bg-card)", color: "#fff",
                           display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
-                          transition: "transform 0.15s ease",
+                          transition: `transform 0.15s ${EASE}`,
                         }}
+                        onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.12)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
                       >
                         <X size={11} strokeWidth={2.5} />
                       </button>
@@ -774,7 +815,7 @@ export default function MenuPage() {
                   borderRadius: 10, padding: "20px", display: "flex", flexDirection: "column",
                   alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
                   background: dragOver ? "rgba(225,11,28,0.03)" : "var(--color-bg-soft)",
-                  transition: "border-color 0.2s ease, background 0.2s ease, transform 0.15s ease",
+                  transition: `border-color 0.18s ${EASE}, background 0.18s ${EASE}, transform 0.18s ${EASE}`,
                   transform: dragOver ? "scale(1.01)" : "scale(1)",
                   minHeight: 90,
                 }}
@@ -801,16 +842,11 @@ export default function MenuPage() {
               className="btn btn-primary"
               onClick={handleSubmit}
               disabled={isSaving}
-              style={{
-                width: "100%", justifyContent: "center", padding: "12px", fontSize: "0.875rem",
-                opacity: isSaving ? 0.75 : 1,
-                display: "flex", alignItems: "center", gap: 8,
-                transition: "opacity 0.15s ease, transform 0.1s ease",
-              }}
+              style={{ width: "100%", justifyContent: "center", padding: "12px", fontSize: "0.875rem", opacity: isSaving ? 0.6 : 1, transition: `opacity 0.15s ${EASE}, transform 0.15s ${EASE}` }}
+              onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.99)")}
+              onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
             >
-              {isSaving && (
-                <Loader2 size={16} strokeWidth={2.2} style={{ animation: "spin 0.7s linear infinite" }} />
-              )}
               {isSaving ? "Saving…" : editItem ? "Save Changes" : "Add Dish"}
             </button>
           </div>
@@ -818,9 +854,13 @@ export default function MenuPage() {
       )}
 
       <style jsx global>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
+        @keyframes fm-dropdown-in {
+          from { opacity: 0; transform: translateY(-4px) scaleY(0.96); }
+          to { opacity: 1; transform: translateY(0) scaleY(1); }
+        }
+        @keyframes fm-fade-in {
+          from { opacity: 0; transform: translateY(4px); }
+          to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
     </>

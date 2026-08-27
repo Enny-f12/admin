@@ -9,7 +9,7 @@ import {
   ChevronDown,
   Upload,
   Download,
-  DollarSign,
+  HashIcon,
   Plus,
   Minus,
   ArrowLeftRight,
@@ -330,7 +330,7 @@ export default function InventoryDashboardPage() {
           <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Out of Stock</p>
         </div>
         <div className="card" style={{ textAlign: "center" }}>
-          <DollarSign size={20} strokeWidth={1.8} color="var(--color-heading)" style={{ margin: "0 auto" }} />
+          <HashIcon size={20} strokeWidth={1.8} color="var(--color-heading)" style={{ margin: "0 auto" }} />
           <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>
             {stats ? `₦${stats.totalValue.toLocaleString()}` : loading ? "..." : "-"}
           </p>
