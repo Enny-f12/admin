@@ -10,6 +10,7 @@ import {
   CreateMenuItemPayload,
   UpdateMenuItemPayload,
   CreateCategoryPayload,
+  UpdateCategoryPayload,
 } from '@/types/menu';
 
 function extractErrorMessage(error: unknown, fallback: string) {
@@ -31,6 +32,8 @@ interface MenuState {
   isDeleting: boolean;
   isTogglingAvailability: boolean;
   isCreatingCategory: boolean;
+  isUpdatingCategory: boolean;
+  isDeletingCategory: boolean;
 
   // keeps items in sync with whatever filter was last applied,
   // so mutations know how to refetch correctly
@@ -38,6 +41,8 @@ interface MenuState {
 
   fetchCategories: (filters?: GetCategoriesFilters) => Promise<void>;
   addCategory: (payload: CreateCategoryPayload) => Promise<MenuCategory | null>;
+  updateCategory: (id: string, payload: UpdateCategoryPayload) => Promise<boolean>;
+  deleteCategory: (id: string) => Promise<boolean>;
   fetchItems: (filters?: GetItemsFilters) => Promise<void>;
   createItem: (payload: CreateMenuItemPayload, files: File[]) => Promise<boolean>;
   updateItem: (id: string, payload: UpdateMenuItemPayload) => Promise<boolean>;
@@ -61,6 +66,8 @@ export const useMenuStore = create<MenuState>((set, get) => ({
   isDeleting: false,
   isTogglingAvailability: false,
   isCreatingCategory: false,
+  isUpdatingCategory: false,
+  isDeletingCategory: false,
 
   lastFilters: {},
 
@@ -92,6 +99,42 @@ export const useMenuStore = create<MenuState>((set, get) => ({
       set({ isCreatingCategory: false });
       toast.error(extractErrorMessage(error, 'Could not add category'));
       return null;
+    }
+  },
+
+  // Patches the category in place from the response rather than refetching —
+  // consistent with addCategory's approach above.
+  updateCategory: async (id, payload) => {
+    set({ isUpdatingCategory: true });
+    try {
+      const updated = await menuService.updateCategory(id, payload);
+      set((state) => ({
+        isUpdatingCategory: false,
+        categories: state.categories?.map((c) => (c.id === id ? updated : c)) ?? null,
+      }));
+      toast.success('Category updated');
+      return true;
+    } catch (error) {
+      set({ isUpdatingCategory: false });
+      toast.error(extractErrorMessage(error, 'Could not update category'));
+      return false;
+    }
+  },
+
+  deleteCategory: async (id) => {
+    set({ isDeletingCategory: true });
+    try {
+      await menuService.deleteCategory(id);
+      set((state) => ({
+        isDeletingCategory: false,
+        categories: state.categories?.filter((c) => c.id !== id) ?? null,
+      }));
+      toast.success('Category removed');
+      return true;
+    } catch (error) {
+      set({ isDeletingCategory: false });
+      toast.error(extractErrorMessage(error, 'Could not remove category'));
+      return false;
     }
   },
 
