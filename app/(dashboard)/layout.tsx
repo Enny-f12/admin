@@ -38,7 +38,8 @@ import {
   X,
   BadgePercent,
   Star,
-  KeyRound,
+  KeyRound,   
+LucideTable,
 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
 import PushSetup from "@/components/PushSetup";
@@ -61,6 +62,7 @@ const NAV_SECTIONS = [
       { label: "Drinks & Fridge", href: "/inventory/drinks-fridge", icon: GlassWater },
       { label: "Suppliers", href: "/inventory/suppliers", icon: Building2 },
       { label: "Food Inventory", href: "/inventory/food", icon: ChefHat },
+      { label: "UOM", href: "/inventory/stock/uom", icon: LucideTable  },
       { label: "Reconciliation", href: "/inventory/reconciliation", icon: ClipboardCheck },
     ],
   },

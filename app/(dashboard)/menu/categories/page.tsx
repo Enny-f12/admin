@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -14,14 +14,13 @@ import {
   Loader2,
   ImageOff,
   AlertTriangle,
-  Crop,
+  UploadCloud,
 } from "lucide-react";
 import { useBranch } from "../../layout";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useMenuStore } from "@/store/useMenuStore";
 import { MenuCategory } from "@/types/menu";
 import ImageCropper from "@/components/menu/ImageCropper";
-import { blobToDataUrl } from "@/lib/cropimage";
 
 function slugify(name: string) {
   return name
@@ -31,8 +30,9 @@ function slugify(name: string) {
     .replace(/(^-|-$)/g, "");
 }
 
-const EMPTY_FORM = { name: "", description: "", imageUrl: "" };
+const EMPTY_FORM = { name: "", description: "" };
 const CATEGORY_ASPECT = 1;
+const MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024; // 1MB, same cap as dish images
 
 export default function CategoriesPage() {
   const branch = useBranch();
@@ -44,10 +44,23 @@ export default function CategoriesPage() {
   const [editCategory, setEditCategory] = useState<MenuCategory | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [deleteTarget, setDeleteTarget] = useState<MenuCategory | null>(null);
-  // Crop flow: cropOpen shows the cropper over whatever's currently in
-  // form.imageUrl. Works for both a freshly pasted link and a re-crop of
-  // an already-cropped (data URL) image.
-  const [cropOpen, setCropOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  // A freshly picked + cropped image, staged but not yet uploaded. Only
+  // ever holds ONE file — a category has a single image, unlike a dish's
+  // multi-image gallery. previewUrl is its object URL for display.
+  const [newFile, setNewFile] = useState<File | null>(null);
+  const [newPreviewUrl, setNewPreviewUrl] = useState<string | null>(null);
+  const [removingImage, setRemovingImage] = useState(false);
+
+  // Crop step: cropSrc is the object URL of whatever was just picked.
+  // Category images are only ever cropped right after picking a local
+  // file — never re-cropped from an already-uploaded remote image, so
+  // there's no CORS/crossOrigin concern here at all.
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [cropFileMeta, setCropFileMeta] = useState<{ name: string; type: string } | null>(null);
+
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const {
     categories,
@@ -56,10 +69,13 @@ export default function CategoriesPage() {
     isCreatingCategory,
     isUpdatingCategory,
     isDeletingCategory,
+    isUploadingCategoryImage,
     fetchCategories,
     addCategory,
     updateCategory,
     deleteCategory,
+    uploadCategoryImage,
+    deleteCategoryImage,
   } = useMenuStore();
 
   useEffect(() => {
@@ -70,20 +86,64 @@ export default function CategoriesPage() {
     c.name.toLowerCase().includes(search.toLowerCase())
   );
 
+  const resetImageState = () => {
+    if (newPreviewUrl) URL.revokeObjectURL(newPreviewUrl);
+    setNewFile(null);
+    setNewPreviewUrl(null);
+  };
+
   const openAdd = () => {
     setEditCategory(null);
     setForm(EMPTY_FORM);
+    resetImageState();
     setModalOpen(true);
   };
 
   const openEdit = (cat: MenuCategory) => {
     setEditCategory(cat);
-    setForm({
-      name: cat.name,
-      description: cat.description ?? "",
-      imageUrl: cat.imageUrl ?? "",
-    });
+    setForm({ name: cat.name, description: cat.description ?? "" });
+    resetImageState();
     setModalOpen(true);
+  };
+
+  // Enforces the same 1MB cap dish images use, then opens the cropper —
+  // only one file is ever accepted for a category, so no queue needed.
+  const handleFile = (file: File) => {
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      toast.error(`"${file.name}" is over 1MB`);
+      return;
+    }
+    const src = URL.createObjectURL(file);
+    setCropSrc(src);
+    setCropFileMeta({ name: file.name, type: file.type || "image/jpeg" });
+  };
+
+  const handleCropComplete = (blob: Blob) => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    const croppedFile = new File([blob], cropFileMeta?.name ?? "category.jpg", {
+      type: cropFileMeta?.type ?? "image/jpeg",
+    });
+    resetImageState();
+    setNewFile(croppedFile);
+    setNewPreviewUrl(URL.createObjectURL(croppedFile));
+    setCropSrc(null);
+    setCropFileMeta(null);
+  };
+
+  const handleCropCancel = () => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    setCropSrc(null);
+    setCropFileMeta(null);
+  };
+
+  // Removes an already-saved image via the API immediately — this is
+  // the edit flow only, same as removeExistingImage on the dish page.
+  const removeExistingImage = async () => {
+    if (!editCategory) return;
+    setRemovingImage(true);
+    const ok = await deleteCategoryImage(editCategory.id);
+    setRemovingImage(false);
+    if (ok) setEditCategory((prev) => (prev ? { ...prev, imageUrl: null } : prev));
   };
 
   const handleSubmit = async () => {
@@ -96,22 +156,28 @@ export default function CategoriesPage() {
       return;
     }
 
-    const payload = {
-      name: form.name,
-      description: form.description || undefined,
-      imageUrl: form.imageUrl || undefined,
-    };
+    const payload = { name: form.name, description: form.description || undefined };
 
     if (editCategory) {
+      // Same order as the dish flow: attach the new image first (if any),
+      // then update the text fields — so a failed image upload doesn't
+      // leave the name/description half-saved either.
+      if (newFile) {
+        const imageOk = await uploadCategoryImage(editCategory.id, newFile);
+        if (!imageOk) return;
+      }
       const ok = await updateCategory(editCategory.id, payload);
       if (ok) setModalOpen(false);
     } else {
-      const category = await addCategory({
-        vendorId,
-        slug: slugify(form.name),
-        ...payload,
-      });
-      if (category) setModalOpen(false);
+      const category = await addCategory({ vendorId, slug: slugify(form.name), ...payload });
+      if (!category) return;
+      if (newFile) {
+        const imageOk = await uploadCategoryImage(category.id, newFile);
+        if (!imageOk) {
+          toast.error("Category added, but image upload failed");
+        }
+      }
+      setModalOpen(false);
     }
   };
 
@@ -121,21 +187,8 @@ export default function CategoriesPage() {
     setDeleteTarget(null);
   };
 
-  // Cropped result is stored directly as a base64 data URL in imageUrl —
-  // there's no dedicated category-image upload endpoint, and the schema
-  // already treats imageUrl as a plain string, so this needs no backend
-  // change. Trade-off: the payload sent on save is heavier than a plain
-  // link (typically tens of KB for a compressed square crop).
-  const handleCropComplete = async (blob: Blob) => {
-    const dataUrl = await blobToDataUrl(blob);
-    setForm((f) => ({ ...f, imageUrl: dataUrl }));
-    setCropOpen(false);
-  };
-
-  const isSaving = isCreatingCategory || isUpdatingCategory;
-  // A data: URL is already same-origin from the canvas's perspective, so
-  // no CORS header is needed there — only a fetched http(s) link needs it.
-  const cropCrossOrigin = form.imageUrl.startsWith("data:") ? undefined : "anonymous";
+  const isSaving = isCreatingCategory || isUpdatingCategory || isUploadingCategoryImage;
+  const displayedImageUrl = newPreviewUrl ?? editCategory?.imageUrl ?? null;
 
   return (
     <>
@@ -315,67 +368,91 @@ export default function CategoriesPage() {
               />
             </div>
 
-            {/* Category image — pasted URL, cropped client-side to 1:1 */}
+            {/* Category image — real file upload, cropped client-side to
+                1:1 before it's staged. Same dropzone pattern as dish
+                images, just capped at one file. */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
                 <label style={{ fontSize: "0.82rem", fontWeight: 500, color: "var(--color-text)" }}>
                   Category Image
                 </label>
-                <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>1:1 · Image URL</span>
+                <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>1:1 · Max 1MB</span>
               </div>
 
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-                <div
-                  style={{
-                    width: 88, aspectRatio: "1 / 1", borderRadius: 10, flexShrink: 0,
-                    border: "1px solid var(--color-border)", background: "var(--color-bg-soft)",
-                    position: "relative", overflow: "hidden",
-                    transition: "border-color 0.2s ease",
-                  }}
-                >
-                  {form.imageUrl ? (
+              {displayedImageUrl ? (
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+                  <div style={{ position: "relative", width: 88, height: 88, flexShrink: 0 }}>
                     <Image
-                      src={form.imageUrl}
+                      src={displayedImageUrl}
                       alt="Category preview"
                       fill
-                      style={{ objectFit: "cover" }}
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                      }}
+                      style={{ borderRadius: 10, objectFit: "cover", border: newFile ? "1px solid var(--color-primary)" : "1px solid var(--color-border)" }}
                     />
-                  ) : (
-                    <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <ImageOff size={16} strokeWidth={1.6} color="var(--color-text-muted)" />
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-                  <input
-                    className="input"
-                    placeholder="https://images.unsplash.com/..."
-                    value={form.imageUrl.startsWith("data:") ? "" : form.imageUrl}
-                    onChange={(e) => setForm((f) => ({ ...f, imageUrl: e.target.value }))}
-                  />
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                    <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
-                      {form.imageUrl.startsWith("data:")
-                        ? "Cropped — paste a new link to replace it."
-                        : "Paste a link, then crop to 1:1."}
-                    </p>
                     <button
                       type="button"
-                      onClick={() => setCropOpen(true)}
-                      disabled={!form.imageUrl}
-                      className="btn-icon"
-                      style={{ flexShrink: 0, opacity: form.imageUrl ? 1 : 0.5, cursor: form.imageUrl ? "pointer" : "default" }}
+                      aria-label="Remove image"
+                      onClick={() => (newFile ? resetImageState() : removeExistingImage())}
+                      disabled={removingImage}
+                      style={{
+                        position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%",
+                        background: "var(--color-primary)", border: "2px solid var(--color-bg-card)", color: "#fff",
+                        display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+                        opacity: removingImage ? 0.5 : 1,
+                      }}
                     >
-                      <Crop size={12} strokeWidth={1.8} />
-                      Crop
+                      {removingImage ? (
+                        <Loader2 size={11} strokeWidth={2.5} style={{ animation: "spin 0.7s linear infinite" }} />
+                      ) : (
+                        <X size={11} strokeWidth={2.5} />
+                      )}
                     </button>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    className="btn-icon"
+                    style={{ marginTop: 4 }}
+                  >
+                    <UploadCloud size={13} strokeWidth={1.8} />
+                    Replace
+                  </button>
                 </div>
-              </div>
+              ) : (
+                <div
+                  onClick={() => fileRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+                  }}
+                  style={{
+                    border: `1.5px dashed ${dragOver ? "var(--color-primary)" : "var(--color-border)"}`,
+                    borderRadius: 10, padding: "18px", display: "flex", flexDirection: "column",
+                    alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
+                    background: dragOver ? "rgba(225,11,28,0.03)" : "var(--color-bg-soft)",
+                    transition: "border-color 0.2s ease, background 0.2s ease",
+                    minHeight: 88,
+                  }}
+                >
+                  <UploadCloud size={20} strokeWidth={1.6} color="var(--color-text-muted)" />
+                  <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 400, color: "var(--color-text-muted)" }}>
+                    Click or drag to add an image — crop to 1:1
+                  </p>
+                </div>
+              )}
+
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  if (e.target.files?.[0]) handleFile(e.target.files[0]);
+                  e.target.value = "";
+                }}
+              />
             </div>
 
             <button
@@ -395,14 +472,13 @@ export default function CategoriesPage() {
         </div>
       )}
 
-      {/* Crop step — opened on demand from the "Crop" button above */}
-      {cropOpen && form.imageUrl && (
+      {/* Crop step — shown right after picking a file, before it's staged */}
+      {cropSrc && (
         <ImageCropper
-          imageSrc={form.imageUrl}
+          imageSrc={cropSrc}
           aspect={CATEGORY_ASPECT}
           title="Crop category image (1:1)"
-          crossOrigin={cropCrossOrigin}
-          onCancel={() => setCropOpen(false)}
+          onCancel={handleCropCancel}
           onComplete={handleCropComplete}
         />
       )}

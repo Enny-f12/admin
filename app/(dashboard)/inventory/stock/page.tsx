@@ -13,22 +13,27 @@ import {
   SlidersHorizontal,
   Search,
   ChevronDown,
+  ChevronRight,
   X,
   TrendingUp,
   TrendingDown,
-  PackagePlus,
+  RefreshCw,
 } from "lucide-react";
 import { useEffect } from "react";
 import { useStockStore } from "@/store/useStockStore";
-import { StockItem, StockStatus } from "@/types/stock.types";
+import { useAuthStore } from "@/store/useAuthStore";
+import { StockItem, StockStatus, StockItemType, SupplierType } from "@/types/stock.types";
 import { useBranch } from "../../layout";
 
 type ModalItem = {
   itemId: string;
+  menuItemId: string;
   name: string;
   unit: string;
+  itemType: StockItemType;
   status?: StockStatus;
-  current: number;
+  current: number;        // food: quantity. drinks: fridgeQty (the sellable number)
+  warehouseQty?: number;  // drinks only
   branchId: string;
 };
 
@@ -37,6 +42,8 @@ const STATUS_CLASS: Record<StockStatus, string> = {
   "Low Stock": "badge badge-yellow",
   Critical: "badge badge-red",
 };
+
+const CRITICAL_ALERTS_PREVIEW_COUNT = 5;
 
 const StatusBadge = ({ status }: { status: StockStatus }) => (
   <span className={STATUS_CLASS[status]} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -47,9 +54,20 @@ const StatusBadge = ({ status }: { status: StockStatus }) => (
   </span>
 );
 
-/* ── Pagination hook + bar (shared by both tables) ──
-   No effect / no setState-in-effect: page is clamped at render time,
-   and only ever changed from real user actions (goToPage / changePageSize). */
+const ItemTypeBadge = ({ itemType }: { itemType: StockItemType }) => (
+  <span
+    style={{
+      display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: "0.7rem",
+      fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.03em",
+      background: itemType === "drink" ? "rgba(24,95,165,0.08)" : "rgba(15,110,86,0.08)",
+      color: itemType === "drink" ? "#185FA5" : "#0F6E56",
+    }}
+  >
+    {itemType}
+  </span>
+);
+
+/* ── Pagination hook + bar (shared by both tables) ── */
 function usePagination<T>(data: T[], initialPageSize: 5 | 10 = 10) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<5 | 10>(initialPageSize);
@@ -102,13 +120,13 @@ function PaginationBar({
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <button disabled={page <= 1} onClick={() => goToPage(page - 1)} style={pagerBtn(page <= 1)}>
+        <button disabled={page <= 1} onClick={() => goToPage(page - 1)} className="pager-btn" style={pagerBtn(page <= 1)}>
           Prev
         </button>
         <span style={{ fontSize: "0.8rem", color: "var(--color-text)" }}>
           Page {page} of {totalPages}
         </span>
-        <button disabled={page >= totalPages} onClick={() => goToPage(page + 1)} style={pagerBtn(page >= totalPages)}>
+        <button disabled={page >= totalPages} onClick={() => goToPage(page + 1)} className="pager-btn" style={pagerBtn(page >= totalPages)}>
           Next
         </button>
       </div>
@@ -120,6 +138,7 @@ const pagerBtn = (disabled: boolean): React.CSSProperties => ({
   padding: "6px 12px", borderRadius: 6, border: "1px solid var(--color-border)",
   background: disabled ? "var(--color-bg-soft)" : "#fff", color: disabled ? "var(--color-text-muted)" : "var(--color-text)",
   fontSize: "0.8rem", cursor: disabled ? "not-allowed" : "pointer", fontFamily: "var(--font-sans)",
+  transition: "background 0.15s ease, border-color 0.15s ease, transform 0.15s ease",
 });
 
 export default function StockInventoryPage() {
@@ -136,31 +155,27 @@ export default function StockInventoryPage() {
     fetchLowStockAlerts,
     fetchSuppliers,
     adjustStock,
-    addStock,
-    isAddingStock,
     transferStock,
     removeStock,
     addSupplier,
+    resyncMenu,
+    isResyncingMenu,
   } = useStockStore();
 
-  // Single source of truth for the active branch — same context the
-  // sidebar picker in app/(admin)/layout.tsx writes to. This page no
-  // longer keeps its own branchId state or re-derives role logic:
-  // canPickBranch is resolved once, upstream, from assignedBranchId +
-  // role, and this page just renders differently based on it. "All
-  // Branches" no longer exists as a selectable option, so branch.id is
-  // always a real branch once the picker has made its initial selection.
   const branch = useBranch();
+
+  const user = useAuthStore((s) => s.user);
+  const isApprover = user?.role === "SUPER_ADMIN" || user?.role === "MANAGER";
 
   const [branchOpen, setBranchOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [showThresholds, setShowThresholds] = useState(false);
-  const [showAddStock, setShowAddStock] = useState(false);
 
   const [adjustItem, setAdjustItem] = useState<ModalItem | null>(null);
   const [transferItem, setTransferItem] = useState<ModalItem | null>(null);
   const [removeItem, setRemoveItem] = useState<ModalItem | null>(null);
   const [supplierOpen, setSupplierOpen] = useState(false);
+  const [criticalAlertsOpen, setCriticalAlertsOpen] = useState(false);
 
   useEffect(() => {
     fetchBranches();
@@ -177,30 +192,47 @@ export default function StockInventoryPage() {
   const lowStockCount = items?.filter((i) => i.status === "Low Stock").length ?? 0;
   const criticalCount = items?.filter((i) => i.status === "Critical").length ?? 0;
 
-  // dedupe defends against duplicate itemIds coming back from /admin/stock/alerts
   const dedupedLowStock = (lowStock ?? []).filter(
     (a, i, arr) => arr.findIndex((x) => x.itemId === a.itemId) === i,
   );
+  const previewLowStock = dedupedLowStock.slice(0, CRITICAL_ALERTS_PREVIEW_COUNT);
+  const remainingLowStockCount = dedupedLowStock.length - previewLowStock.length;
 
   const { page, goToPage, pageSize, changePageSize, totalPages, pageItems, start } = usePagination(items ?? [], 10);
 
+  // Reads the right "current" number for a row/branch depending on
+  // itemType — food's `quantity`, or a drink's `fridgeQty` (the number
+  // that actually matters for selling/low-stock purposes). Warehouse is
+  // carried separately for the drink-specific modals.
   const toModalItem = (item: StockItem, fallbackBranchId?: string): ModalItem => {
-    const qty =
+    const bq =
       item.quantities.find((q) => q.branchId === fallbackBranchId) ?? item.quantities[0];
+    const current = item.itemType === "drink" ? (bq?.fridgeQty ?? 0) : (bq?.quantity ?? item.total);
     return {
       itemId: item.id,
+      menuItemId: item.menuItemId,
       name: item.name,
       unit: item.unit,
+      itemType: item.itemType,
       status: item.status,
-      current: qty?.quantity ?? item.total,
-      branchId: qty?.branchId ?? "",
+      current,
+      warehouseQty: item.itemType === "drink" ? bq?.warehouseQty ?? 0 : undefined,
+      branchId: bq?.branchId ?? "",
     };
+  };
+
+  const displayQuantity = (item: StockItem) => {
+    const bq = item.quantities.find((q) => q.branchId === branch.id) ?? item.quantities[0];
+    if (item.itemType === "drink") {
+      return `Warehouse ${bq?.warehouseQty ?? 0} / Fridge ${bq?.fridgeQty ?? 0}`;
+    }
+    return bq?.quantity ?? item.total;
   };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, position: "relative" }}>
 
-      {!showThresholds && !showAddStock ? (
+      {!showThresholds ? (
         <>
           <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--color-heading)" }}>
             {`Stock levels — ${branch.name}`}
@@ -231,21 +263,25 @@ export default function StockInventoryPage() {
             </div>
           </div>
 
-          {/* Top action row — Add Stock and Threshold Configuration are
-              both page-level navigation (full-view swaps, same pattern
-              as ThresholdView below), so they belong here together.
-              Adjust / Transfer / Remove stay off this row: those act on
-              an item that's already tracked, and belong on each table
-              row — Add Stock is specifically for items that AREN'T
-              tracked anywhere yet (see AddStockView below). */}
+          {/*
+            "Add Stock" is intentionally gone. There is no such thing as
+            a stock item that isn't a menu item — ingredients/raw
+            materials are out of scope entirely. Every row here traces
+            back to a MenuItem via menuItemId, created automatically
+            when that item is added in Menu Management. If a menu item
+            is missing from this list (e.g. it predates that fix, or
+            the cascade failed), use Resync Menu below instead of
+            typing a new item in by hand.
+          */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
             <button
               className="btn btn-primary"
               style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", fontSize: "0.85rem" }}
-              onClick={() => setShowAddStock(true)}
+              onClick={() => resyncMenu()}
+              disabled={isResyncingMenu}
             >
-              <PackagePlus size={16} strokeWidth={1.8} />
-              Add Stock
+              <RefreshCw size={16} strokeWidth={1.8} className={isResyncingMenu ? "spin" : undefined} />
+              {isResyncingMenu ? "Syncing…" : "Resync Menu"}
             </button>
             <button
               className="btn btn-primary"
@@ -271,10 +307,16 @@ export default function StockInventoryPage() {
                   }}
                 >
                   {branch.name}
-                  <ChevronDown size={16} strokeWidth={1.8} color="var(--color-text-muted)" />
+                  <ChevronDown
+                    size={16}
+                    strokeWidth={1.8}
+                    color="var(--color-text-muted)"
+                    style={{ transition: "transform 0.2s ease", transform: branchOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+                  />
                 </button>
                 {branchOpen && (
                   <div
+                    className="fade-in-down"
                     style={{
                       position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 150,
                       background: "#fff", border: "1px solid var(--color-border)", borderRadius: 10,
@@ -289,7 +331,7 @@ export default function StockInventoryPage() {
                           display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
                           padding: "10px 14px", background: b.id === branch.id ? "var(--color-bg-soft)" : "#fff",
                           border: "none", cursor: "pointer", fontSize: "0.85rem", fontFamily: "var(--font-sans)",
-                          color: "var(--color-text)", textAlign: "left",
+                          color: "var(--color-text)", textAlign: "left", transition: "background 0.15s ease",
                         }}
                       >
                         {b.id === branch.id && <span style={{ marginRight: 6 }}>✓</span>}
@@ -300,9 +342,6 @@ export default function StockInventoryPage() {
                 )}
               </div>
             ) : (
-              // Locked manager (or a mid-load state) — a static, non-interactive
-              // chip. No dropdown, nothing to switch, same pattern as the
-              // sidebar's own non-picker branch display.
               <div
                 title="Your account is scoped to this branch"
                 style={{
@@ -340,12 +379,28 @@ export default function StockInventoryPage() {
               <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No alerts right now</p>
             )}
             {!lowStockLoading &&
-              dedupedLowStock.map((a) => (
+              previewLowStock.map((a) => (
                 <div key={a.itemId} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem", padding: "3px 0" }}>
-                  <span style={{ color: "var(--color-text)" }}>{a.itemName}</span>
+                  <span style={{ color: "var(--color-text)" }}>
+                    {a.itemName} <ItemTypeBadge itemType={a.itemType} />
+                  </span>
                   <span style={{ color: "#E10B1C", fontWeight: 600 }}>{a.currentQuantity} {a.unit} left</span>
                 </div>
               ))}
+            {!lowStockLoading && remainingLowStockCount > 0 && (
+              <button
+                onClick={() => setCriticalAlertsOpen(true)}
+                className="view-more-btn"
+                style={{
+                  display: "flex", alignItems: "center", gap: 4, marginTop: 10, padding: "6px 0",
+                  background: "none", border: "none", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600,
+                  color: "#E10B1C", fontFamily: "var(--font-sans)",
+                }}
+              >
+                View {remainingLowStockCount} more
+                <ChevronRight size={14} strokeWidth={2} className="view-more-chevron" />
+              </button>
+            )}
           </div>
 
           {/* Main table */}
@@ -365,6 +420,7 @@ export default function StockInventoryPage() {
                     <thead>
                       <tr>
                         <th>Item</th>
+                        <th>Type</th>
                         <th>Quantity</th>
                         <th>Total</th>
                         <th>Status</th>
@@ -378,23 +434,25 @@ export default function StockInventoryPage() {
                             <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{item.name}</p>
                             <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{item.unit}</p>
                           </td>
-                          <td>
-                            {item.quantities.find((q) => q.branchId === branch.id)?.quantity ?? item.total}
-                          </td>
+                          <td><ItemTypeBadge itemType={item.itemType} /></td>
+                          <td>{displayQuantity(item)}</td>
                           <td style={{ fontWeight: 600 }}>{item.total}</td>
                           <td><StatusBadge status={item.status} /></td>
                           <td>
                             <div style={{ display: "flex", gap: 6 }}>
                               <IconButton
                                 icon={<Plus size={14} strokeWidth={2} />}
+                                title="Adjust stock"
                                 onClick={() => setAdjustItem(toModalItem(item, branch.id))}
                               />
                               <IconButton
                                 icon={<ArrowLeftRight size={14} strokeWidth={1.8} />}
+                                title="Transfer between branches"
                                 onClick={() => setTransferItem(toModalItem(item, branch.id))}
                               />
                               <IconButton
                                 icon={<PackageMinus size={14} strokeWidth={1.8} />}
+                                title="Remove / wastage"
                                 onClick={() => setRemoveItem(toModalItem(item, branch.id))}
                               />
                             </div>
@@ -412,33 +470,12 @@ export default function StockInventoryPage() {
             )}
           </div>
         </>
-      ) : showAddStock ? (
-        <AddStockView
-          suppliers={suppliers ?? []}
-          branch={branch}
-          isSubmitting={isAddingStock}
-          onBack={() => setShowAddStock(false)}
-          onOpenSupplier={() => setSupplierOpen(true)}
-          onSubmit={async (form) => {
-            const ok = await addStock({
-              name: form.name,
-              unit: form.unit,
-              // Not a user-facing field — the schema requires it, but
-              // there's no existing item to reference on a create call.
-              // See AddStockPayload in stock.types.ts.
-              itemId: null,
-              branchId: form.branchId,
-              quantity: form.qty,
-              costPerUnit: form.cost,
-              supplierId: form.supplierId || null,
-              invoiceNumber: form.invoice || null,
-              reason: form.reason,
-            });
-            if (ok) setShowAddStock(false);
-          }}
-        />
       ) : (
         <ThresholdView onBack={() => setShowThresholds(false)} />
+      )}
+
+      {criticalAlertsOpen && (
+        <CriticalAlertsModal alerts={dedupedLowStock} onClose={() => setCriticalAlertsOpen(false)} />
       )}
 
       {adjustItem && (
@@ -451,8 +488,10 @@ export default function StockInventoryPage() {
           onSubmit={async (form) => {
             const ok = await adjustStock({
               itemId: adjustItem.itemId,
+              menuItemId: adjustItem.menuItemId,
               branchId: adjustItem.branchId,
               quantity: form.qty,
+              destination: form.destination,
               supplierId: form.supplierId || null,
               invoiceNumber: form.invoice || null,
               costPerUnit: form.cost,
@@ -462,14 +501,18 @@ export default function StockInventoryPage() {
           }}
         />
       )}
+
       {transferItem && (
         <TransferStockModal
           item={transferItem}
           branches={branches ?? []}
+          isApprover={isApprover}
+          currentUser={user ? { id: user.id, fullName: user.fullName } : undefined}
           onClose={() => setTransferItem(null)}
           onSubmit={async (form) => {
             const ok = await transferStock({
               itemId: transferItem.itemId,
+              menuItemId: transferItem.menuItemId,
               fromBranchId: form.fromBranchId,
               toBranchId: form.toBranchId,
               quantity: form.qty,
@@ -487,6 +530,7 @@ export default function StockInventoryPage() {
           onSubmit={async (form) => {
             const ok = await removeStock({
               itemId: removeItem.itemId,
+              menuItemId: removeItem.menuItemId,
               branchId: removeItem.branchId,
               quantity: form.qty,
               costPerUnit: form.cost,
@@ -506,20 +550,67 @@ export default function StockInventoryPage() {
           }}
         />
       )}
+
+      <style jsx global>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .spin { animation: spin 0.8s linear infinite; }
+
+        @keyframes fadeInDown {
+          from { opacity: 0; transform: translateY(-6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in-down { animation: fadeInDown 0.16s cubic-bezier(0.16, 1, 0.3, 1); }
+
+        @keyframes backdropIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes modalIn {
+          from { opacity: 0; transform: translateY(10px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .modal-backdrop { animation: backdropIn 0.18s ease-out; }
+        .modal-shell { animation: modalIn 0.22s cubic-bezier(0.16, 1, 0.3, 1); }
+
+        @keyframes rowFadeIn {
+          from { opacity: 0; transform: translateY(4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .row-fade-in { animation: rowFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+
+        .view-more-btn { transition: gap 0.15s ease, opacity 0.15s ease; }
+        .view-more-btn:hover { opacity: 0.75; gap: 7px; }
+        .view-more-chevron { transition: transform 0.15s ease; }
+        .view-more-btn:hover .view-more-chevron { transform: translateX(2px); }
+
+        .pager-btn:not(:disabled):hover { background: var(--color-bg-soft); transform: translateY(-1px); }
+        .pager-btn:not(:disabled):active { transform: translateY(0); }
+      `}</style>
     </div>
   );
 }
 
 /* ── Small shared building blocks ── */
 
-function IconButton({ icon, onClick }: { icon: React.ReactNode; onClick: () => void }) {
+function IconButton({ icon, onClick, title }: { icon: React.ReactNode; onClick: () => void; title?: string }) {
   return (
     <button
       onClick={onClick}
+      title={title}
       style={{
         display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30,
         borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer",
-        color: "var(--color-text-muted)",
+        color: "var(--color-text-muted)", transition: "background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--color-bg-soft)";
+        e.currentTarget.style.color = "var(--color-text)";
+        e.currentTarget.style.transform = "translateY(-1px)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "#fff";
+        e.currentTarget.style.color = "var(--color-text-muted)";
+        e.currentTarget.style.transform = "translateY(0)";
       }}
     >
       {icon}
@@ -533,6 +624,7 @@ function ModalShell({
   return (
     <div
       onClick={onClose}
+      className="modal-backdrop"
       style={{
         position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
         display: hidden ? "none" : "flex", alignItems: "flex-start", justifyContent: "center",
@@ -541,6 +633,7 @@ function ModalShell({
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="modal-shell"
         style={{
           width, maxWidth: "90vw", maxHeight: "88vh", background: "#fff", borderRadius: 14,
           boxShadow: "0 20px 60px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", overflow: "hidden",
@@ -553,7 +646,16 @@ function ModalShell({
           }}
         >
           <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "var(--color-heading)" }}>{title}</h3>
-          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex" }}>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)",
+              display: "flex", padding: 4, borderRadius: 6, transition: "background 0.15s ease, color 0.15s ease",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-bg-soft)"; e.currentTarget.style.color = "var(--color-text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--color-text-muted)"; }}
+          >
             <X size={18} />
           </button>
         </div>
@@ -592,9 +694,52 @@ function Stepper({ value, onChange }: { value: number; onChange: (v: number) => 
 const stepperBtn: React.CSSProperties = {
   width: 34, height: 34, borderRadius: 8, border: "1px solid var(--color-border)",
   background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+  transition: "background 0.15s ease, transform 0.1s ease",
 };
 
-/* ── Adjust Stock modal ── */
+/* ── Critical Alerts modal — full list, opened from "View more" ──
+   Reuses the same row layout as the inline preview, just without the
+   5-item cap. Rows stagger in slightly on open rather than popping
+   in all at once. */
+function CriticalAlertsModal({
+  alerts, onClose,
+}: {
+  alerts: { itemId: string; itemName: string; itemType: StockItemType; currentQuantity: number; unit: string }[];
+  onClose: () => void;
+}) {
+  return (
+    <ModalShell title="Critical Stock Alerts" onClose={onClose} width={480}>
+      {!alerts.length && (
+        <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No alerts right now</p>
+      )}
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {alerts.map((a, i) => (
+          <div
+            key={a.itemId}
+            className="row-fade-in"
+            style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9rem",
+              padding: "10px 0", borderBottom: i < alerts.length - 1 ? "1px solid var(--color-border)" : "none",
+              animationDelay: `${Math.min(i, 10) * 25}ms`,
+            }}
+          >
+            <span style={{ color: "var(--color-text)", display: "flex", alignItems: "center", gap: 8 }}>
+              {a.itemName} <ItemTypeBadge itemType={a.itemType} />
+            </span>
+            <span style={{ color: "#E10B1C", fontWeight: 600 }}>{a.currentQuantity} {a.unit} left</span>
+          </div>
+        ))}
+      </div>
+    </ModalShell>
+  );
+}
+
+/* ── Adjust Stock modal — the ONE add-stock action, both types ──
+   Food: supplier is optional (blank = in-house/kitchen production, not
+   an error). Drinks: an extra "Add to" toggle picks warehouse vs
+   fridge — everything else about the form is identical.
+   qty/cost default to 0, not 20/1200 — those were placeholder example
+   values that were leaking into real submissions. */
 function AdjustStockModal({
   item, suppliers, onClose, onOpenSupplier, hidden, onSubmit,
 }: {
@@ -603,14 +748,27 @@ function AdjustStockModal({
   onClose: () => void;
   onOpenSupplier: () => void;
   hidden?: boolean;
-  onSubmit: (form: { supplierId: string; invoice: string; qty: number; cost: number; reason: string }) => void;
+  onSubmit: (form: {
+    supplierId: string;
+    invoice: string;
+    qty: number;
+    cost: number;
+    reason: string;
+    destination?: "warehouse" | "fridge";
+  }) => void;
 }) {
+  const isDrink = item.itemType === "drink";
   const [supplierId, setSupplierId] = useState("");
   const [invoice, setInvoice] = useState("");
-  const [qty, setQty] = useState(20);
-  const [cost, setCost] = useState(1200);
-  const [reason, setReason] = useState("New delivery received from supplier");
-  const newStock = item.current + qty;
+  const [destination, setDestination] = useState<"warehouse" | "fridge">("warehouse");
+  const [qty, setQty] = useState(0);
+  const [cost, setCost] = useState(0);
+  const [reason, setReason] = useState("");
+
+  const currentForDestination = isDrink
+    ? (destination === "warehouse" ? item.warehouseQty ?? 0 : item.current)
+    : item.current;
+  const newStock = currentForDestination + qty;
   const totalCost = qty * cost;
 
   return (
@@ -620,10 +778,38 @@ function AdjustStockModal({
         {item.status && <StatusBadge status={item.status} />}
       </div>
 
-      <Field label="Supplier">
+      {isDrink && (
+        <Field label="Add to">
+          <div style={{ display: "flex", gap: 8 }}>
+            {(["warehouse", "fridge"] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => setDestination(d)}
+                style={{
+                  flex: 1, padding: "8px 0", borderRadius: 8, fontSize: "0.85rem", fontWeight: 600,
+                  border: `1.5px solid ${destination === d ? "var(--color-primary)" : "var(--color-border)"}`,
+                  background: destination === d ? "rgba(225,11,28,0.05)" : "#fff",
+                  color: destination === d ? "var(--color-primary)" : "var(--color-text)",
+                  cursor: "pointer", fontFamily: "var(--font-sans)", textTransform: "capitalize",
+                  transition: "background 0.15s ease, border-color 0.15s ease, color 0.15s ease",
+                }}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+          <p style={{ margin: "6px 0 0", fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+            {destination === "warehouse"
+              ? "Bulk stock from a supplier delivery. Move it to fridge later when needed."
+              : "Direct top-up of ready-to-serve stock (skips the warehouse step)."}
+          </p>
+        </Field>
+      )}
+
+      <Field label={`Supplier${isDrink ? "" : " (optional — leave blank for in-house kitchen production)"}`}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <select className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} style={{ flex: 1, minWidth: 160 }}>
-            <option value="">Select supplier</option>
+            <option value="">{isDrink ? "Select supplier" : "None — restaurant (in-house)"}</option>
             {suppliers.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
@@ -633,7 +819,7 @@ function AdjustStockModal({
             style={{
               padding: "0 14px", height: 42, borderRadius: 8, border: "1px solid var(--color-primary)",
               background: "#fff", color: "var(--color-primary)", fontWeight: 600, fontSize: "0.85rem",
-              cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+              cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, transition: "background 0.15s ease",
             }}
           >
             Add New Supplier
@@ -646,7 +832,7 @@ function AdjustStockModal({
       </Field>
 
       <p style={{ margin: "0 0 6px", fontSize: "0.85rem", color: "var(--color-text)" }}>
-        Current: <strong>{item.current} {item.unit}</strong>
+        Current{isDrink ? ` (${destination})` : ""}: <strong>{currentForDestination} {item.unit}</strong>
       </p>
       <div style={{ marginBottom: 16 }}>
         <Stepper value={qty} onChange={setQty} />
@@ -665,7 +851,7 @@ function AdjustStockModal({
       </p>
 
       <Field label="Reason (required)">
-        <textarea className="input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+        <textarea className="input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={isDrink ? "e.g. New delivery received from supplier" : "e.g. Extra batch prepared in kitchen"} />
       </Field>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
@@ -673,8 +859,8 @@ function AdjustStockModal({
         <button
           className="btn btn-primary"
           style={{ padding: "9px 18px", fontSize: "0.85rem" }}
-          disabled={!reason.trim()}
-          onClick={() => onSubmit({ supplierId, invoice, qty, cost, reason })}
+          disabled={!reason.trim() || qty === 0}
+          onClick={() => onSubmit({ supplierId, invoice, qty, cost, reason, destination: isDrink ? destination : undefined })}
         >
           Apply Change
         </button>
@@ -683,28 +869,33 @@ function AdjustStockModal({
   );
 }
 
-/* ── Transfer Stock modal ── */
+/* ── Transfer Stock modal — branch to branch, works for both types ──
+   Food transfers `quantity`; drinks transfer `fridgeQty` (the sellable
+   number) — warehouse stock never moves between branches here. */
 function TransferStockModal({
-  item, branches, onClose, onSubmit,
+  item, branches, isApprover, currentUser, onClose, onSubmit,
 }: {
   item: ModalItem;
   branches: { id: string; name: string }[];
+  isApprover?: boolean;
+  currentUser?: { id: string; fullName: string };
   onClose: () => void;
   onSubmit: (form: { fromBranchId: string; toBranchId: string; qty: number; managerId: string; reason: string }) => void;
 }) {
   const [fromBranchId, setFromBranchId] = useState(item.branchId || branches[0]?.id || "");
   const [toBranchId, setToBranchId] = useState(branches[1]?.id ?? branches[0]?.id ?? "");
-  const [qty, setQty] = useState(20);
-  const [managerId, setManagerId] = useState("");
-  const [reason, setReason] = useState("High demand, surplus at source branch");
+  const [qty, setQty] = useState(0);
+  const managerId = isApprover ? (currentUser?.id ?? "") : "";
+  const [reason, setReason] = useState("");
   const needsApproval = qty > 10;
+  const canApprove = isApprover && !!managerId;
 
   const branchName = (id: string) => branches.find((b) => b.id === id)?.name ?? "–";
 
   return (
     <ModalShell title="Transfer Stock" onClose={onClose}>
       <div style={{ padding: "10px 14px", borderRadius: 10, background: "var(--color-bg-soft)", marginBottom: 20, fontWeight: 600, color: "var(--color-text)" }}>
-        {item.name}
+        {item.name} <ItemTypeBadge itemType={item.itemType} />
       </div>
 
       <p style={{ margin: "0 0 8px", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)" }}>Transfer:</p>
@@ -723,6 +914,7 @@ function TransferStockModal({
 
       <p style={{ margin: "0 0 6px", fontSize: "0.85rem", color: "var(--color-text)" }}>
         Available Stock: <strong>{item.current} {item.unit}</strong>
+        {item.itemType === "drink" && " (fridge)"}
       </p>
       <p style={{ margin: "0 0 6px", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)" }}>Quantity to transfer</p>
       <div style={{ marginBottom: 12 }}>
@@ -732,15 +924,21 @@ function TransferStockModal({
       {needsApproval && (
         <p style={{ display: "flex", alignItems: "center", gap: 6, margin: "0 0 16px", fontSize: "0.8rem", color: "#a07a00" }}>
           <AlertTriangle size={14} strokeWidth={1.8} />
-          Approval Required: Quantity exceeds 10 units - requires second manager
+          Approval Required: Quantity exceeds 10 units - requires manager approval
         </p>
       )}
 
-      <Field label="Approving Manager:">
-        <select className="input" value={managerId} onChange={(e) => setManagerId(e.target.value)}>
-          <option value="">Select Manager</option>
-        </select>
-      </Field>
+      {needsApproval && (
+        isApprover ? (
+          <p style={{ margin: "0 0 16px", fontSize: "0.85rem", color: "var(--color-text)" }}>
+            Approving Manager: <strong>{currentUser?.fullName ?? "You"}</strong>
+          </p>
+        ) : (
+          <p style={{ margin: "0 0 16px", fontSize: "0.8rem", color: "#E10B1C" }}>
+            Only a Manager or Super Admin can approve a transfer over 10 units. Please ask a manager to complete this transfer, or reduce the quantity to 10 or below.
+          </p>
+        )
+      )}
 
       <Field label="Reason:">
         <textarea className="input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -760,7 +958,7 @@ function TransferStockModal({
         <button
           className="btn btn-primary"
           style={{ padding: "9px 18px", fontSize: "0.85rem" }}
-          disabled={needsApproval && !managerId}
+          disabled={(needsApproval && !canApprove) || qty === 0 || !reason.trim()}
           onClick={() => onSubmit({ fromBranchId, toBranchId, qty, managerId, reason })}
         >
           Confirm Transfer
@@ -770,7 +968,8 @@ function TransferStockModal({
   );
 }
 
-/* ── Remove Stock Wastage modal ── */
+/* ── Remove Stock Wastage modal — works for both types.
+   Food removes from `quantity`; drinks remove from `fridgeQty` only. ── */
 const WASTAGE_REASONS = ["Spoiled / Expired", "Damaged during preparation", "Customer return", "Overproduction", "Other (please specify)"];
 
 function RemoveStockModal({
@@ -780,15 +979,15 @@ function RemoveStockModal({
   onClose: () => void;
   onSubmit: (form: { qty: number; cost: number; reason: string; details: string }) => void;
 }) {
-  const [qty, setQty] = useState(3);
-  const [cost, setCost] = useState(1200);
+  const [qty, setQty] = useState(0);
+  const [cost, setCost] = useState(0);
   const [reason, setReason] = useState(WASTAGE_REASONS[0]);
   const [details, setDetails] = useState("");
   const newStock = Math.max(0, item.current - qty);
   const totalCost = qty * cost;
 
   return (
-    <ModalShell title="Remove Stock Wastage - Food Items" onClose={onClose}>
+    <ModalShell title={`Remove Stock Wastage — ${item.itemType === "drink" ? "Fridge" : "Food"} Items`} onClose={onClose}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, background: "var(--color-bg-soft)", marginBottom: 20 }}>
         <span style={{ fontWeight: 600, color: "var(--color-text)" }}>{item.name}</span>
         {item.status && <StatusBadge status={item.status} />}
@@ -829,7 +1028,7 @@ function RemoveStockModal({
         <button
           className="btn btn-primary"
           style={{ padding: "9px 18px", fontSize: "0.85rem" }}
-          disabled={reason.startsWith("Other") && !details.trim()}
+          disabled={qty === 0 || (reason.startsWith("Other") && !details.trim())}
           onClick={() => onSubmit({ qty, cost, reason, details })}
         >
           Remove
@@ -839,23 +1038,22 @@ function RemoveStockModal({
   );
 }
 
-/* ── Add New Supplier modal ──
-   Fields match POST /admin/suppliers per Swagger: name, type,
-   contactPerson, phone, address. `type` renders as `{}` in Swagger's
-   example (usually means an unset-sample enum) — left as free text
-   until the real enum values are confirmed via the Schema tab, rather
-   than guessing wrong options for a <select>. */
+/* ── Add New Supplier modal — unchanged ── */
+const SUPPLIER_TYPES: SupplierType[] = ["Beverage Supplier", "Food Supplier", "Packaging Supplier"];
+
 function AddSupplierModal({
   onClose, onSubmit,
 }: {
   onClose: () => void;
-  onSubmit: (form: { name: string; type: string; contactPerson: string; phone: string; address: string }) => void;
+  onSubmit: (form: { name: string; type: SupplierType; contactPerson: string; phone: string; address: string }) => void;
 }) {
   const [name, setName] = useState("");
-  const [type, setType] = useState("");
+  const [type, setType] = useState<SupplierType | "">("");
   const [contactPerson, setContactPerson] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
+
+  const canSave = name.trim() && type && contactPerson.trim() && phone.trim();
 
   return (
     <ModalShell title="Add New Supplier" onClose={onClose} width={420}>
@@ -863,7 +1061,10 @@ function AddSupplierModal({
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
       <Field label="Type">
-        <input className="input" value={type} onChange={(e) => setType(e.target.value)} placeholder="e.g. Food, Beverage" />
+        <select className="input" value={type} onChange={(e) => setType(e.target.value as SupplierType)}>
+          <option value="">Select type</option>
+          {SUPPLIER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
       </Field>
       <Field label="Contact Person">
         <input className="input" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} />
@@ -877,8 +1078,8 @@ function AddSupplierModal({
       <button
         className="btn btn-primary"
         style={{ width: "100%", padding: "10px 0", fontSize: "0.9rem", display: "flex", alignItems: "center", justifyContent: "center" }}
-        disabled={!name.trim() || !contactPerson.trim() || !phone.trim()}
-        onClick={() => onSubmit({ name, type, contactPerson, phone, address })}
+        disabled={!canSave}
+        onClick={() => onSubmit({ name, type: type as SupplierType, contactPerson, phone, address })}
       >
         Add
       </button>
@@ -886,172 +1087,23 @@ function AddSupplierModal({
   );
 }
 
-/* ── Add Stock view — full page, same pattern as ThresholdView ──
-   Registers a BRAND NEW item that has never been tracked at any
-   branch before: name, unit, initial quantity, cost, reason, and
-   optionally supplier/invoice for the first delivery. This is
-   deliberately NOT an item picker — Adjust Stock (the per-row Plus
-   icon) already covers "add quantity to an item I'm already
-   tracking," so duplicating that here would just be a worse version
-   of the same flow.
-
-   Per the live Swagger schema for POST /admin/stock/add, `itemId` is
-   part of the request body — but it is intentionally NOT a field
-   here. There's no existing item to reference on a create call, so
-   the parent page sends it as `null` without any corresponding UI
-   control. Don't add an item-id input to this form. */
-function AddStockView({
-  suppliers, branch, isSubmitting, onBack, onOpenSupplier, onSubmit,
-}: {
-  suppliers: { id: string; name: string }[];
-  branch: { id: string; name: string; canPickBranch: boolean; branches: { id: string; name: string }[] };
-  isSubmitting: boolean;
-  onBack: () => void;
-  onOpenSupplier: () => void;
-  onSubmit: (form: {
-    name: string;
-    unit: string;
-    branchId: string;
-    qty: number;
-    cost: number;
-    supplierId: string;
-    invoice: string;
-    reason: string;
-  }) => void;
-}) {
-  const [name, setName] = useState("");
-  const [unit, setUnit] = useState("pcs");
-  const [branchId, setBranchId] = useState(branch.id);
-  const [supplierId, setSupplierId] = useState("");
-  const [invoice, setInvoice] = useState("");
-  const [qty, setQty] = useState(20);
-  const [cost, setCost] = useState(0);
-  const [reason, setReason] = useState("New delivery received from supplier");
-
-  const totalCost = qty * cost;
-
-  const canSubmit =
-    name.trim().length > 0 &&
-    unit.trim().length > 0 &&
-    !!branchId &&
-    qty > 0 &&
-    reason.trim().length > 0 &&
-    !isSubmitting;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <button
-        onClick={onBack}
-        style={{
-          display: "flex", alignItems: "center", gap: 6, background: "none", border: "none",
-          cursor: "pointer", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-primary)",
-          fontFamily: "var(--font-sans)", padding: 0, alignSelf: "flex-start",
-        }}
-      >
-        ← Back to Stock Inventory
-      </button>
-
-      <div>
-        <h2 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 600, color: "var(--color-heading)" }}>
-          Add Stock
-        </h2>
-        <p style={{ margin: "4px 0 0", fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-          Register a new item that isn&apos;t tracked in inventory yet. To restock an existing item, use the Adjust action on its row instead.
-        </p>
-      </div>
-
-      <div className="card">
-        <Field label="Item name">
-          <input
-            className="input"
-            placeholder="e.g. Basmati Rice"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            autoFocus
-          />
-        </Field>
-
-        <Field label="Unit">
-          <input
-            className="input"
-            placeholder="e.g. kg, pcs, bottles"
-            value={unit}
-            onChange={(e) => setUnit(e.target.value)}
-          />
-        </Field>
-
-        {branch.canPickBranch && (
-          <Field label="Branch">
-            <select className="input" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-              {branch.branches.map((b) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
-            </select>
-          </Field>
-        )}
-
-        <Field label="Supplier (optional)">
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <select className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)} style={{ flex: 1, minWidth: 160 }}>
-              <option value="">Select supplier</option>
-              {suppliers.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-            <button
-              onClick={onOpenSupplier}
-              style={{
-                padding: "0 14px", height: 42, borderRadius: 8, border: "1px solid var(--color-primary)",
-                background: "#fff", color: "var(--color-primary)", fontWeight: 600, fontSize: "0.85rem",
-                cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
-              }}
-            >
-              Add New Supplier
-            </button>
-          </div>
-        </Field>
-
-        <Field label="Invoice Number (optional)">
-          <input className="input" placeholder="INV-12345....." value={invoice} onChange={(e) => setInvoice(e.target.value)} />
-        </Field>
-
-        <Field label="Initial quantity">
-          <Stepper value={qty} onChange={setQty} />
-        </Field>
-
-        <Field label="Cost price per unit">
-          <input className="input" type="number" value={cost} onChange={(e) => setCost(Number(e.target.value) || 0)} />
-        </Field>
-
-        <p style={{ margin: "-6px 0 20px", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>
-          Total cost: ₦{totalCost.toLocaleString()}
-        </p>
-
-        <Field label="Reason (required)">
-          <textarea className="input" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
-        </Field>
-
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          <button onClick={onBack} style={cancelBtn}>Cancel</button>
-          <button
-            className="btn btn-primary"
-            style={{ padding: "9px 18px", fontSize: "0.85rem", opacity: canSubmit ? 1 : 0.6 }}
-            disabled={!canSubmit}
-            onClick={() => onSubmit({ name, unit, branchId, qty, cost, supplierId, invoice, reason })}
-          >
-            {isSubmitting ? "Adding…" : "Add Item"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+/*
+ * ── DISABLED: "Add Stock" view (freeform new-item registration) ──
+ * Removed from the main render entirely. Ingredients are out of scope
+ * for this system, and there is no such thing as a stock item without
+ * a menuItemId — every row must originate from Menu Management. Kept
+ * here, commented, only as a historical reference for what the old
+ * flow looked like; do not restore without re-checking the backend.
+ *
+ * function AddStockView({ ... }) { ... }
+ */
 
 /* ── Threshold Configuration view ── */
 
 type ThresholdRow = {
   itemId: string;
   itemName: string;
+  itemType: StockItemType;
   unit: string;
   threshold: number;
   notify: boolean;
@@ -1080,7 +1132,6 @@ function ThresholdView({ onBack }: { onBack: () => void }) {
   const updateRow = (itemId: string, patch: Partial<ThresholdRow>) =>
     setRows((prev) => prev.map((r) => (r.itemId === itemId ? { ...r, ...patch } : r)));
 
-  // defensive de-dupe: guards the UI even if the API sends a duplicate itemId
   const filtered = rows
     .filter((r) => r.itemName.toLowerCase().includes(search.toLowerCase()))
     .filter((r, i, arr) => arr.findIndex((x) => x.itemId === r.itemId) === i);
@@ -1104,7 +1155,7 @@ function ThresholdView({ onBack }: { onBack: () => void }) {
         Low Stock Thresholds
       </h2>
 
-      <Field label="Default threshold for all food items">
+      <Field label="Default threshold for all items">
         <input
           className="input"
           value={`${defaultThreshold} units`}
@@ -1145,7 +1196,7 @@ function ThresholdView({ onBack }: { onBack: () => void }) {
               <table>
                 <thead>
                   <tr>
-                    {["Item", "Threshold", "Notify?", "Auto-reorder"].map((c) => <th key={c}>{c}</th>)}
+                    {["Item", "Type", "Threshold", "Notify?", "Auto-reorder"].map((c) => <th key={c}>{c}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -1155,6 +1206,7 @@ function ThresholdView({ onBack }: { onBack: () => void }) {
                         <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{row.itemName}</p>
                         <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{row.unit}</p>
                       </td>
+                      <td><ItemTypeBadge itemType={row.itemType} /></td>
                       <td>
                         <input
                           className="input"
@@ -1184,7 +1236,7 @@ function ThresholdView({ onBack }: { onBack: () => void }) {
       </div>
 
       <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
-        Auto-Reorder: When stock reaches threshold, system can auto-generate purchase order for manager approval.
+        For drinks, the threshold applies to fridge stock only — warehouse stock is never checked against thresholds.
       </p>
 
       <div>
@@ -1220,7 +1272,7 @@ function Radio({ checked, onClick, label }: { checked: boolean; onClick: () => v
       <span
         style={{
           width: 16, height: 16, borderRadius: "50%", border: `1.5px solid ${checked ? "var(--color-primary)" : "var(--color-border)"}`,
-          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "border-color 0.15s ease",
         }}
       >
         {checked && <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--color-primary)" }} />}
@@ -1233,4 +1285,5 @@ function Radio({ checked, onClick, label }: { checked: boolean; onClick: () => v
 const cancelBtn: React.CSSProperties = {
   padding: "9px 18px", borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff",
   cursor: "pointer", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)", fontFamily: "var(--font-sans)",
+  transition: "background 0.15s ease, transform 0.1s ease",
 };

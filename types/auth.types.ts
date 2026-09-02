@@ -1,6 +1,3 @@
-// types/auth.types.ts
-
-
 export interface UserPreferences {
   assignedBranchIds?: string[];
   [key: string]: unknown;
@@ -41,7 +38,6 @@ export interface AuthResponse {
   refreshToken: string;
 }
 
-
 export interface Branch {
   id: string;
   name: string;
@@ -59,11 +55,29 @@ export interface RegisterResponse extends User {
   message: string;
 }
 
-
+// ── Login / 2FA ──
+// One endpoint now covers both steps. twoFactorCode omitted = "please
+// validate my credentials and send me a code". twoFactorCode present =
+// "here's everything, log me in." See backend request doc v4.0.
 export interface LoginPayload {
   email: string;
   password: string;
+  twoFactorCode?: string;
   branchId?: string;
+}
+
+// Returned by /auth/login when credentials were valid but no code was
+// submitted yet — a code has just been emailed.
+export interface CodeSentResponse {
+  codeSent: true;
+  message: string;
+  maskedDestination?: string; // e.g. "s***@gmail.com", display only
+}
+
+export type LoginResponse = AuthResponse | CodeSentResponse;
+
+export function isCodeSentResponse(res: LoginResponse): res is CodeSentResponse {
+  return (res as CodeSentResponse).codeSent === true;
 }
 
 // POST /auth/send-otp
@@ -100,9 +114,8 @@ export interface RefreshResponse {
   refreshToken: string;
 }
 
-
 export interface ForgotPasswordPayload {
-  identifier: string; 
+  identifier: string;
 }
 
 export interface ForgotPasswordResponse {
@@ -118,7 +131,6 @@ export interface ResetPasswordPayload {
 export interface ResetPasswordResponse {
   message: string;
 }
-
 
 export interface ChangePasswordPayload {
   currentPassword: string;

@@ -4,9 +4,23 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  LineChart as ReLineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+import {
   ClipboardList,
-  Users,
-  Activity,
+  CalendarDays,
+  Wallet,
+  CalendarClock,
   ArrowUpRight,
   ArrowDownRight,
   ArrowRight,
@@ -23,7 +37,10 @@ import {
   X,
   MapPin,
   User as UserIcon,
-  HashIcon,
+  Utensils,
+  LineChart as LineChartIcon,
+  Building2,
+  PieChart as PieChartIcon,
 } from "lucide-react";
 import { useBranch } from "../layout";
 import { useDashboardStore } from "@/store/useDashboardStore";
@@ -47,7 +64,6 @@ const CYCLE_STEPS = [
   { label: "Audit", icon: FileText },
 ];
 
-
 const QUICK_ACTIONS: {
   label: string;
   icon: React.ElementType;
@@ -64,10 +80,11 @@ const QUICK_ACTIONS: {
 // Dashboard previews are capped to this many rows; "View more" / "View
 // all" hands off to the full page.
 const PREVIEW_ROWS = 5;
+const TOP_ITEMS_ROWS = 5;
 const ORDERS_HREF = "/orders";
-// Not given explicitly in the request — matches the "Stock Inventory"
-// sidebar item. Flag/change this if a dedicated alerts route exists.
 const LOW_STOCK_HREF = "/stock-inventory";
+
+const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
 
 const STATUS_CLASS: Record<string, string> = {
   RECEIVED: "badge badge-yellow",
@@ -79,12 +96,25 @@ const STATUS_CLASS: Record<string, string> = {
   CANCELLED: "badge badge-red",
 };
 
-
 const ACTION_LABEL: Record<string, string> = {
   CREATE: "created",
   UPDATE: "updated",
   STATUS_CHANGE: "changed the status of",
   DELETE: "deleted",
+};
+
+// Colors for the order-type pie chart, keyed by the raw API `type` value.
+const DISTRIBUTION_COLORS: Record<string, string> = {
+  DINE_IN: "#E10B1C",
+  TAKEAWAY: "#a07a00",
+  DELIVERY: "#2563EB",
+};
+
+// Colors for the branch-performance rating pill, keyed by the API `status` value.
+const RATING_COLORS: Record<string, { bg: string; color: string }> = {
+  TOP_PERFORMING: { bg: "rgba(22,163,74,0.10)", color: "#16A34A" },
+  NEEDS_ATTENTION: { bg: "rgba(225,11,28,0.08)", color: "#E10B1C" },
+  STEADY: { bg: "rgba(37,99,235,0.08)", color: "#2563EB" },
 };
 
 function actionLabel(action: string) {
@@ -93,6 +123,10 @@ function actionLabel(action: string) {
 
 function formatOrderType(type?: string) {
   if (!type) return "–";
+  return type === "DINE_IN" ? "Dine In" : type === "TAKEAWAY" ? "Takeaway" : "Delivery";
+}
+
+function formatDistributionLabel(type: string) {
   return type === "DINE_IN" ? "Dine In" : type === "TAKEAWAY" ? "Takeaway" : "Delivery";
 }
 
@@ -121,6 +155,11 @@ function formatDateTime(iso?: string | null) {
   });
 }
 
+function formatShortDate(iso?: string) {
+  if (!iso) return "–";
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 function timeAgo(iso?: string) {
   if (!iso) return "–";
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -132,7 +171,7 @@ function timeAgo(iso?: string) {
   return new Date(iso).toLocaleDateString();
 }
 
-/* ── Skeleton primitive — kept local, no extra file per request ── */
+/* ── Skeleton primitive ── */
 function Skeleton({
   width = "100%",
   height = 14,
@@ -209,6 +248,57 @@ const modalSubValueStyle: React.CSSProperties = {
   color: "var(--color-text-muted)",
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ChartTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: "1px solid var(--color-border)",
+        borderRadius: 8,
+        padding: "8px 12px",
+        boxShadow: "0 8px 20px rgba(0,0,0,0.10)",
+        fontSize: "0.78rem",
+      }}
+    >
+      <p style={{ margin: "0 0 4px", fontWeight: 600, color: "var(--color-text)" }}>{formatShortDate(label)}</p>
+      <p style={{ margin: 0, color: "var(--color-primary)" }}>{formatNaira(payload[0]?.value)}</p>
+      {payload[0]?.payload?.orders != null && (
+        <p style={{ margin: "2px 0 0", color: "var(--color-text-muted)" }}>
+          {payload[0].payload.orders} order{payload[0].payload.orders === 1 ? "" : "s"}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function DistributionTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0]?.payload;
+  if (!d || d.type === "NONE") return null;
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: "1px solid var(--color-border)",
+        borderRadius: 8,
+        padding: "8px 12px",
+        boxShadow: "0 8px 20px rgba(0,0,0,0.10)",
+        fontSize: "0.78rem",
+      }}
+    >
+      <p style={{ margin: "0 0 4px", fontWeight: 600, color: "var(--color-text)" }}>
+        {formatDistributionLabel(d.type)}
+      </p>
+      <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
+        {d.count} order{d.count === 1 ? "" : "s"} · {d.percentage}%
+      </p>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const branch = useBranch();
   const router = useRouter();
@@ -221,6 +311,18 @@ export default function DashboardPage() {
     lowStock,
     lowStockLoading,
     lowStockError,
+    salesTrends,
+    salesTrendsLoading,
+    salesTrendsError,
+    distribution,
+    distributionLoading,
+    distributionError,
+    branchPerformance,
+    branchPerformanceLoading,
+    branchPerformanceError,
+    topItems,
+    topItemsLoading,
+    topItemsError,
     auditLogs: activity,
     auditLogsLoading: activityLoading,
     auditLogsError: activityError,
@@ -231,47 +333,47 @@ export default function DashboardPage() {
   } = useDashboardStore();
 
   useEffect(() => {
-    // useBranch() returns { id, name } (see layout.tsx SelectedBranch) —
-    // id is the real UUID, no more guessing at field names.
     fetchAll(undefined, branch.id);
   }, [fetchAll, branch]);
 
+  const pct = (n: number | null | undefined) => (n != null ? `${n > 0 ? "+" : ""}${n}%` : "–");
+
   const STATS: StatCard[] = [
-    {
-      label: "Revenue Today",
-      value: `₦${(summary?.revenueToday ?? 0).toLocaleString()}`,
-      change: summary?.revenueChangePercent != null ? `${summary.revenueChangePercent}%` : "–",
-      up: (summary?.revenueChangePercent ?? 0) >= 0,
-      icon: HashIcon,
-    },
     {
       label: "Orders Today",
       value: `${summary?.ordersToday ?? 0}`,
-      change: summary?.ordersChangePercent != null ? `${summary.ordersChangePercent}%` : "–",
-      up: (summary?.ordersChangePercent ?? 0) >= 0,
+      change: pct(summary?.ordersTodayChangePercent),
+      up: (summary?.ordersTodayChangePercent ?? 0) >= 0,
       icon: ClipboardList,
     },
     {
-      label: "Active Customers",
-      // TODO(BACKEND): no total customer count endpoint yet — see request doc #4
-      value: "–",
-      change: "–",
-      up: true,
-      icon: Users,
+      label: "Orders This Week",
+      value: `${summary?.ordersThisWeek ?? 0}`,
+      change: pct(summary?.ordersWeekChangePercent),
+      up: (summary?.ordersWeekChangePercent ?? 0) >= 0,
+      icon: CalendarDays,
     },
     {
-      label: "System Health",
-      // Not a backend concern — static/infra
-      value: "99.8%",
-      change: "0",
+      label: "Revenue This Month",
+      value: `₦${(summary?.revenueThisMonth ?? 0).toLocaleString()}`,
+      change: pct(summary?.revenueMonthChangePercent),
+      up: (summary?.revenueMonthChangePercent ?? 0) >= 0,
+      icon: Wallet,
+    },
+    {
+      label: "Active Reservations",
+      value: `${summary?.activeReservations ?? 0}`,
+      change: "–",
       up: true,
-      icon: Activity,
+      icon: CalendarClock,
     },
   ];
 
   const totalLowStock = lowStock?.length ?? 0;
   const outOfStockCount = lowStock?.filter((i) => i.status === "OUT_OF_STOCK").length ?? 0;
   const visibleLowStock = lowStock?.slice(0, PREVIEW_ROWS) ?? [];
+
+  const visibleTopItems = topItems?.slice(0, TOP_ITEMS_ROWS) ?? [];
 
   const visibleOrders = orders?.slice(0, PREVIEW_ROWS) ?? [];
   const totalOrders = orders?.length ?? 0;
@@ -290,18 +392,61 @@ export default function DashboardPage() {
           animation: skeleton-shimmer 1.4s ease infinite;
         }
         @keyframes skeleton-shimmer {
-          0% {
-            background-position: 100% 50%;
-          }
-          100% {
-            background-position: 0 50%;
-          }
+          0% { background-position: 100% 50%; }
+          100% { background-position: 0 50%; }
+        }
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in {
+          animation: fadeInUp 0.45s ${EASE};
+        }
+        .stat-card {
+          transition: transform 0.2s ${EASE}, box-shadow 0.2s ${EASE};
+        }
+        .stat-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.07);
+        }
+        .row-hover {
+          transition: background 0.18s ${EASE}, transform 0.18s ${EASE};
+        }
+        .row-hover:hover {
+          background: var(--color-bg-soft) !important;
+          transform: translateX(2px);
+        }
+        .branch-row {
+          transition: background 0.18s ${EASE}, transform 0.18s ${EASE};
+        }
+        .branch-row:hover {
+          background: var(--color-bg-soft) !important;
+          transform: translateX(2px);
+        }
+        .quick-action-btn {
+          transition: background 0.18s ${EASE}, transform 0.18s ${EASE}, box-shadow 0.18s ${EASE};
+        }
+        .quick-action-btn:hover {
+          background: var(--color-bg-soft);
+          transform: translateY(-2px);
+          box-shadow: 0 8px 18px rgba(0, 0, 0, 0.06);
+        }
+        .link-btn {
+          transition: color 0.15s ${EASE}, opacity 0.15s ${EASE};
+        }
+        .link-btn:hover {
+          opacity: 0.75;
         }
         .dashboard-two-col {
           display: grid;
           grid-template-columns: 2fr 1fr;
           gap: 16px;
           align-items: start;
+        }
+        .dashboard-col {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
         }
         .quick-actions-grid {
           display: grid;
@@ -527,193 +672,555 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* Low stock + Quick actions */}
+      {/* Left col: Low Stock + Sales Trend + Branch Performance/Distribution  |  Right col: Quick Actions + Top Items */}
       <div className="dashboard-two-col">
-        {/* Low stock */}
-        <div className="card">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 14,
-              flexWrap: "wrap",
-              gap: 8,
-            }}
-          >
-            <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>Low Stock</h3>
-            {!lowStockLoading && totalLowStock > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span
-                  style={{
-                    fontSize: "0.75rem",
-                    fontWeight: 600,
-                    color: "var(--color-text-muted)",
-                    background: "var(--color-bg-soft)",
-                    padding: "4px 10px",
-                    borderRadius: 999,
-                  }}
-                >
-                  {totalLowStock} total
-                </span>
-                {outOfStockCount > 0 && (
+        <div className="dashboard-col">
+          {/* Low stock */}
+          <div className="card">
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 14,
+                flexWrap: "wrap",
+                gap: 8,
+              }}
+            >
+              <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>Low Stock</h3>
+              {!lowStockLoading && totalLowStock > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span
                     style={{
                       fontSize: "0.75rem",
                       fontWeight: 600,
-                      color: "#E10B1C",
-                      background: "rgba(225,11,28,0.08)",
+                      color: "var(--color-text-muted)",
+                      background: "var(--color-bg-soft)",
                       padding: "4px 10px",
                       borderRadius: 999,
                     }}
                   >
-                    {outOfStockCount} out of stock
+                    {totalLowStock} total
                   </span>
-                )}
+                  {outOfStockCount > 0 && (
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        fontWeight: 600,
+                        color: "#E10B1C",
+                        background: "rgba(225,11,28,0.08)",
+                        padding: "4px 10px",
+                        borderRadius: 999,
+                      }}
+                    >
+                      {outOfStockCount} out of stock
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {lowStockLoading &&
+                Array.from({ length: PREVIEW_ROWS }).map((_, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      background: "var(--color-bg-soft)",
+                    }}
+                  >
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <Skeleton width={140} height={12} />
+                      <Skeleton width={90} height={10} />
+                    </div>
+                    <Skeleton width={28} height={16} />
+                  </div>
+                ))}
+
+              {!lowStockLoading && (lowStockError || totalLowStock === 0) && (
+                <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+                  {lowStockError ? "Could not load low stock alerts" : "No low stock alerts right now"}
+                </p>
+              )}
+
+              {!lowStockLoading &&
+                visibleLowStock.map((item, i) => (
+                  <div
+                    key={`${item.itemName}-${item.branchName}-${i}`}
+                    className="fade-in"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      background: "var(--color-bg-soft)",
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: "0.88rem",
+                          fontWeight: 600,
+                          color: "var(--color-text)",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {item.itemName}
+                      </p>
+                      <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
+                        min {item.reorderThreshold} {item.unit} · {item.branchName}
+                      </p>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: "1rem",
+                        fontWeight: 700,
+                        color: item.status === "OUT_OF_STOCK" ? "#E10B1C" : "#a07a00",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {item.currentQuantity}
+                    </span>
+                  </div>
+                ))}
+
+              {!lowStockLoading && totalLowStock > PREVIEW_ROWS && (
+                <button
+                  className="link-btn"
+                  onClick={() => router.push(LOW_STOCK_HREF)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "var(--color-primary)",
+                    fontFamily: "var(--font-sans)",
+                    fontSize: "0.8rem",
+                    fontWeight: 500,
+                    padding: "6px 0 0",
+                    textAlign: "left",
+                  }}
+                >
+                  View more ({totalLowStock - PREVIEW_ROWS} more)
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Sales trend */}
+          <div className="card">
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 4,
+                gap: 8,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <LineChartIcon size={16} strokeWidth={1.8} color="#a07a00" />
+                <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>Sales Trend</h3>
+              </div>
+              <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>Last 7 days</span>
+            </div>
+
+            {salesTrendsLoading && (
+              <div style={{ height: 220, display: "flex", alignItems: "flex-end", gap: 8, padding: "16px 4px 0" }}>
+                {Array.from({ length: 7 }).map((_, i) => (
+                  <Skeleton key={i} width="100%" height={40 + (i % 3) * 30} radius={4} />
+                ))}
+              </div>
+            )}
+
+            {!salesTrendsLoading && (salesTrendsError || !salesTrends?.length) && (
+              <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", padding: "12px 0" }}>
+                {salesTrendsError ? "Could not load sales trend" : "No sales data for this period"}
+              </p>
+            )}
+
+            {!salesTrendsLoading && salesTrends && salesTrends.length > 0 && (
+              <div className="fade-in" style={{ width: "100%", height: 220, marginTop: 8 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ReLineChart data={salesTrends} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={formatShortDate}
+                      tick={{ fontSize: 11, fill: "var(--color-text-muted)" }}
+                      axisLine={{ stroke: "var(--color-border)" }}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tickFormatter={(v) => `₦${Number(v) >= 1000 ? `${Math.round(v / 1000)}k` : v}`}
+                      tick={{ fontSize: 11, fill: "var(--color-text-muted)" }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={48}
+                    />
+                    <Tooltip content={<ChartTooltip />} />
+                    <Line
+                      type="monotone"
+                      dataKey="revenue"
+                      stroke="#E10B1C"
+                      strokeWidth={2.5}
+                      dot={{ r: 3, fill: "#E10B1C", strokeWidth: 0 }}
+                      activeDot={{ r: 5 }}
+                      animationDuration={600}
+                      animationEasing="ease-out"
+                    />
+                  </ReLineChart>
+                </ResponsiveContainer>
               </div>
             )}
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {lowStockLoading &&
-              Array.from({ length: PREVIEW_ROWS }).map((_, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "12px 14px",
-                    borderRadius: 10,
-                    background: "var(--color-bg-soft)",
-                  }}
-                >
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <Skeleton width={140} height={12} />
-                    <Skeleton width={90} height={10} />
-                  </div>
-                  <Skeleton width={28} height={16} />
-                </div>
-              ))}
+          {/* Branch performance */}
+          <div className="card">
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 14,
+                gap: 8,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Building2 size={16} strokeWidth={1.8} color="#a07a00" />
+                <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>Branch Performance</h3>
+              </div>
+              <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)" }}>This month</span>
+            </div>
 
-            {!lowStockLoading && (lowStockError || totalLowStock === 0) && (
+            {branchPerformanceLoading && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      background: "var(--color-bg-soft)",
+                    }}
+                  >
+                    <Skeleton width="60%" height={12} />
+                    <Skeleton width="40%" height={10} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!branchPerformanceLoading && (branchPerformanceError || !branchPerformance?.branches?.length) && (
               <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-                {lowStockError ? "Could not load low stock alerts" : "No low stock alerts right now"}
+                {branchPerformanceError ? "Could not load branch performance" : "No branch data available"}
               </p>
             )}
 
-            {!lowStockLoading &&
-              visibleLowStock.map((item, i) => (
-                <div
-                  key={`${item.itemName}-${item.branchName}-${i}`}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "12px 14px",
-                    borderRadius: 10,
-                    background: "var(--color-bg-soft)",
-                    gap: 10,
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <p
+            {!branchPerformanceLoading && branchPerformance && branchPerformance.branches.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {branchPerformance.branches.map((b) => {
+                  const ratingStyle = RATING_COLORS[b.status] ?? {
+                    bg: "var(--color-bg-soft)",
+                    color: "var(--color-text-muted)",
+                  };
+                  return (
+                    <div
+                      key={b.branchId}
+                      className="branch-row fade-in"
                       style={{
-                        margin: 0,
-                        fontSize: "0.88rem",
-                        fontWeight: 600,
-                        color: "var(--color-text)",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 10,
+                        padding: "10px 12px",
+                        borderRadius: 10,
+                        background: b.isTopPerforming ? "rgba(22,163,74,0.06)" : "var(--color-bg-soft)",
                       }}
                     >
-                      {item.itemName}
-                    </p>
-                    <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--color-text-muted)" }}>
-                      min {item.reorderThreshold} {item.unit} · {item.branchName}
-                    </p>
-                  </div>
-                  <span
-                    style={{
-                      fontSize: "1rem",
-                      fontWeight: 700,
-                      color: item.status === "OUT_OF_STOCK" ? "#E10B1C" : "#a07a00",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {item.currentQuantity}
-                  </span>
-                </div>
-              ))}
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <p
+                            style={{
+                              margin: 0,
+                              fontSize: "0.85rem",
+                              fontWeight: 600,
+                              color: "var(--color-text)",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {b.name}
+                          </p>
+                          <span
+                            style={{
+                              fontSize: "0.65rem",
+                              fontWeight: 600,
+                              padding: "2px 8px",
+                              borderRadius: 999,
+                              background: ratingStyle.bg,
+                              color: ratingStyle.color,
+                              whiteSpace: "nowrap",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {b.rating}
+                          </span>
+                        </div>
+                        <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
+                          {b.city} · {b.orders} orders · {b.activeReservations} reservation
+                          {b.activeReservations === 1 ? "" : "s"}
+                        </p>
+                      </div>
 
-            {!lowStockLoading && totalLowStock > PREVIEW_ROWS && (
-              <button
-                onClick={() => router.push(LOW_STOCK_HREF)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--color-primary)",
-                  fontFamily: "var(--font-sans)",
-                  fontSize: "0.8rem",
-                  fontWeight: 500,
-                  padding: "6px 0 0",
-                  textAlign: "left",
-                }}
-              >
-                View more ({totalLowStock - PREVIEW_ROWS} more)
-              </button>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <p style={{ margin: 0, fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)" }}>
+                          {formatNaira(b.revenue)}
+                        </p>
+                        {b.changePercent != null ? (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 2,
+                              fontSize: "0.72rem",
+                              fontWeight: 500,
+                              color: b.changePercent >= 0 ? "#16A34A" : "#E10B1C",
+                            }}
+                          >
+                            {b.changePercent >= 0 ? (
+                              <ArrowUpRight size={11} strokeWidth={2} />
+                            ) : (
+                              <ArrowDownRight size={11} strokeWidth={2} />
+                            )}
+                            {Math.abs(b.changePercent)}%
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>–</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
 
-        {/* Quick actions */}
-        <div className="card">
-          <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 14px" }}>Quick Actions</h3>
-          <div className="quick-actions-grid">
-            {QUICK_ACTIONS.map(({ label, icon: Icon, bg, color, href }) => (
-              <button
-                key={label}
-                onClick={() => href && router.push(href)}
-                disabled={!href}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "flex-start",
-                  gap: 10,
-                  padding: "14px 12px",
-                  borderRadius: 10,
-                  border: "1px solid var(--color-border)",
-                  background: "#fff",
-                  cursor: href ? "pointer" : "not-allowed",
-                  opacity: href ? 1 : 0.55,
-                  fontFamily: "var(--font-sans)",
-                  transition: "background 0.15s",
-                }}
-                onMouseEnter={(e) => {
-                  if (href) (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)";
-                }}
-                onMouseLeave={(e) => {
-                  if (href) (e.currentTarget as HTMLButtonElement).style.background = "#fff";
-                }}
-              >
-                <div
+        <div className="dashboard-col">
+          {/* Quick actions */}
+          <div className="card">
+            <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: "0 0 14px" }}>Quick Actions</h3>
+            <div className="quick-actions-grid">
+              {QUICK_ACTIONS.map(({ label, icon: Icon, bg, color, href }) => (
+                <button
+                  key={label}
+                  className="quick-action-btn"
+                  onClick={() => href && router.push(href)}
+                  disabled={!href}
                   style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 8,
-                    background: bg,
                     display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    padding: "14px 12px",
+                    borderRadius: 10,
+                    border: "1px solid var(--color-border)",
+                    background: "#fff",
+                    cursor: href ? "pointer" : "not-allowed",
+                    opacity: href ? 1 : 0.55,
+                    fontFamily: "var(--font-sans)",
                   }}
                 >
-                  <Icon size={15} strokeWidth={1.8} color={color} />
+                  <div
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: 8,
+                      background: bg,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Icon size={15} strokeWidth={1.8} color={color} />
+                  </div>
+                  <span style={{ fontSize: "0.8rem", fontWeight: 500, color: "var(--color-text)" }}>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Top items */}
+          <div className="card">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <Utensils size={16} strokeWidth={1.8} color="#a07a00" />
+              <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>Top Items</h3>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {topItemsLoading &&
+                Array.from({ length: TOP_ITEMS_ROWS }).map((_, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 4px" }}>
+                    <Skeleton width={22} height={22} radius={6} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+                      <Skeleton width="70%" height={12} />
+                      <Skeleton width="40%" height={10} />
+                    </div>
+                  </div>
+                ))}
+
+              {!topItemsLoading && (topItemsError || !visibleTopItems.length) && (
+                <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+                  {topItemsError ? "Could not load top items" : "No item sales yet this month"}
+                </p>
+              )}
+
+              {!topItemsLoading &&
+                visibleTopItems.map((item, i) => (
+                  <div
+                    key={item.itemId}
+                    className="row-hover fade-in"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "8px 6px",
+                      borderRadius: 8,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: 6,
+                        background: "rgba(252,208,99,0.15)",
+                        color: "#a07a00",
+                        fontSize: "0.72rem",
+                        fontWeight: 700,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {i + 1}
+                    </span>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: "0.85rem",
+                          fontWeight: 600,
+                          color: "var(--color-text)",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {item.name}
+                      </p>
+                      <p style={{ margin: 0, fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
+                        {item.totalSold} sold
+                      </p>
+                    </div>
+                    <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-text)", flexShrink: 0 }}>
+                      {formatNaira(item.revenue)}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+
+          {/* Order type breakdown */}
+          <div className="card">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <PieChartIcon size={16} strokeWidth={1.8} color="#a07a00" />
+              <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>Order Type Breakdown</h3>
+            </div>
+
+            {distributionLoading && (
+              <div style={{ height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Skeleton width={140} height={140} radius={999} />
+              </div>
+            )}
+
+            {!distributionLoading && distributionError && (
+              <p style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", padding: "12px 0" }}>
+                Could not load order breakdown
+              </p>
+            )}
+
+            {!distributionLoading && !distributionError && distribution && (() => {
+              const totalDistCount = distribution.reduce((sum, d) => sum + d.count, 0);
+              const hasData = totalDistCount > 0;
+              const pieData = hasData ? distribution : [{ type: "NONE", count: 1, revenue: 0, percentage: 0 }];
+
+              return (
+                <div className="fade-in" style={{ width: "100%", height: 220, position: "relative" }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieData}
+                        dataKey="count"
+                        nameKey="type"
+                        innerRadius={50}
+                        outerRadius={80}
+                        paddingAngle={hasData ? 2 : 0}
+                        animationDuration={600}
+                        animationEasing="ease-out"
+                      >
+                        {pieData.map((entry) => (
+                          <Cell
+                            key={entry.type}
+                            fill={hasData ? DISTRIBUTION_COLORS[entry.type] ?? "#999" : "var(--color-border)"}
+                            stroke="#fff"
+                            strokeWidth={2}
+                          />
+                        ))}
+                      </Pie>
+                      {hasData && <Tooltip content={<DistributionTooltip />} />}
+                      {hasData && (
+                        <Legend
+                          formatter={(value: string) => formatDistributionLabel(value)}
+                          wrapperStyle={{ fontSize: "0.78rem" }}
+                        />
+                      )}
+                    </PieChart>
+                  </ResponsiveContainer>
+
+                  {!hasData && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 500, color: "var(--color-text-muted)" }}>
+                        No orders for this period
+                      </p>
+                    </div>
+                  )}
                 </div>
-                <span style={{ fontSize: "0.8rem", fontWeight: 500, color: "var(--color-text)" }}>{label}</span>
-              </button>
-            ))}
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -731,6 +1238,7 @@ export default function DashboardPage() {
         >
           <h3 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>Recent Activity</h3>
           <button
+            className="link-btn"
             onClick={() => router.push("/audit-logs")}
             style={{
               background: "none",
@@ -779,6 +1287,7 @@ export default function DashboardPage() {
             activity.map((item, i) => (
               <div
                 key={item.id}
+                className="row-hover"
                 style={{
                   display: "flex",
                   alignItems: "flex-start",
@@ -848,6 +1357,7 @@ export default function DashboardPage() {
             )}
           </div>
           <button
+            className="link-btn"
             onClick={() => router.push(ORDERS_HREF)}
             style={{
               background: "none",
@@ -895,7 +1405,7 @@ export default function DashboardPage() {
 
               {!ordersLoading &&
                 visibleOrders.map((order) => (
-                  <tr key={order.id}>
+                  <tr key={order.id} className="row-hover">
                     <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{order.orderNumber}</td>
                     <td style={{ fontWeight: 400 }}>
                       {order.customer?.fullName ?? order.guestName ?? "–"}
@@ -935,7 +1445,7 @@ export default function DashboardPage() {
                           display: "flex",
                           padding: 4,
                           borderRadius: 6,
-                          transition: "color 0.15s",
+                          transition: `color 0.15s ${EASE}`,
                         }}
                         onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text)")}
                         onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--color-text-muted)")}
@@ -952,6 +1462,7 @@ export default function DashboardPage() {
         {!ordersLoading && totalOrders > PREVIEW_ROWS && (
           <div style={{ padding: "12px 20px", borderTop: "1px solid var(--color-border)" }}>
             <button
+              className="link-btn"
               onClick={() => router.push(ORDERS_HREF)}
               style={{
                 background: "none",
@@ -987,7 +1498,7 @@ export default function DashboardPage() {
           }}
         >
           <div
-            className="order-modal-panel"
+            className="order-modal-panel fade-in"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -1044,6 +1555,7 @@ export default function DashboardPage() {
                   padding: 6,
                   borderRadius: 8,
                   flexShrink: 0,
+                  transition: `color 0.15s ${EASE}, background 0.15s ${EASE}`,
                 }}
               >
                 <X size={18} />

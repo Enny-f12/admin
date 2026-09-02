@@ -1,7 +1,7 @@
-// store/useAccountingStore.ts
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { accountingService } from '@/services/accounting.service';
+import { stockService } from '@/services/stock.service';
 import {
   AccountingSummary,
   AccountingFilters,
@@ -10,6 +10,7 @@ import {
 } from '@/types/accounting.types';
 
 function extractErrorMessage(error: unknown, fallback: string) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const anyErr = error as any;
   return anyErr?.response?.data?.message ?? anyErr?.message ?? fallback;
 }
@@ -32,11 +33,14 @@ interface AccountingState {
 
   fetchSummary: (filters: AccountingFilters) => Promise<void>;
   fetchMarginItems: (filters: AccountingFilters & { search?: string; page?: number; limit?: number }) => Promise<void>;
-  updateItemCostPrice: (id: string, costPrice: number) => Promise<boolean>;
+  // Now takes the full MarginItem (needs its id — used as StockItem.id —
+  // and sellingPrice, to recompute marginPercent locally after the write,
+  // since the Stock endpoint returns a StockItem, not a MarginItem).
+  updateItemCostPrice: (item: MarginItem, costPrice: number) => Promise<boolean>;
   fetchRecentSales: (filters: AccountingFilters & { page?: number; limit?: number }) => Promise<void>;
 }
 
-export const useAccountingStore = create<AccountingState>((set, get) => ({
+export const useAccountingStore = create<AccountingState>((set) => ({
   summary: null,
   summaryLoading: false,
   summaryError: false,
@@ -72,13 +76,28 @@ export const useAccountingStore = create<AccountingState>((set, get) => ({
     }
   },
 
-  updateItemCostPrice: async (id, costPrice) => {
+  // Routes through the SAME endpoint the Stock Inventory page uses —
+  // PATCH /admin/stock/items/:itemId/cost-price — instead of a separate
+  // accounting-owned one. There is exactly one place costPerUnit ever
+  // gets written now, no matter which screen the edit started from.
+  updateItemCostPrice: async (item, costPrice) => {
     set({ isSavingCostPrice: true });
     try {
-      const updated = await accountingService.updateItemCostPrice(id, { costPrice });
+      const updatedStockItem = await stockService.updateCostPrice({
+        itemId: item.id,
+        costPerUnit: costPrice,
+      });
+      const marginPercent =
+        item.sellingPrice > 0
+          ? Math.round(((item.sellingPrice - updatedStockItem.costPerUnit) / item.sellingPrice) * 100)
+          : 0;
       set((state) => ({
         isSavingCostPrice: false,
-        marginItems: state.marginItems ? state.marginItems.map((m) => (m.id === id ? updated : m)) : state.marginItems,
+        marginItems: state.marginItems
+          ? state.marginItems.map((m) =>
+              m.id === item.id ? { ...m, costPrice: updatedStockItem.costPerUnit, marginPercent } : m,
+            )
+          : state.marginItems,
       }));
       toast.success('Cost price updated.');
       return true;

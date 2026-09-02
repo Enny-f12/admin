@@ -41,22 +41,24 @@ export interface UpdateNotificationSettingsPayload {
   sms: { id: string; on: boolean }[];
 }
 
+// ── Branches — matches backend schema (Swagger: SettingsController) ──
 export interface Branch {
   id: string;
-  label: string;
   name: string;
   location: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  state: string;
+  country: string;
+  postalCode: string;
+  latitude: number;
+  longitude: number;
   phone: string;
   email: string;
   pickupEnabled: boolean;
+  isActive: boolean;
 }
 
-export interface CreateBranchPayload {
-  name: string;
-  location: string;
-  phone: string;
-  email: string;
-  pickupEnabled: boolean;
-}
-
+export type CreateBranchPayload = Omit<Branch, 'id'>;
 export type UpdateBranchPayload = Partial<CreateBranchPayload>;

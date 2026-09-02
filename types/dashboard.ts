@@ -2,30 +2,65 @@
 
 export interface DashboardSummary {
   ordersToday: number;
-  ordersChangePercent: number;   
-  revenueToday: number;
-  revenueChangePercent: number;  
-  reservationsToday: number;
+  ordersTodayChangePercent: number | null;
+  ordersThisWeek: number;
+  ordersWeekChangePercent: number | null;
+  revenueThisMonth: number;
+  revenueMonthChangePercent: number | null;
+  activeReservations: number;
 }
 
 /* ── Sales trends ── */
 export interface SalesTrendPoint {
   date: string;
   revenue: number;
+  orders: number;
 }
 
-/* ── Popular items ── */
+/* ── Top / popular items ── */
 export interface PopularItem {
+  itemId: string;
   name: string;
-  price: number;
+  unit: string;
   photo: string | null;
   totalSold: number;
+  revenue: number;
 }
 
-/* ── Order type distribution ── */
+/* ── Shared range param used by several dashboard endpoints ── */
+export type DashboardRange = "today" | "week" | "month" | "year" | "all";
+
+/* ── Order type distribution (Pie Chart) ── */
 export interface OrderDistribution {
-  type: string;
+  type: OrderType | string;
   count: number;
+  revenue: number;
+  percentage: number;
+}
+
+/* ── Branch performance comparison ── */
+export interface BranchPerformanceEntry {
+  branchId: string;
+  name: string;
+  city: string;
+  address: string;
+  revenue: number;
+  revenueSharePercent: number;
+  orders: number;
+  avgOrderValue: number;
+  activeReservations: number;
+  changePercent: number | null;
+  status: "TOP_PERFORMING" | "NEEDS_ATTENTION" | string;
+  rating: string;
+  isTopPerforming: boolean;
+}
+
+export interface BranchPerformance {
+  totalRevenue: number;
+  totalOrders: number;
+  averageOrderValue: number;
+  topPerformingBranch: BranchPerformanceEntry | null;
+  branches: BranchPerformanceEntry[];
 }
 
 /* ── Customers ── */
@@ -41,9 +76,8 @@ export interface DashboardCustomer {
 
 export interface DashboardCustomersResponse {
   data: DashboardCustomer[];
-  total: number; 
+  total: number;
 }
-
 
 export type LowStockStatus = "LOW" | "OUT_OF_STOCK";
 
@@ -56,7 +90,6 @@ export interface LowStockAlert {
   status: LowStockStatus;
 }
 
-
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
@@ -65,7 +98,6 @@ export interface AuditLogEntry {
   action: string;
   item: string;
 }
-
 
 export interface AuditLogsResponse {
   items: AuditLogEntry[];
@@ -93,9 +125,9 @@ export interface AdminOrderItem {
   menuItemId: string;
   nameSnapshot: string;
   descriptionSnapshot: string | null;
-  unitPrice: string; 
+  unitPrice: string;
   quantity: number;
-  totalPrice: string; 
+  totalPrice: string;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -126,7 +158,6 @@ export interface AdminOrderBranch {
   postalCode: string | null;
   isActive: boolean;
 }
-
 
 export interface AdminOrder {
   id: string;
@@ -180,6 +211,4 @@ export interface AdminOrdersFilters {
   dateTo?: string;
   branchId?: string;
   page?: number;
-  
-  
-}
+} 

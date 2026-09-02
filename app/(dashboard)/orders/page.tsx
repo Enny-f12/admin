@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import {
   CalendarDays,
   SlidersHorizontal,
@@ -19,6 +20,7 @@ import {
   CreditCard,
   StickyNote,
   AlertTriangle,
+  Copy,
 } from "lucide-react";
 import { useOrderStore } from "@/store/useOrderStore";
 import { OrderStatus, AdminOrder } from "@/types/orders";
@@ -28,6 +30,8 @@ import { useBranch } from "../layout";
 const STATUS_OPTIONS: ("All Status" | OrderStatus)[] = [
   "All Status", "RECEIVED", "PREPARING", "READY_FOR_PICKUP", "OUT_FOR_DELIVERY", "DELIVERED", "COMPLETED", "CANCELLED",
 ];
+
+const TYPE_OPTIONS: ("All Types" | AdminOrder["orderType"])[] = ["All Types", "DINE_IN", "TAKEAWAY", "DELIVERY"];
 
 const STATUS_LABEL: Record<OrderStatus, string> = {
   RECEIVED: "Received",
@@ -96,12 +100,60 @@ function formatDeliveryAddress(order: AdminOrder): string {
   return parts.length > 0 ? parts.join(", ") : "-";
 }
 
+// Small clipboard control used next to order IDs in both the table and
+// the detail modal -- copies the raw order number (what a customer would
+// read out over the phone when confirming a bank transfer) and swaps to
+// a checkmark briefly for feedback, alongside a toast.
+function CopyOrderIdButton({ orderNumber }: { orderNumber: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(orderNumber);
+      setCopied(true);
+      toast.success("Order ID copied");
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Could not copy order ID");
+    }
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      aria-label={`Copy order ID ${orderNumber}`}
+      className="copy-order-id-btn"
+      style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        background: "none", border: "none", cursor: "pointer", padding: 3, borderRadius: 5,
+        color: copied ? "#16A34A" : "var(--color-text-muted)",
+      }}
+    >
+      <style jsx>{`
+        .copy-order-id-btn {
+          transition: color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+        }
+        .copy-order-id-btn:hover {
+          background: var(--color-bg-soft);
+        }
+        .copy-order-id-btn:active {
+          transform: scale(0.88);
+        }
+      `}</style>
+      {copied ? <Check size={13} strokeWidth={2.2} /> : <Copy size={13} strokeWidth={1.8} />}
+    </button>
+  );
+}
+
 export default function OrdersPage() {
   const [search, setSearch] = useState("");
   const [searchBy, setSearchBy] = useState("Name");
   const [searchByOpen, setSearchByOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"All Status" | OrderStatus>("All Status");
   const [statusOpen, setStatusOpen] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<"All Types" | AdminOrder["orderType"]>("All Types");
+  const [typeOpen, setTypeOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
 
@@ -122,6 +174,11 @@ export default function OrdersPage() {
   }, [statusFilter, branch.id, fetchOrders]);
 
   const filtered = (orders ?? []).filter((o) => {
+    // Type filter is applied client-side over the branch/status-scoped
+    // list, same as the free-text search below -- only status and
+    // branch are sent to the backend as query params today.
+    if (typeFilter !== "All Types" && o.orderType !== typeFilter) return false;
+
     const q = search.toLowerCase();
     if (!q) return true;
     if (searchBy === "Name") return (o.customer?.fullName ?? o.guestName ?? "").toLowerCase().includes(q);
@@ -284,6 +341,30 @@ export default function OrdersPage() {
               </div>
             )}
           </div>
+
+          <div style={{ position: "relative", minWidth: 170 }}>
+            <button
+              onClick={() => setTypeOpen((v) => !v)}
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer", fontSize: "0.85rem", color: "var(--color-text)", fontFamily: "var(--font-sans)" }}
+            >
+              {typeFilter === "All Types" ? "All Types" : ORDER_TYPE_LABEL[typeFilter]}
+              <ChevronDown size={15} strokeWidth={1.8} color="var(--color-text-muted)" />
+            </button>
+            {typeOpen && (
+              <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 170, background: "#fff", border: "1px solid var(--color-border)", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.10)", overflow: "hidden", zIndex: 60 }}>
+                {TYPE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt}
+                    onClick={() => { setTypeFilter(opt); setTypeOpen(false); setPage(1); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "10px 14px", background: opt === typeFilter ? "var(--color-bg-soft)" : "#fff", border: "none", cursor: "pointer", fontSize: "0.85rem", fontFamily: "var(--font-sans)", color: "var(--color-text)" }}
+                  >
+                    {opt === typeFilter && <Check size={13} strokeWidth={2} />}
+                    {opt === "All Types" ? "All Types" : ORDER_TYPE_LABEL[opt]}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -309,7 +390,12 @@ export default function OrdersPage() {
 
               {!isLoading && !isError && paged.map((order) => (
                 <tr key={order.id}>
-                  <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{order.orderNumber}</td>
+                  <td style={{ fontWeight: 600, color: "var(--color-text)" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                      {order.orderNumber}
+                      <CopyOrderIdButton orderNumber={order.orderNumber} />
+                    </span>
+                  </td>
                   <td>{order.customer?.fullName ?? order.guestName ?? "-"}</td>
                   <td>{order.items.length} {order.items.length === 1 ? "Item" : "Items"}</td>
                   <td style={{ fontWeight: 500, color: "var(--color-text)" }}>{formatMoney(order.totalAmount)}</td>
@@ -406,8 +492,9 @@ function OrderDetailModal({ orderId, onClose }: { orderId: string; onClose: () =
         style={{ width: 470, maxWidth: "92vw", maxHeight: "88vh", background: "#fff", borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", overflow: "hidden" }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px 16px", flexShrink: 0, borderBottom: "1px solid var(--color-border)" }}>
-          <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "var(--color-heading)" }}>
+          <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "var(--color-heading)", display: "flex", alignItems: "center", gap: 6 }}>
             Order&nbsp;{order?.orderNumber ?? "-"}
+            {order?.orderNumber && <CopyOrderIdButton orderNumber={order.orderNumber} />}
           </h3>
           <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex" }}>
             <X size={18} />

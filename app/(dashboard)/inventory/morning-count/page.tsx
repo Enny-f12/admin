@@ -1,6 +1,8 @@
+// app/(dashboard)/inventory/morning-count/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Clock,
   ChevronDown,
@@ -9,8 +11,10 @@ import {
   SquarePen,
   X,
   Loader2,
+  ClipboardList,
 } from "lucide-react";
 import { useMorningCountStore } from "@/store/useMorningCountStore";
+import { useAuthStore } from "@/store/useAuthStore";
 import { useBranch } from "../../layout";
 
 const STATUS_CLASS: Record<string, string> = {
@@ -20,6 +24,10 @@ const STATUS_CLASS: Record<string, string> = {
 };
 
 const TODAY = new Date().toISOString().slice(0, 10);
+
+// Roles allowed to see the staff audit log from this page. Adjust these
+// two strings if your role enum names them differently.
+const STAFF_LOG_ROLES = ["SUPER_ADMIN", "MANAGER"];
 
 // Backend sends sheet.date as a raw ISO string (e.g.
 // "2026-08-14T00:00:00.000Z") — display it as "14 August 2026" instead.
@@ -32,6 +40,8 @@ function formatDayMonthYear(iso?: string | null) {
 
 export default function MorningCountPage() {
   const branch = useBranch();
+  const router = useRouter();
+  const { user } = useAuthStore();
 
   const {
     sheet,
@@ -49,7 +59,6 @@ export default function MorningCountPage() {
     submitSelectedCategory,
   } = useMorningCountStore();
 
-
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [editing, setEditing] = useState<{ itemId: string } | null>(null);
   const [editUnit, setEditUnit] = useState("");
@@ -61,6 +70,8 @@ export default function MorningCountPage() {
   // guards the brief window before a picker's initial branch selection
   // lands.
   const hasUsableBranch = Boolean(branch.id);
+
+  const canViewStaffLogs = Boolean(user?.role && STAFF_LOG_ROLES.includes(user.role));
 
   useEffect(() => {
     if (hasUsableBranch) {
@@ -78,6 +89,39 @@ export default function MorningCountPage() {
   // what to *display* too. sheet?.outletName kept only as a last-resort
   // fallback in case branch.name is ever empty mid-load.
   const outletDisplayName = branch.name || sheet?.outletName || "—";
+
+  const metaRows: [string, string][] = [
+    ["Date:", formatDayMonthYear(sheet?.date)],
+    ["Counter Staff:", sheet?.counterStaffName ?? "–"],
+    ["Time:", sheet?.time ?? "–"],
+  ];
+
+  // FIX — the /morning-count/sheet response doesn't include a `summary`
+  // object at all (verified in the Network tab: the payload is just
+  // { id, branchId, date, categories }), so `sheet?.summary.totalUpdated`
+  // crashed with "Cannot read properties of undefined (reading
+  // 'totalUpdated')" the moment a sheet loaded. Computing the counts
+  // client-side from categories/items removes the dependency on a field
+  // the backend never sends, and stays correct even if that changes later.
+  //
+  // Also note: item.status is trusted as the source of truth here
+  // ("Updated" / "Pending" / "Out of stock"), matching STATUS_CLASS.
+  // Any status value other than those three falls into "pending" so the
+  // counts always add up to the total item count.
+  const summary = useMemo(() => {
+    if (!sheet) return null;
+    let totalUpdated = 0;
+    let totalOutOfStock = 0;
+    let totalPending = 0;
+    for (const cat of sheet.categories) {
+      for (const item of cat.items) {
+        if (item.status === "Updated") totalUpdated++;
+        else if (item.status === "Out of stock") totalOutOfStock++;
+        else totalPending++;
+      }
+    }
+    return { totalUpdated, totalPending, totalOutOfStock };
+  }, [sheet]);
 
   const openEdit = (itemId: string) => {
     if (!category) return;
@@ -122,48 +166,78 @@ export default function MorningCountPage() {
       >
         <div>
           <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
-            {outletDisplayName} <span style={{ margin: "0 4px" }}>•</span>{" "}
-            <span style={{ fontWeight: 700 }}>(FOOD ITEMS ONLY)</span>
+            {outletDisplayName}
           </p>
           <h1 style={{ margin: "6px 0 0", fontSize: "1.25rem", fontWeight: 700, letterSpacing: "0.01em", color: "var(--color-heading)" }}>
             MORNING STOCK COUNT
           </h1>
           <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            Count every food item to unlock the day&apos;s operations
+            Count every item to unlock the day&apos;s operations
           </p>
         </div>
 
-        <button
-          onClick={() => saveDraft()}
-          disabled={isSavingDraft || !sheet}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "9px 16px",
-            borderRadius: 8,
-            border: "1px solid var(--color-primary)",
-            background: "#fff",
-            color: "var(--color-primary)",
-            fontSize: "0.85rem",
-            fontWeight: 600,
-            fontFamily: "var(--font-sans)",
-            cursor: isSavingDraft || !sheet ? "default" : "pointer",
-            opacity: isSavingDraft || !sheet ? 0.6 : 1,
-          }}
-        >
-          <Clock size={15} strokeWidth={1.8} />
-          {isSavingDraft ? "Saving…" : "Save Draft"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {canViewStaffLogs && (
+            <button
+              onClick={() => router.push("/inventory/morning-count/audit-logs")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "9px 16px",
+                borderRadius: 8,
+                border: "1px solid var(--color-border)",
+                background: "#fff",
+                color: "var(--color-text)",
+                fontSize: "0.85rem",
+                fontWeight: 600,
+                fontFamily: "var(--font-sans)",
+                cursor: "pointer",
+                transition: "background 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)";
+                (e.currentTarget as HTMLButtonElement).style.transform = "translateY(-1px)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "#fff";
+                (e.currentTarget as HTMLButtonElement).style.transform = "translateY(0)";
+              }}
+            >
+              <ClipboardList size={15} strokeWidth={1.8} />
+              View Staff Logs
+            </button>
+          )}
+
+          <button
+            onClick={() => saveDraft()}
+            disabled={isSavingDraft || !sheet}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "9px 16px",
+              borderRadius: 8,
+              border: "1px solid var(--color-primary)",
+              background: "#fff",
+              color: "var(--color-primary)",
+              fontSize: "0.85rem",
+              fontWeight: 600,
+              fontFamily: "var(--font-sans)",
+              cursor: isSavingDraft || !sheet ? "default" : "pointer",
+              opacity: isSavingDraft || !sheet ? 0.6 : 1,
+              transition: "opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
+          >
+            <Clock size={15} strokeWidth={1.8} />
+            {isSavingDraft ? "Saving…" : "Save Draft"}
+          </button>
+        </div>
       </div>
 
       {/* Meta rows */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: -8 }}>
-        {[
-          ["Date:", formatDayMonthYear(sheet?.date)],
-          ["Counter Staff:", sheet?.counterStaffName ?? "–"],
-          ["Time:", sheet?.time ?? "–"],
-        ].map(([label, value]) => (
+        {metaRows.map(([label, value]) => (
           <p key={label} style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
             <span style={{ color: "var(--color-text-muted)" }}>{label}</span>{" "}
             <span style={{ fontWeight: 600 }}>{value}</span>
@@ -177,7 +251,7 @@ export default function MorningCountPage() {
           INSTRUCTIONS:
         </p>
         <p style={{ margin: "0 0 12px", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)" }}>
-          Please physically count each FOOD ITEM and enter the quantity.
+          Please physically count each ITEM and enter the quantity.
         </p>
         <p style={{ margin: "0 0 6px", fontSize: "0.85rem", color: "var(--color-text)" }}>
           &ldquo;Previous column shows&rdquo;
@@ -197,12 +271,9 @@ export default function MorningCountPage() {
         <p style={{ margin: "0 0 4px", fontSize: "0.85rem", color: "var(--color-text)" }}>
           Items left blank <span style={{ margin: "0 4px" }}>→</span> Keep previous value
         </p>
-        <p style={{ margin: "0 0 12px", fontSize: "0.85rem", color: "var(--color-text)" }}>
+        <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
           Items marked &ldquo;0&rdquo; <span style={{ margin: "0 4px" }}>→</span>{" "}
           <span style={{ color: "var(--color-error, #E10B1C)", fontWeight: 600 }}>Out of stock</span>
-        </p>
-        <p style={{ margin: 0, fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)" }}>
-          DRINKS are NOT counted here. Use Drinks Inventory tab.
         </p>
       </div>
 
@@ -227,10 +298,19 @@ export default function MorningCountPage() {
                 fontWeight: 500,
                 color: "var(--color-text)",
                 fontFamily: "var(--font-sans)",
+                transition: "border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
               }}
             >
               {category.name}
-              <ChevronDown size={16} strokeWidth={1.8} color="var(--color-text-muted)" />
+              <ChevronDown
+                size={16}
+                strokeWidth={1.8}
+                color="var(--color-text-muted)"
+                style={{
+                  transition: "transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
+                  transform: categoryOpen ? "rotate(180deg)" : "rotate(0deg)",
+                }}
+              />
             </button>
 
             {categoryOpen && (
@@ -246,6 +326,8 @@ export default function MorningCountPage() {
                   boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
                   overflow: "hidden",
                   zIndex: 60,
+                  animation: "morning-count-dropdown-in 0.16s cubic-bezier(0.16, 1, 0.3, 1)",
+                  transformOrigin: "top",
                 }}
               >
                 {sheet.categories.map((cat) => (
@@ -266,6 +348,17 @@ export default function MorningCountPage() {
                       fontSize: "0.85rem",
                       fontFamily: "var(--font-sans)",
                       color: "var(--color-text)",
+                      transition: "background 0.15s cubic-bezier(0.16, 1, 0.3, 1)",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (cat.id !== selectedCategoryId) {
+                        (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)";
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (cat.id !== selectedCategoryId) {
+                        (e.currentTarget as HTMLButtonElement).style.background = "#fff";
+                      }
                     }}
                   >
                     {cat.name}
@@ -275,7 +368,10 @@ export default function MorningCountPage() {
             )}
           </div>
 
-          {category.submitted ? (
+          {/* FIX — backend field is `isSubmitted`, not `submitted`. This
+              previously never matched, so submitted categories would
+              silently render as still-editable. */}
+          {category.isSubmitted ? (
             <span
               style={{
                 display: "flex",
@@ -308,6 +404,13 @@ export default function MorningCountPage() {
                 fontWeight: 500,
                 color: "var(--color-text)",
                 fontFamily: "var(--font-sans)",
+                transition: "background 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "#fff";
               }}
             >
               <FileClock size={15} strokeWidth={1.8} color="#a07a00" />
@@ -354,7 +457,7 @@ export default function MorningCountPage() {
                 </thead>
                 <tbody>
                   {category.items.map((item) => (
-                    <tr key={item.id}>
+                    <tr key={item.id} style={{ transition: "background 0.15s cubic-bezier(0.16, 1, 0.3, 1)" }}>
                       <td>
                         <p style={{ margin: 0, fontWeight: 600, color: "var(--color-text)" }}>{item.name}</p>
                         <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{item.unit}</p>
@@ -365,14 +468,15 @@ export default function MorningCountPage() {
                         <input
                           type="number"
                           className="input"
-                          disabled={category.submitted}
+                          disabled={category.isSubmitted}
                           value={item.current === null ? "" : item.current}
                           onChange={(e) =>
                             updateItemCurrent(item.id, e.target.value === "" ? null : Number(e.target.value))
                           }
                           style={{
                             width: 90,
-                            opacity: category.submitted ? 0.6 : updatingItemIds[item.id] ? 0.85 : 1,
+                            opacity: category.isSubmitted ? 0.6 : updatingItemIds[item.id] ? 0.85 : 1,
+                            transition: "opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
                           }}
                         />
                       </td>
@@ -397,7 +501,7 @@ export default function MorningCountPage() {
                       <td>
                         <button
                           onClick={() => openEdit(item.id)}
-                          disabled={category.submitted}
+                          disabled={category.isSubmitted}
                           style={{
                             display: "flex",
                             alignItems: "center",
@@ -406,12 +510,21 @@ export default function MorningCountPage() {
                             borderRadius: 8,
                             border: "1px solid var(--color-border)",
                             background: "#fff",
-                            cursor: category.submitted ? "default" : "pointer",
-                            opacity: category.submitted ? 0.6 : 1,
+                            cursor: category.isSubmitted ? "default" : "pointer",
+                            opacity: category.isSubmitted ? 0.6 : 1,
                             fontSize: "0.8rem",
                             fontWeight: 500,
                             color: "var(--color-text)",
                             fontFamily: "var(--font-sans)",
+                            transition: "background 0.18s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!category.isSubmitted) {
+                              (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)";
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.background = "#fff";
                           }}
                         >
                           <SquarePen size={13} strokeWidth={1.8} />
@@ -427,20 +540,21 @@ export default function MorningCountPage() {
         )}
       </div>
 
-      {/* Summary */}
+      {/* Summary — computed client-side from sheet.categories (see `summary`
+          above); the backend response has no summary field to read. */}
       <div className="card">
         <p style={{ margin: "0 0 10px", fontSize: "0.95rem", fontWeight: 700, color: "var(--color-heading)" }}>
           Summary:
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
-            Total Items updated: <strong>{sheet?.summary.totalUpdated ?? "–"}</strong>
+            Total Items updated: <strong>{summary?.totalUpdated ?? "–"}</strong>
           </p>
           <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
-            Items pending: <strong>{sheet?.summary.totalPending ?? "–"}</strong>
+            Items pending: <strong>{summary?.totalPending ?? "–"}</strong>
           </p>
           <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
-            Items marked out of stock: <strong>{sheet?.summary.totalOutOfStock ?? "–"}</strong>
+            Items marked out of stock: <strong>{summary?.totalOutOfStock ?? "–"}</strong>
           </p>
         </div>
       </div>
@@ -458,6 +572,13 @@ export default function MorningCountPage() {
             fontWeight: 600,
             color: "var(--color-text)",
             fontFamily: "var(--font-sans)",
+            transition: "background 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "#fff";
           }}
           onClick={() => hasUsableBranch && fetchSheet(branch.id, TODAY)}
         >
@@ -465,8 +586,8 @@ export default function MorningCountPage() {
         </button>
         <button
           className="btn btn-primary"
-          style={{ padding: "10px 20px", fontSize: "0.85rem" }}
-          disabled={!category || category.submitted}
+          style={{ padding: "10px 20px", fontSize: "0.85rem", transition: "opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), transform 0.15s cubic-bezier(0.16, 1, 0.3, 1)" }}
+          disabled={!category || category.isSubmitted}
           onClick={() => submitSelectedCategory()}
         >
           Submit Count
@@ -484,6 +605,7 @@ export default function MorningCountPage() {
             alignItems: "center",
             justifyContent: "center",
             zIndex: 100,
+            animation: "morning-count-fade-in 0.15s cubic-bezier(0.16, 1, 0.3, 1)",
           }}
           onClick={() => setEditing(null)}
         >
@@ -496,6 +618,7 @@ export default function MorningCountPage() {
               borderRadius: 14,
               padding: 24,
               boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+              animation: "morning-count-modal-in 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
             }}
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
@@ -505,7 +628,14 @@ export default function MorningCountPage() {
               <button
                 onClick={() => setEditing(null)}
                 aria-label="Close"
-                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex" }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--color-text-muted)",
+                  display: "flex",
+                  transition: "color 0.15s cubic-bezier(0.16, 1, 0.3, 1)",
+                }}
               >
                 <X size={18} />
               </button>
@@ -534,17 +664,43 @@ export default function MorningCountPage() {
                   fontWeight: 600,
                   color: "var(--color-text)",
                   fontFamily: "var(--font-sans)",
+                  transition: "background 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-soft)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "#fff";
                 }}
               >
                 Cancel
               </button>
-              <button onClick={saveEdit} className="btn btn-primary" style={{ padding: "9px 18px", fontSize: "0.85rem" }}>
+              <button
+                onClick={saveEdit}
+                className="btn btn-primary"
+                style={{ padding: "9px 18px", fontSize: "0.85rem", transition: "opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1)" }}
+              >
                 Save
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <style jsx global>{`
+        @keyframes morning-count-fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes morning-count-modal-in {
+          from { opacity: 0; transform: translateY(8px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes morning-count-dropdown-in {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }

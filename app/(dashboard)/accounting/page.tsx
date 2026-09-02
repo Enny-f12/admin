@@ -94,18 +94,21 @@ const TD_STYLE: React.CSSProperties = {
 };
 
 const PAGE_SIZE = 5;
-// Fetched from the store with this larger limit so pagination below has
-// something to page through client-side. This is a stopgap — see the
-// TODO(BACKEND) note near fetchMarginItems/fetchRecentSales in the effect
-// below for why real server-side pagination (page/limit + total count)
-// would be the correct long-term fix.
 const FETCH_LIMIT = 50;
-
-// How long to wait, after the person stops changing a date field, before
-// firing the fetch. Picking a new start date shouldn't trigger a request
-// on the (now stale) previous end date the instant it's clicked — this
-// gives them a moment to also change the end date before anything loads.
 const DATE_DEBOUNCE_MS = 500;
+
+// Default reporting period — computed relative to "now" (last 14 days)
+// instead of a hardcoded past date, so the page shows something current
+// the first time anyone opens it rather than a report from months ago.
+function isoDate(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+function defaultDateRange() {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - 13); // last 14 days inclusive
+  return { start: isoDate(start), end: isoDate(end) };
+}
 
 function ReadonlyField({ label, value, loading }: { label: string; value: string; loading?: boolean }) {
   return (
@@ -124,8 +127,6 @@ function ReadonlyField({ label, value, loading }: { label: string; value: string
   );
 }
 
-// Same visual footprint as ReadonlyField, but an actual native date input
-// so the user can pick the reporting period instead of it being fixed.
 function DateField({
   label, value, onChange, max, min, invalid,
 }: { label: string; value: string; onChange: (v: string) => void; max?: string; min?: string; invalid?: boolean }) {
@@ -202,8 +203,6 @@ function SectionCard({
   );
 }
 
-// Prev/Next pager shown under a table, replacing the old "VIEW ALL" link.
-// Renders nothing when everything fits on one page.
 function Pagination({
   page, totalPages, onPrev, onNext, totalItems,
 }: { page: number; totalPages: number; onPrev: () => void; onNext: () => void; totalItems: number }) {
@@ -238,11 +237,6 @@ function Pagination({
 }
 
 // ── CSV export ───────────────────────────────────────────────────────────────
-// No confirmed backend export endpoint exists yet (see handoff doc /
-// TODO(BACKEND) convention elsewhere in this file), so this builds a CSV
-// client-side from whatever's currently loaded in the store and triggers a
-// browser download. Once a real export endpoint exists, swap this for a
-// fetch to it instead.
 function csvEscape(val: unknown): string {
   const s = val === null || val === undefined ? "" : String(val);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -391,17 +385,10 @@ function ItemConfigView({
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
-// Defaults only — the period is now user-editable (see startDate/endDate
-// state below), not fixed constants.
-const DEFAULT_START_DATE = "2026-05-01";
-const DEFAULT_END_DATE = "2026-05-15";
+const { start: DEFAULT_START_DATE, end: DEFAULT_END_DATE } = defaultDateRange();
 
 export default function AccountingPage() {
   const branch = useBranch();
-  // undefined for "All Branches" (or no branch) — same convention as
-  // every other branch-filtered endpoint. See the backend suggestion re:
-  // these 4 accounting endpoints treating "no branchId" as "aggregate
-  // across all branches" once they're actually built.
   const branchId = asBranchId(branch?.id);
 
   const {
@@ -414,29 +401,15 @@ export default function AccountingPage() {
   const [view, setView] = useState<"dashboard" | "edit">("dashboard");
   const [activeItem, setActiveItem] = useState<MarginItem | null>(null);
 
-  // Editable reporting period. startDate/endDate reflect what's in the
-  // date inputs right now (so the fields feel responsive); debouncedStart/
-  // debouncedEnd are what's actually used to fetch, updated only after the
-  // person pauses for DATE_DEBOUNCE_MS. This is what stops "change start
-  // date" from immediately firing a request against the still-old end
-  // date before they've had a chance to touch it.
   const [startDate, setStartDate] = useState(DEFAULT_START_DATE);
   const [endDate, setEndDate] = useState(DEFAULT_END_DATE);
   const [debouncedStart, setDebouncedStart] = useState(DEFAULT_START_DATE);
   const [debouncedEnd, setDebouncedEnd] = useState(DEFAULT_END_DATE);
   const dateRangeValid = debouncedStart !== "" && debouncedEnd !== "" && debouncedStart <= debouncedEnd;
 
-  // Pagination — 5 rows per table page, client-side over a larger fetched
-  // batch (FETCH_LIMIT). Resets to page 1 whenever the underlying data
-  // changes (branch/date switch).
   const [marginPage, setMarginPage] = useState(1);
   const [salesPage, setSalesPage] = useState(1);
 
-  // Debounce: only commit startDate/endDate into debouncedStart/debouncedEnd
-  // once the person has stopped changing them for DATE_DEBOUNCE_MS. Every
-  // keystroke/pick resets this timer, so picking a new start date and then
-  // immediately picking a new end date results in exactly one fetch with
-  // both dates applied, not two fetches (one stale, one correct).
   useEffect(() => {
     const t = setTimeout(() => {
       setDebouncedStart(startDate);
@@ -449,11 +422,6 @@ export default function AccountingPage() {
     if (!dateRangeValid) return;
     const filters = { startDate: debouncedStart, endDate: debouncedEnd, branchId };
     fetchSummary(filters);
-    // TODO(BACKEND): item-margins and recent-sales endpoints don't yet
-    // support real page/limit + total-count pagination, so we fetch a
-    // larger batch (FETCH_LIMIT) and paginate over it client-side below.
-    // Once the endpoints support page params, switch these to request
-    // just the current page instead of everything up to FETCH_LIMIT.
     fetchMarginItems({ ...filters, limit: FETCH_LIMIT });
     fetchRecentSales({ ...filters, limit: FETCH_LIMIT });
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -478,9 +446,12 @@ export default function AccountingPage() {
     setView("edit");
   };
 
+  // Passes the full item now (not just its id) — the store needs
+  // sellingPrice too, to recompute marginPercent locally after the Stock
+  // endpoint responds with just an updated costPerUnit.
   const handleSave = async (costPrice: number) => {
     if (!activeItem) return;
-    const ok = await updateItemCostPrice(activeItem.id, costPrice);
+    const ok = await updateItemCostPrice(activeItem, costPrice);
     if (ok) setView("dashboard");
   };
 
@@ -506,7 +477,6 @@ export default function AccountingPage() {
 
   return (
     <div style={{ margin: "0 auto" }}>
-      {/* Page title + period */}
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 8 }}>
         <div>
           <p style={{ margin: 0, fontSize: "0.8rem", fontWeight: 600, color: "var(--color-primary)" }}>
@@ -547,7 +517,6 @@ export default function AccountingPage() {
         </div>
       )}
 
-      {/* Metric cards */}
       <div
         style={{
           display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
@@ -583,13 +552,11 @@ export default function AccountingPage() {
       {!summaryLoading && summaryError && (
         <div style={{ ...CARD, padding: 16, marginBottom: 20 }}>
           <p style={{ margin: 0, fontSize: 13, color: "#9CA3AF" }}>
-            {/* TODO(BACKEND): GET /admin/accounting/summary not implemented — see request doc #1 */}
             Summary data unavailable
           </p>
         </div>
       )}
 
-      {/* Profit margin by item */}
       <SectionCard title="PROFIT MARGIN BY ITEM">
         <div style={{ overflowX: "auto", margin: "-24px", marginTop: 0 }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -615,7 +582,6 @@ export default function AccountingPage() {
               {!marginItemsLoading && (marginItemsError || !marginItems?.length) && (
                 <tr>
                   <td colSpan={6} style={{ ...TD_STYLE, textAlign: "center", color: "#9CA3AF" }}>
-                    {/* TODO(BACKEND): GET /admin/accounting/item-margins not implemented — see request doc #2 */}
                     No margin data available
                   </td>
                 </tr>
@@ -657,7 +623,6 @@ export default function AccountingPage() {
         </div>
       </SectionCard>
 
-      {/* COGS breakdown */}
       <SectionCard title="COST OF GOODS SOLD BREAKDOWN">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 24 }}>
           <div>
@@ -679,7 +644,6 @@ export default function AccountingPage() {
         </div>
       </SectionCard>
 
-      {/* Daily stock movement */}
       <SectionCard title="DAILY STOCK MOVEMENT">
         <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 360 }}>
           <ReadonlyField label={`Opening Stock (${debouncedStart})`} loading={summaryLoading} value={fmt(summary?.stockMovement.openingStock)} />
@@ -690,7 +654,6 @@ export default function AccountingPage() {
         </div>
       </SectionCard>
 
-      {/* VAT collected */}
       <SectionCard title="VAT COLLECTED REPORT">
         <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 360 }}>
           <ReadonlyField label="Total Sales" loading={summaryLoading} value={fmt(summary?.vat.totalSales)} />
@@ -699,7 +662,6 @@ export default function AccountingPage() {
         </div>
       </SectionCard>
 
-      {/* Sales by payment method */}
       <SectionCard title="SALES BY PAYMENT METHOD">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16 }}>
           <ReadonlyField label="Mobile App (%)" loading={summaryLoading} value={summary ? `${summary.paymentMethodBreakdown.mobileApp}` : "–"} />
@@ -709,7 +671,6 @@ export default function AccountingPage() {
         </div>
       </SectionCard>
 
-      {/* Wastage breakdown */}
       <SectionCard title="WASTAGE BREAKDOWN">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
           <ReadonlyField
@@ -724,7 +685,6 @@ export default function AccountingPage() {
         </div>
       </SectionCard>
 
-      {/* Recent sales */}
       <SectionCard title="RECENT SALES (with recorded by)">
         <div style={{ overflowX: "auto", margin: "-24px", marginTop: 0 }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -749,7 +709,6 @@ export default function AccountingPage() {
               {!recentSalesLoading && (recentSalesError || !recentSales?.length) && (
                 <tr>
                   <td colSpan={5} style={{ ...TD_STYLE, textAlign: "center", color: "#9CA3AF" }}>
-                    {/* TODO(BACKEND): GET /admin/accounting/recent-sales not implemented — see request doc #4 */}
                     No recent sales available
                   </td>
                 </tr>

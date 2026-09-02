@@ -211,6 +211,10 @@ function CreateOrderView({ branchId }: { branchId: string }) {
   const total = subtotal + tax;
   const canCreate = !!customer && cart.length > 0 && !!paymentChoice;
 
+  // Increments an item's quantity in the cart (adds it at qty 1 if it
+  // isn't there yet). No longer closes the Add Item modal -- the
+  // modal now has its own +/- stepper per row so people can build up
+  // quantities across several items before dismissing it.
   const addToCart = (item: MenuItem) => {
     if (item.stock === 0) { setStockWarnItem(item); return; }
     setCart((prev) => {
@@ -219,7 +223,20 @@ function CreateOrderView({ branchId }: { branchId: string }) {
         ? prev.map((c) => (c.id === item.id ? { ...c, qty: c.qty + 1 } : c))
         : [...prev, { ...item, qty: 1 }];
     });
-    setAddItemOpen(false);
+  };
+
+  // Mirror of addToCart's decrement side, used by the modal's "-"
+  // button. Unlike changeQty below (used in the Items list, where an
+  // item is always already present with qty >= 1), this can take an
+  // item down to zero -- at which point it's dropped from the cart
+  // entirely rather than left sitting at qty 0.
+  const decrementFromModal = (id: string) => {
+    setCart((prev) => {
+      const existing = prev.find((c) => c.id === id);
+      if (!existing) return prev;
+      if (existing.qty <= 1) return prev.filter((c) => c.id !== id);
+      return prev.map((c) => (c.id === id ? { ...c, qty: c.qty - 1 } : c));
+    });
   };
 
   const changeQty = (id: string, delta: number) =>
@@ -469,7 +486,9 @@ function CreateOrderView({ branchId }: { branchId: string }) {
           items={menuItems ?? []}
           loading={menuItemsLoading}
           onSearch={(s) => searchMenuItems(s, branchId)}
-          onAdd={addToCart}
+          cart={cart}
+          onIncrement={addToCart}
+          onDecrement={decrementFromModal}
           onOutOfStock={setStockWarnItem}
           onClose={() => setAddItemOpen(false)}
         />
@@ -829,10 +848,13 @@ function ModalShell({ title, onClose, children, width = 460 }: { title: string; 
 }
 
 function AddItemModal({
-  items, loading, onSearch, onAdd, onOutOfStock, onClose,
+  items, loading, onSearch, cart, onIncrement, onDecrement, onOutOfStock, onClose,
 }: {
   items: MenuItem[]; loading: boolean; onSearch: (search: string) => void;
-  onAdd: (item: MenuItem) => void; onOutOfStock: (item: MenuItem) => void; onClose: () => void;
+  cart: CartItem[];
+  onIncrement: (item: MenuItem) => void;
+  onDecrement: (id: string) => void;
+  onOutOfStock: (item: MenuItem) => void; onClose: () => void;
 }) {
   const [search, setSearch] = useState("");
 
@@ -848,8 +870,43 @@ function AddItemModal({
     return { text: `${stock} left`, color: "#16A34A", bg: "rgba(22,163,74,0.08)" };
   };
 
+  const qtyInCart = (id: string) => cart.find((c) => c.id === id)?.qty ?? 0;
+  const cartCount = cart.reduce((s, c) => s + c.qty, 0);
+
   return (
     <ModalShell title="Add Item" onClose={onClose} width={520}>
+      {/* Stepper rows replace the old "click row to add 1 + close"
+          pattern -- each row now has its own "- qty +" control, backed
+          directly by the cart state, so multiple items (and multiple
+          units of the same item) can be picked before dismissing. */}
+      <style jsx>{`
+        .item-row {
+          transition: background 0.15s ease;
+        }
+        .item-row:hover {
+          background: var(--color-bg-soft);
+        }
+        .stepper-btn {
+          transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+        }
+        .stepper-btn:hover:not(:disabled) {
+          background: var(--color-bg-soft);
+          border-color: var(--color-primary);
+        }
+        .stepper-btn:active:not(:disabled) {
+          transform: scale(0.9);
+        }
+        .stepper-btn:disabled {
+          cursor: not-allowed;
+        }
+        .done-btn {
+          transition: opacity 0.15s ease, transform 0.1s ease;
+        }
+        .done-btn:active {
+          transform: scale(0.98);
+        }
+      `}</style>
+
       <div style={{ position: "relative", marginBottom: 16 }}>
         <Search size={16} strokeWidth={1.8} color="var(--color-text-muted)" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
         <input className="input" placeholder="Search menu..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: "100%", paddingLeft: 38 }} />
@@ -878,30 +935,67 @@ function AddItemModal({
 
         {!loading && items.map((item) => {
           const s = stockLabel(item.stock);
+          const qty = qtyInCart(item.id);
+          const isOut = item.stock === 0;
           return (
-            <button
+            <div
               key={item.id}
-              onClick={() => (item.stock === 0 ? onOutOfStock(item) : onAdd(item))}
+              className="item-row"
               style={{
-                display: "flex", alignItems: "center", gap: 14, padding: "12px 4px", border: "none",
-                borderTop: "1px solid var(--color-border)", background: "none", cursor: "pointer", textAlign: "left", fontFamily: "var(--font-sans)",
+                display: "flex", alignItems: "center", gap: 14, padding: "10px 8px",
+                borderTop: "1px solid var(--color-border)", borderRadius: 8,
               }}
             >
               <div style={{ width: 42, height: 42, borderRadius: 8, background: "var(--color-bg-soft)", flexShrink: 0 }} />
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ margin: 0, fontWeight: 600, fontSize: "0.9rem", color: "var(--color-text)" }}>{item.name}</p>
                 <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--color-text-muted)" }}>{formatMoney(item.price)}</p>
               </div>
-              <span style={{ padding: "4px 10px", borderRadius: 999, fontSize: "0.75rem", fontWeight: 600, color: s.color, background: s.bg }}>
+              <span style={{ padding: "4px 10px", borderRadius: 999, fontSize: "0.75rem", fontWeight: 600, color: s.color, background: s.bg, flexShrink: 0 }}>
                 {s.text}
               </span>
-            </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                <button
+                  className="stepper-btn"
+                  onClick={() => onDecrement(item.id)}
+                  disabled={qty === 0}
+                  aria-label={`Decrease ${item.name}`}
+                  style={{ ...stepperBtnBase, opacity: qty === 0 ? 0.35 : 1 }}
+                >
+                  <Minus size={13} />
+                </button>
+                <span style={{ minWidth: 20, textAlign: "center", fontWeight: 600, fontSize: "0.85rem", color: "var(--color-text)" }}>{qty}</span>
+                <button
+                  className="stepper-btn"
+                  onClick={() => (isOut ? onOutOfStock(item) : onIncrement(item))}
+                  disabled={isOut}
+                  aria-label={`Increase ${item.name}`}
+                  style={{ ...stepperBtnBase, opacity: isOut ? 0.35 : 1 }}
+                >
+                  <Plus size={13} />
+                </button>
+              </div>
+            </div>
           );
         })}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--color-border)" }}>
+        <span style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
+          {cartCount > 0 ? `${cartCount} ${cartCount === 1 ? "item" : "items"} selected` : "No items selected yet"}
+        </span>
+        <button onClick={onClose} className="btn btn-primary done-btn" style={{ padding: "9px 22px", fontSize: "0.85rem" }}>
+          Done
+        </button>
       </div>
     </ModalShell>
   );
 }
+
+const stepperBtnBase: React.CSSProperties = {
+  width: 26, height: 26, borderRadius: 7, border: "1px solid var(--color-border)", background: "#fff",
+  display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-text)",
+};
 
 function StockWarningModal({ item, onClose }: { item: MenuItem; onClose: () => void }) {
   return (

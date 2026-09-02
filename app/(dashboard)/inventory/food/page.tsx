@@ -1,3 +1,15 @@
+// app/(admin)/inventory/page.tsx — full file
+//
+// This page used to pull from its own useInventoryDashboardStore, which
+// called /admin/food-inventory/* and /admin/drinks/* — a completely
+// separate data source from the Stock Inventory page's /admin/stock/*.
+// Two independent write paths for the same numbers is how they drifted
+// apart (a stock adjustment made on one page never showed up on the
+// other). Fixed by sourcing this page from useStockStore directly —
+// the exact same store, same cache, same actions as
+// app/(admin)/inventory/stock/page.tsx. There is only one Inventory
+// now; this page is just a food/drinks-split VIEW over it.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -7,48 +19,44 @@ import {
   TrendingDown,
   Search,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Upload,
   Download,
   HashIcon,
   Plus,
   Minus,
   ArrowLeftRight,
-  Bell,
+  PackageMinus,
   Check,
   ChefHat,
   GlassWater,
   X,
-  Calendar,
 } from "lucide-react";
-import { useInventoryDashboardStore } from "@/store/useInventoryStore";
-import { FoodInventoryItem } from "@/types/food-inventory.types";
-import { DrinksInventoryItem, Supplier } from "@/types/drinks.types";
-import { drinksService } from "@/services/drinks.service";
+import { useStockStore } from "@/store/useStockStore";
+import { StockItem, StockStatus, StockItemType } from "@/types/stock.types";
 import { useBranch } from "../../layout";
 
-type Status = "In Stock" | "Low Stock" | "Out of Stock";
+const STATUS_OPTIONS: (StockStatus | "All Status")[] = ["All Status", "In Stock", "Low Stock", "Critical"];
+const PAGE_SIZE = 10;
 
-const STATUS_OPTIONS: (Status | "All Status")[] = ["All Status", "In Stock", "Low Stock", "Out of Stock"];
-const PAGE_SIZE = 6;
-
-const STATUS_CLASS: Record<Status, string> = {
+const STATUS_CLASS: Record<StockStatus, string> = {
   "In Stock": "badge badge-green",
   "Low Stock": "badge badge-yellow",
-  "Out of Stock": "badge badge-red",
+  Critical: "badge badge-red",
 };
 
-const StatusBadge = ({ status }: { status: Status }) => (
+const StatusBadge = ({ status }: { status: StockStatus }) => (
   <span className={STATUS_CLASS[status]} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
     {status === "In Stock" && <TrendingUp size={12} strokeWidth={2} />}
     {status === "Low Stock" && <TrendingDown size={12} strokeWidth={2} />}
-    {status === "Out of Stock" && <AlertTriangle size={12} strokeWidth={2} />}
+    {status === "Critical" && <AlertTriangle size={12} strokeWidth={2} />}
     {status}
   </span>
 );
 
-// Builds a CSV string from whichever tab is active and triggers a
-// browser download. Purely client-side against currently-loaded data --
-// no backend export endpoint exists for this.
+// Purely client-side against currently-loaded data, same as before —
+// no backend export endpoint needed for this.
 function downloadCsv(filename: string, rows: (string | number)[][]) {
   const csv = rows
     .map((row) =>
@@ -71,8 +79,6 @@ function downloadCsv(filename: string, rows: (string | number)[][]) {
   URL.revokeObjectURL(url);
 }
 
-// Opens a new window with a simple printable table and triggers the
-// browser print dialog. Client-side only, same as the CSV export.
 function printTable(title: string, headers: string[], rows: (string | number)[][]) {
   const win = window.open("", "_blank", "width=900,height=700");
   if (!win) return;
@@ -104,121 +110,147 @@ function printTable(title: string, headers: string[], rows: (string | number)[][
   win.print();
 }
 
+type ModalItem = {
+  itemId: string;
+  menuItemId: string;
+  name: string;
+  unit: string;
+  itemType: StockItemType;
+  status?: StockStatus;
+  current: number;        // food: quantity. drinks: fridgeQty (the sellable number)
+  warehouseQty?: number;  // drinks only
+  branchId: string;
+};
+
 export default function InventoryDashboardPage() {
-  const [tab, setTab] = useState<"food" | "drinks">("food");
+  const [tab, setTab] = useState<StockItemType>("food");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All Categories");
-  const [status, setStatus] = useState<Status | "All Status">("All Status");
+  const [status, setStatus] = useState<StockStatus | "All Status">("All Status");
   const [page, setPage] = useState(1);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
-  const [fridgeAlertOpen, setFridgeAlertOpen] = useState(false);
-  const [receiveOpen, setReceiveOpen] = useState(false);
-  const [transferOpen, setTransferOpen] = useState(false);
-  const [adjustOpen, setAdjustOpen] = useState(false);
 
-  // Branch scoping, same pattern as Stock Inventory / Suppliers. "All
-  // Branches" no longer exists as an option (see app/(admin)/layout.tsx)
-  // -- a picker always resolves to one of branch.branches, so this page
-  // filters both tabs' data to whichever branch is currently selected.
+  const [adjustItem, setAdjustItem] = useState<ModalItem | null>(null);
+  const [transferItem, setTransferItem] = useState<ModalItem | null>(null);
+  const [removeItem, setRemoveItem] = useState<ModalItem | null>(null);
+
   const branch = useBranch();
   const [branchOpen, setBranchOpen] = useState(false);
 
   const {
-    foodItems,
-    foodTotal,
-    foodStats,
-    foodCategories,
-    foodLoading,
-    foodError,
-    drinkItems,
-    drinksTotal,
-    drinksStats,
-    drinksLoading,
-    drinksError,
+    items,
+    itemsLoading,
+    itemsError,
+    branches,
     banner,
-    fetchFoodItems,
-    fetchFoodCategories,
-    fetchDrinkItems,
+    fetchItems,
+    fetchBranches,
     fetchBanner,
-    adjustWarehouseStock,
-    transferToFridge,
-    receiveDelivery,
-  } = useInventoryDashboardStore();
+    adjustStock,
+    transferStock,
+    removeStock,
+  } = useStockStore();
 
   useEffect(() => {
-    fetchFoodCategories();
+    fetchBranches();
     fetchBanner(branch.id);
-     
-  }, [fetchFoodCategories, fetchBanner, branch.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branch.id]);
 
   useEffect(() => {
-    if (tab === "food") {
-      fetchFoodItems({
-        branchId: branch.id,
-        search: search || undefined,
-        category: category === "All Categories" ? undefined : category,
-        status: status === "All Status" ? undefined : status,
-        page,
-        pageSize: PAGE_SIZE,
-      });
-    } else {
-      fetchDrinkItems({
-        branchId: branch.id,
-        search: search || undefined,
-        status: status === "All Status" ? undefined : status,
-        page,
-        pageSize: PAGE_SIZE,
-      });
-    }
+    fetchItems(branch.id, search || undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, search, category, status, page, branch.id]);
+  }, [branch.id, search]);
 
-  const switchTab = (t: "food" | "drinks") => {
+  const switchTab = (t: StockItemType) => {
     setTab(t);
     setPage(1);
     setSearch("");
     setStatus("All Status");
     setCategory("All Categories");
-    if (t === "drinks") setFridgeAlertOpen(true);
   };
 
-  const loading = tab === "food" ? foodLoading : drinksLoading;
-  const hasError = tab === "food" ? foodError : drinksError;
-  const total = tab === "food" ? foodTotal : drinksTotal;
-  const stats = tab === "food" ? foodStats : drinksStats;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Single item list, split by itemType — this is the whole fix. Both
+  // tabs read the same `items` array the Stock Inventory page reads,
+  // so an adjustment made on either page is immediately reflected on
+  // both (same store, same cache — nothing to "sync" because it was
+  // never two things to begin with).
+  const tabItems = (items ?? []).filter((i) => i.itemType === tab);
 
-  const drinkStatusOf = (i: DrinksInventoryItem): Status => i.status;
+  // Categories are derived from whatever's actually in the data — no
+  // separate categories endpoint to keep in sync with menu items.
+  const categories = Array.from(new Set(tabItems.map((i) => i.category))).sort();
 
-  const lowStockDrinks = drinkItems?.filter((i) => i.status === "Low Stock") ?? [];
-  const outOfStockDrinks = drinkItems?.filter((i) => i.status === "Out of Stock") ?? [];
-  const lowStockFood = foodItems?.filter((i) => i.status === "Low Stock") ?? [];
-  const outOfStockFood = foodItems?.filter((i) => i.status === "Out of Stock") ?? [];
-  const inStockFood = foodItems?.filter((i) => i.status === "In Stock") ?? [];
+  const branchQty = (item: StockItem) =>
+    item.quantities.find((q) => q.branchId === branch.id) ?? item.quantities[0];
+
+  const currentValue = (item: StockItem) => {
+    const bq = branchQty(item);
+    return item.itemType === "drink" ? (bq?.fridgeQty ?? 0) : (bq?.quantity ?? item.total);
+  };
+
+  const filtered = tabItems.filter((i) => {
+    if (category !== "All Categories" && i.category !== category) return false;
+    if (status !== "All Status" && i.status !== status) return false;
+    return true;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  const lowStock = filtered.filter((i) => i.status === "Low Stock");
+  const critical = filtered.filter((i) => i.status === "Critical");
+  const inStock = filtered.filter((i) => i.status === "In Stock");
+  const totalValue = filtered.reduce((sum, i) => sum + currentValue(i) * i.costPerUnit, 0);
+
+  const stats = {
+    totalItems: filtered.length,
+    lowStock: lowStock.length,
+    outOfStock: critical.length,
+    totalValue,
+  };
+
+  const toModalItem = (item: StockItem): ModalItem => {
+    const bq = branchQty(item);
+    return {
+      itemId: item.id,
+      menuItemId: item.menuItemId,
+      name: item.name,
+      unit: item.unit,
+      itemType: item.itemType,
+      status: item.status,
+      current: currentValue(item),
+      warehouseQty: item.itemType === "drink" ? bq?.warehouseQty ?? 0 : undefined,
+      branchId: bq?.branchId ?? branch.id,
+    };
+  };
 
   const handleExportCsv = () => {
-    if (tab === "food") {
-      const headers = ["Item", "Unit", "Pack", "Stock", "Threshold", "Status"];
-      const rows = (foodItems ?? []).map((i) => [i.name, i.unit, i.pack, i.stock, i.threshold, i.status]);
-      downloadCsv(`food-inventory-${branch.name.replace(/\s+/g, "-")}.csv`, [headers, ...rows]);
-    } else {
-      const headers = ["Item", "Unit", "Fridge", "Warehouse", "Threshold", "Status"];
-      const rows = (drinkItems ?? []).map((i) => [i.name, i.unit, i.fridgeStock, i.warehouseStock, i.fridgeThreshold, i.status]);
-      downloadCsv(`drinks-inventory-${branch.name.replace(/\s+/g, "-")}.csv`, [headers, ...rows]);
-    }
+    const headers = tab === "food"
+      ? ["Item", "Category", "Unit", "Stock", "Threshold", "Status"]
+      : ["Item", "Category", "Unit", "Fridge", "Warehouse", "Threshold", "Status"];
+    const rows = filtered.map((i) => {
+      const bq = branchQty(i);
+      return tab === "food"
+        ? [i.name, i.category, i.unit, currentValue(i), i.threshold, i.status]
+        : [i.name, i.category, i.unit, bq?.fridgeQty ?? 0, bq?.warehouseQty ?? 0, i.threshold, i.status];
+    });
+    downloadCsv(`${tab}-inventory-${branch.name.replace(/\s+/g, "-")}.csv`, [headers, ...rows]);
   };
 
   const handlePrint = () => {
-    if (tab === "food") {
-      const headers = ["Item", "Unit", "Pack", "Stock", "Threshold", "Status"];
-      const rows = (foodItems ?? []).map((i) => [i.name, i.unit, i.pack, i.stock, i.threshold, i.status]);
-      printTable(`Food Inventory -- ${branch.name}`, headers, rows);
-    } else {
-      const headers = ["Item", "Unit", "Fridge", "Warehouse", "Threshold", "Status"];
-      const rows = (drinkItems ?? []).map((i) => [i.name, i.unit, i.fridgeStock, i.warehouseStock, i.fridgeThreshold, i.status]);
-      printTable(`Drinks Inventory -- ${branch.name}`, headers, rows);
-    }
+    const headers = tab === "food"
+      ? ["Item", "Category", "Unit", "Stock", "Threshold", "Status"]
+      : ["Item", "Category", "Unit", "Fridge", "Warehouse", "Threshold", "Status"];
+    const rows = filtered.map((i) => {
+      const bq = branchQty(i);
+      return tab === "food"
+        ? [i.name, i.category, i.unit, currentValue(i), i.threshold, i.status]
+        : [i.name, i.category, i.unit, bq?.fridgeQty ?? 0, bq?.warehouseQty ?? 0, i.threshold, i.status];
+    });
+    printTable(`${tab === "food" ? "Food" : "Drinks"} Inventory — ${branch.name}`, headers, rows);
   };
 
   return (
@@ -229,7 +261,6 @@ export default function InventoryDashboardPage() {
         <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Food &amp; Drinks inventory</p>
       </div>
 
-      {/* Branch filter -- dropdown for supers, static chip for locked managers */}
       {branch.canPickBranch ? (
         <div style={{ position: "relative", alignSelf: "flex-start" }}>
           <button
@@ -242,10 +273,16 @@ export default function InventoryDashboardPage() {
             }}
           >
             {branch.name}
-            <ChevronDown size={16} strokeWidth={1.8} color="var(--color-text-muted)" />
+            <ChevronDown
+              size={16}
+              strokeWidth={1.8}
+              color="var(--color-text-muted)"
+              style={{ transition: "transform 0.2s ease", transform: branchOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+            />
           </button>
           {branchOpen && (
             <div
+              className="fade-in-down"
               style={{
                 position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 150,
                 background: "#fff", border: "1px solid var(--color-border)", borderRadius: 10,
@@ -260,7 +297,7 @@ export default function InventoryDashboardPage() {
                     display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
                     padding: "10px 14px", background: b.id === branch.id ? "var(--color-bg-soft)" : "#fff",
                     border: "none", cursor: "pointer", fontSize: "0.85rem", fontFamily: "var(--font-sans)",
-                    color: "var(--color-text)", textAlign: "left",
+                    color: "var(--color-text)", textAlign: "left", transition: "background 0.15s ease",
                   }}
                 >
                   {b.id === branch.id && <span style={{ marginRight: 6 }}>{"✓"}</span>}
@@ -285,7 +322,7 @@ export default function InventoryDashboardPage() {
 
       <div style={{ display: "flex", gap: 10 }}>
         <TabButton active={tab === "food"} onClick={() => switchTab("food")} icon={<ChefHat size={16} strokeWidth={1.8} />} label="Food Inventory" />
-        <TabButton active={tab === "drinks"} onClick={() => switchTab("drinks")} icon={<GlassWater size={16} strokeWidth={1.8} />} label="Drinks Inventory" />
+        <TabButton active={tab === "drink"} onClick={() => switchTab("drink")} icon={<GlassWater size={16} strokeWidth={1.8} />} label="Drinks Inventory" />
       </div>
 
       <div className="card">
@@ -299,9 +336,7 @@ export default function InventoryDashboardPage() {
             </p>
           </>
         ) : (
-          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            Status unavailable
-          </p>
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>Status unavailable</p>
         )}
       </div>
 
@@ -311,28 +346,28 @@ export default function InventoryDashboardPage() {
             ? <ChefHat size={20} strokeWidth={1.8} color="#E10B1C" style={{ margin: "0 auto" }} />
             : <GlassWater size={20} strokeWidth={1.8} color="#E10B1C" style={{ margin: "0 auto" }} />}
           <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>
-            {stats ? stats.totalItems : loading ? "..." : "-"}
+            {itemsLoading ? "…" : stats.totalItems}
           </p>
           <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Total Items</p>
         </div>
         <div className="card" style={{ textAlign: "center" }}>
           <AlertTriangle size={20} strokeWidth={1.8} color="#a07a00" style={{ margin: "0 auto" }} />
           <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "#a07a00" }}>
-            {stats ? stats.lowStock : loading ? "..." : "-"}
+            {itemsLoading ? "…" : stats.lowStock}
           </p>
           <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Low Stock</p>
         </div>
         <div className="card" style={{ textAlign: "center" }}>
           <AlertTriangle size={20} strokeWidth={1.8} color="#E10B1C" style={{ margin: "0 auto" }} />
           <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "#E10B1C" }}>
-            {stats ? stats.outOfStock : loading ? "..." : "-"}
+            {itemsLoading ? "…" : stats.outOfStock}
           </p>
-          <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Out of Stock</p>
+          <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Critical / Out of Stock</p>
         </div>
         <div className="card" style={{ textAlign: "center" }}>
           <HashIcon size={20} strokeWidth={1.8} color="var(--color-heading)" style={{ margin: "0 auto" }} />
           <p style={{ margin: "6px 0 0", fontSize: "1.5rem", fontWeight: 700, color: "var(--color-heading)" }}>
-            {stats ? `₦${stats.totalValue.toLocaleString()}` : loading ? "..." : "-"}
+            {itemsLoading ? "…" : `₦${stats.totalValue.toLocaleString()}`}
           </p>
           <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-muted)" }}>Total Value</p>
         </div>
@@ -356,22 +391,20 @@ export default function InventoryDashboardPage() {
             />
           </div>
 
-          {tab === "food" && (
-            <Dropdown
-              value={category}
-              options={["All Categories", ...(foodCategories ?? [])]}
-              open={categoryOpen}
-              setOpen={setCategoryOpen}
-              onChange={(v) => { setCategory(v); setPage(1); }}
-            />
-          )}
+          <Dropdown
+            value={category}
+            options={["All Categories", ...categories]}
+            open={categoryOpen}
+            setOpen={setCategoryOpen}
+            onChange={(v) => { setCategory(v); setPage(1); }}
+          />
 
           <Dropdown
             value={status}
             options={STATUS_OPTIONS}
             open={statusOpen}
             setOpen={setStatusOpen}
-            onChange={(v) => { setStatus(v as Status | "All Status"); setPage(1); }}
+            onChange={(v) => { setStatus(v as StockStatus | "All Status"); setPage(1); }}
             withStatusIcons
           />
         </div>
@@ -381,52 +414,58 @@ export default function InventoryDashboardPage() {
             <thead>
               <tr>
                 {tab === "food"
-                  ? ["Item", "Unit", "Pack", "Stock", "Threshold", "Status"].map((c) => <th key={c}>{c}</th>)
-                  : ["Item", "Unit", "Fridge", "Warehouse", "Threshold", "Status"].map((c) => <th key={c}>{c}</th>)}
+                  ? ["Item", "Category", "Unit", "Stock", "Threshold", "Status", "Actions"].map((c) => <th key={c}>{c}</th>)
+                  : ["Item", "Category", "Unit", "Fridge", "Warehouse", "Threshold", "Status", "Actions"].map((c) => <th key={c}>{c}</th>)}
               </tr>
             </thead>
             <tbody>
-              {loading && (
+              {itemsLoading && (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
+                  <td colSpan={8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
                     Loading...
                   </td>
                 </tr>
               )}
 
-              {!loading && hasError && (
+              {!itemsLoading && itemsError && (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
+                  <td colSpan={8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
                     No inventory data available
                   </td>
                 </tr>
               )}
 
-              {!loading && !hasError && tab === "food" && (foodItems ?? []).map((item: FoodInventoryItem) => (
-                <tr key={item.id}>
-                  <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{item.name}</td>
-                  <td>{item.unit}</td>
-                  <td>{item.pack}</td>
-                  <td>{item.stock}</td>
-                  <td>{item.threshold}</td>
-                  <td><StatusBadge status={item.status} /></td>
-                </tr>
-              ))}
+              {!itemsLoading && !itemsError && pageItems.map((item) => {
+                const bq = branchQty(item);
+                return (
+                  <tr key={item.id}>
+                    <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{item.name}</td>
+                    <td>{item.category}</td>
+                    <td>{item.unit}</td>
+                    {tab === "food" ? (
+                      <td>{currentValue(item)}</td>
+                    ) : (
+                      <>
+                        <td>{bq?.fridgeQty ?? 0}</td>
+                        <td>{bq?.warehouseQty ?? 0}</td>
+                      </>
+                    )}
+                    <td>{item.threshold}</td>
+                    <td><StatusBadge status={item.status} /></td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <IconButton icon={<Plus size={14} strokeWidth={2} />} title="Adjust stock" onClick={() => setAdjustItem(toModalItem(item))} />
+                        <IconButton icon={<ArrowLeftRight size={14} strokeWidth={1.8} />} title="Transfer between branches" onClick={() => setTransferItem(toModalItem(item))} />
+                        <IconButton icon={<PackageMinus size={14} strokeWidth={1.8} />} title="Remove / wastage" onClick={() => setRemoveItem(toModalItem(item))} />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
 
-              {!loading && !hasError && tab === "drinks" && (drinkItems ?? []).map((item) => (
-                <tr key={item.id}>
-                  <td style={{ fontWeight: 600, color: "var(--color-text)" }}>{item.name}</td>
-                  <td>{item.unit}</td>
-                  <td>{item.fridgeStock}</td>
-                  <td>{item.warehouseStock}</td>
-                  <td>{item.fridgeThreshold}</td>
-                  <td><StatusBadge status={drinkStatusOf(item)} /></td>
-                </tr>
-              ))}
-
-              {!loading && !hasError && ((tab === "food" ? foodItems?.length : drinkItems?.length) ?? 0) === 0 && (
+              {!itemsLoading && !itemsError && pageItems.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
+                  <td colSpan={8} style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-muted)" }}>
                     No items match this filter.
                   </td>
                 </tr>
@@ -435,126 +474,162 @@ export default function InventoryDashboardPage() {
           </table>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 14, padding: "14px 20px", fontSize: "0.85rem" }}>
+        {/*
+          Compact pager — was rendering a button per page (1..36), which
+          is unusable at this item count. Now it's just Previous / the
+          current page / Next, same pattern as the Stock Inventory
+          page's pager, plus a "Page X of Y" label so position is still
+          clear without a wall of page buttons.
+        */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 14,
+          padding: "14px 20px", fontSize: "0.85rem", borderTop: "1px solid var(--color-border)",
+        }}>
+          <span style={{ color: "var(--color-text-muted)", fontSize: "0.8rem" }}>
+            Page {currentPage} of {totalPages}
+          </span>
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-primary)", fontWeight: 600 }}
+            disabled={currentPage <= 1}
+            className="pager-link"
+            style={{
+              display: "flex", alignItems: "center", gap: 4, background: "none", border: "none",
+              cursor: currentPage <= 1 ? "not-allowed" : "pointer", fontWeight: 600, fontFamily: "var(--font-sans)",
+              color: currentPage <= 1 ? "var(--color-text-muted)" : "var(--color-primary)",
+            }}
           >
+            <ChevronLeft size={15} strokeWidth={2} />
             Previous
           </button>
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPage(p)}
-              style={{
-                width: 28, height: 28, borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 600,
-                background: p === page ? "var(--color-secondary)" : "transparent",
-                color: p === page ? "#7a5500" : "var(--color-text)",
-              }}
-            >
-              {p}
-            </button>
-          ))}
+          <span
+            style={{
+              width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+              fontWeight: 700, background: "var(--color-secondary)", color: "#7a5500", flexShrink: 0,
+            }}
+          >
+            {currentPage}
+          </span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-primary)", fontWeight: 600 }}
+            disabled={currentPage >= totalPages}
+            className="pager-link"
+            style={{
+              display: "flex", alignItems: "center", gap: 4, background: "none", border: "none",
+              cursor: currentPage >= totalPages ? "not-allowed" : "pointer", fontWeight: 600, fontFamily: "var(--font-sans)",
+              color: currentPage >= totalPages ? "var(--color-text-muted)" : "var(--color-primary)",
+            }}
           >
             Next
+            <ChevronRight size={15} strokeWidth={2} />
           </button>
         </div>
       </div>
 
-      {tab === "food" ? (
-        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {inStockFood.length > 0 && (
-            <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
-              <TrendingUp size={14} strokeWidth={2} color="#16A34A" />
-              <strong>In Stock:</strong> {inStockFood.length} items well stocked
-            </p>
-          )}
-          {lowStockFood.length > 0 && (
-            <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
-              <AlertTriangle size={14} strokeWidth={1.8} color="#a07a00" />
-              <strong>Low Stock Alert:</strong> {lowStockFood.length} items below threshold
-            </p>
-          )}
-          {outOfStockFood.length > 0 && (
-            <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
-              <AlertTriangle size={14} strokeWidth={1.8} color="#E10B1C" />
-              <strong>Out of Stock:</strong> {outOfStockFood.length} items - customers cannot order
-            </p>
-          )}
-          {!loading && !hasError && (foodItems?.length ?? 0) === 0 && (
-            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No status data to show.</p>
-          )}
-        </div>
-      ) : (
-        <>
-          <div className="card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {lowStockDrinks.length > 0 && (
-              <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
-                <AlertTriangle size={14} strokeWidth={1.8} color="#a07a00" />
-                <strong>Low Fridge Alert:</strong>{" "}
-                {lowStockDrinks.map((r) => `${r.name} (${r.fridgeStock} left)`).join(", ")}
-              </p>
-            )}
-            {outOfStockDrinks.length > 0 && (
-              <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
-                <AlertTriangle size={14} strokeWidth={1.8} color="#E10B1C" />
-                <strong>Out of Stock:</strong> {outOfStockDrinks.map((r) => r.name).join(", ")} - order from supplier
-              </p>
-            )}
-            {!loading && !hasError && lowStockDrinks.length === 0 && outOfStockDrinks.length === 0 && (
-              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No alerts right now.</p>
-            )}
-          </div>
+      <div className="card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {inStock.length > 0 && (
+          <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
+            <TrendingUp size={14} strokeWidth={2} color="#16A34A" />
+            <strong>In Stock:</strong> {inStock.length} items well stocked
+          </p>
+        )}
+        {lowStock.length > 0 && (
+          <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
+            <AlertTriangle size={14} strokeWidth={1.8} color="#a07a00" />
+            <strong>Low Stock Alert:</strong> {lowStock.length} items below threshold
+          </p>
+        )}
+        {critical.length > 0 && (
+          <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: "0.85rem", color: "var(--color-text)" }}>
+            <AlertTriangle size={14} strokeWidth={1.8} color="#E10B1C" />
+            <strong>Critical:</strong> {critical.length} items {tab === "food" ? "— customers cannot order" : "— order from supplier"}
+          </p>
+        )}
+        {!itemsLoading && !itemsError && filtered.length === 0 && (
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No status data to show.</p>
+        )}
+      </div>
 
-          <div style={{ display: "flex", gap: 10 }}>
-            <OutlineButton icon={<Plus size={15} strokeWidth={1.8} />} label="Receive Delivery" onClick={() => setReceiveOpen(true)} />
-            <OutlineButton icon={<ArrowLeftRight size={15} strokeWidth={1.8} />} label="Transfer to Fridge" onClick={() => setTransferOpen(true)} />
-            <OutlineButton icon={<Plus size={15} strokeWidth={1.8} />} label="Adjust Stock" onClick={() => setAdjustOpen(true)} />
-          </div>
-        </>
-      )}
-
-      {receiveOpen && (
-        <ReceiveDeliveryModal
-          branchId={branch.id}
-          onClose={() => setReceiveOpen(false)}
-          onSubmit={async (payload) => {
-            const ok = await receiveDelivery(payload, branch.id);
-            if (ok) setReceiveOpen(false);
-          }}
-        />
-      )}
-      {transferOpen && (
-        <TransferModal
-          items={drinkItems ?? []}
-          onClose={() => setTransferOpen(false)}
-          onSubmit={async (payload) => {
-            const ok = await transferToFridge(payload, branch.id);
-            if (ok) setTransferOpen(false);
-          }}
-        />
-      )}
-      {adjustOpen && (
+      {adjustItem && (
         <AdjustStockModal
-          items={drinkItems ?? []}
-          onClose={() => setAdjustOpen(false)}
-          onSubmit={async (payload) => {
-            const ok = await adjustWarehouseStock(payload, branch.id);
-            if (ok) setAdjustOpen(false);
+          item={adjustItem}
+          onClose={() => setAdjustItem(null)}
+          onSubmit={async (form) => {
+            const ok = await adjustStock({
+              itemId: adjustItem.itemId,
+              menuItemId: adjustItem.menuItemId,
+              branchId: adjustItem.branchId,
+              quantity: form.qty,
+              destination: form.destination,
+              supplierId: null,
+              invoiceNumber: null,
+              costPerUnit: form.cost,
+              reason: form.reason,
+            });
+            if (ok) setAdjustItem(null);
           }}
         />
       )}
 
-      {tab === "drinks" && fridgeAlertOpen && (lowStockDrinks.length > 0 || outOfStockDrinks.length > 0) && (
-        <LowFridgeAlertModal
-          lowStockItems={lowStockDrinks}
-          outOfStockItems={outOfStockDrinks}
-          onDismiss={() => setFridgeAlertOpen(false)}
+      {transferItem && (
+        <TransferStockModal
+          item={transferItem}
+          branches={branches ?? []}
+          onClose={() => setTransferItem(null)}
+          onSubmit={async (form) => {
+            const ok = await transferStock({
+              itemId: transferItem.itemId,
+              menuItemId: transferItem.menuItemId,
+              fromBranchId: form.fromBranchId,
+              toBranchId: form.toBranchId,
+              quantity: form.qty,
+              approvingManagerId: null,
+              reason: form.reason,
+            });
+            if (ok) setTransferItem(null);
+          }}
         />
       )}
+
+      {removeItem && (
+        <RemoveStockModal
+          item={removeItem}
+          onClose={() => setRemoveItem(null)}
+          onSubmit={async (form) => {
+            const ok = await removeStock({
+              itemId: removeItem.itemId,
+              menuItemId: removeItem.menuItemId,
+              branchId: removeItem.branchId,
+              quantity: form.qty,
+              costPerUnit: form.cost,
+              reason: form.reason,
+              otherDetails: null,
+            });
+            if (ok) setRemoveItem(null);
+          }}
+        />
+      )}
+
+      <style jsx global>{`
+        @keyframes fadeInDown {
+          from { opacity: 0; transform: translateY(-6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in-down { animation: fadeInDown 0.16s cubic-bezier(0.16, 1, 0.3, 1); }
+
+        @keyframes backdropIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes modalIn {
+          from { opacity: 0; transform: translateY(10px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .modal-backdrop { animation: backdropIn 0.18s ease-out; }
+        .modal-shell { animation: modalIn 0.22s cubic-bezier(0.16, 1, 0.3, 1); }
+
+        .pager-link { transition: opacity 0.15s ease, gap 0.15s ease; }
+        .pager-link:not(:disabled):hover { opacity: 0.75; }
+      `}</style>
     </div>
   );
 }
@@ -571,6 +646,7 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
         background: active ? undefined : "#fff",
         cursor: "pointer", fontSize: "0.85rem", fontWeight: 500,
         color: active ? undefined : "var(--color-text)", fontFamily: "var(--font-sans)",
+        transition: "background 0.15s ease, border-color 0.15s ease, color 0.15s ease",
       }}
     >
       {icon}
@@ -587,10 +663,31 @@ function OutlineButton({ icon, label, onClick }: { icon: React.ReactNode; label:
         display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", borderRadius: 8,
         border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer",
         fontSize: "0.85rem", fontWeight: 500, color: "var(--color-text)", fontFamily: "var(--font-sans)",
+        transition: "background 0.15s ease, transform 0.15s ease",
       }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-bg-soft)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.transform = "translateY(0)"; }}
     >
       {icon}
       {label}
+    </button>
+  );
+}
+
+function IconButton({ icon, onClick, title }: { icon: React.ReactNode; onClick: () => void; title?: string }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30,
+        borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff", cursor: "pointer",
+        color: "var(--color-text-muted)", transition: "background 0.15s ease, color 0.15s ease, transform 0.15s ease",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-bg-soft)"; e.currentTarget.style.color = "var(--color-text)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--color-text-muted)"; e.currentTarget.style.transform = "translateY(0)"; }}
+    >
+      {icon}
     </button>
   );
 }
@@ -604,7 +701,7 @@ function Dropdown({
     if (!withStatusIcons) return null;
     if (opt === "In Stock") return <TrendingUp size={13} strokeWidth={2} color="#16A34A" />;
     if (opt === "Low Stock") return <TrendingDown size={13} strokeWidth={2} color="#a07a00" />;
-    if (opt === "Out of Stock") return <AlertTriangle size={13} strokeWidth={1.8} color="#E10B1C" />;
+    if (opt === "Critical") return <AlertTriangle size={13} strokeWidth={1.8} color="#E10B1C" />;
     return null;
   };
 
@@ -619,10 +716,16 @@ function Dropdown({
         }}
       >
         {value}
-        <ChevronDown size={15} strokeWidth={1.8} color="var(--color-text-muted)" />
+        <ChevronDown
+          size={15}
+          strokeWidth={1.8}
+          color="var(--color-text-muted)"
+          style={{ transition: "transform 0.2s ease", transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
+        />
       </button>
       {open && (
         <div
+          className="fade-in-down"
           style={{
             position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 190,
             background: "#fff", border: "1px solid var(--color-border)", borderRadius: 10,
@@ -637,7 +740,7 @@ function Dropdown({
                 display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
                 padding: "10px 14px", background: opt === value ? "var(--color-bg-soft)" : "#fff",
                 border: "none", cursor: "pointer", fontSize: "0.85rem", fontFamily: "var(--font-sans)",
-                color: "var(--color-text)", textAlign: "left",
+                color: "var(--color-text)", textAlign: "left", transition: "background 0.15s ease",
               }}
             >
               <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -653,11 +756,11 @@ function Dropdown({
   );
 }
 
-/* -- Shared modal shell -- */
 function ModalShell({ title, onClose, children, width = 460 }: { title: string; onClose: () => void; children: React.ReactNode; width?: number }) {
   return (
     <div
       onClick={onClose}
+      className="modal-backdrop"
       style={{
         position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
         display: "flex", alignItems: "flex-start", justifyContent: "center",
@@ -666,6 +769,7 @@ function ModalShell({ title, onClose, children, width = 460 }: { title: string; 
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="modal-shell"
         style={{
           width, maxWidth: "92vw", maxHeight: "88vh", background: "#fff", borderRadius: 14,
           boxShadow: "0 20px 60px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", overflow: "hidden",
@@ -673,7 +777,16 @@ function ModalShell({ title, onClose, children, width = 460 }: { title: string; 
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px 16px", flexShrink: 0, borderBottom: "1px solid var(--color-border)" }}>
           <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "var(--color-heading)" }}>{title}</h3>
-          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex" }}>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)",
+              display: "flex", padding: 4, borderRadius: 6, transition: "background 0.15s ease, color 0.15s ease",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-bg-soft)"; e.currentTarget.style.color = "var(--color-text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--color-text-muted)"; }}
+          >
             <X size={18} />
           </button>
         </div>
@@ -704,208 +817,88 @@ function Stepper({ value, onChange }: { value: number; onChange: (v: number) => 
 const stepperBtn: React.CSSProperties = {
   width: 34, height: 34, borderRadius: 8, border: "1px solid var(--color-border)",
   background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+  transition: "background 0.15s ease",
 };
 const outlineBtn: React.CSSProperties = {
   padding: "9px 18px", borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff",
   cursor: "pointer", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)", fontFamily: "var(--font-sans)",
+  transition: "background 0.15s ease",
 };
 
-/* -- Receive Delivery modal -- */
-type ReceivedRow = { name: string; qty: number; costPerUnit: number };
-
-function ReceiveDeliveryModal({
-  onClose, onSubmit,
+/* -- Adjust Stock modal — same shape as the Stock Inventory page's.
+   Food: no destination toggle, supplier not asked here (this dashboard
+   doesn't collect supplier — use the Stock Inventory page's Adjust
+   modal for that level of detail; this one is qty + cost + reason).
+   Drinks: destination toggle picks warehouse vs fridge. -- */
+function AdjustStockModal({
+  item, onClose, onSubmit,
 }: {
-  branchId?: string;
+  item: ModalItem;
   onClose: () => void;
-  onSubmit: (payload: {
-    supplierId: string | null;
-    deliveryDate: string;
-    invoiceNumber: string;
-    isDraft: boolean;
-    items: { itemName: string; quantity: number; costPerUnit: number }[];
-  }) => void;
+  onSubmit: (form: { qty: number; cost: number; reason: string; destination?: "warehouse" | "fridge" }) => void;
 }) {
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [supplierId, setSupplierId] = useState("");
-  const [deliveryDate, setDeliveryDate] = useState("");
-  const [invoice, setInvoice] = useState("");
-  const [items, setItems] = useState<ReceivedRow[]>([{ name: "", qty: 0, costPerUnit: 0 }]);
-
-  useEffect(() => {
-    // NOTE: getSuppliers() is still unscoped by branch (open backend
-    // request, same one covering Stock/Suppliers) -- branchId isn't
-    // passed here yet because the endpoint doesn't accept it.
-    drinksService.getSuppliers().then(setSuppliers).catch(() => setSuppliers([]));
-  }, []);
-
-  const totalCost = items.reduce((sum, i) => sum + i.qty * i.costPerUnit, 0);
-  const canSubmit = items.some((i) => i.name.trim() && i.qty > 0);
-
-  const addItem = () => setItems((prev) => [...prev, { name: "", qty: 0, costPerUnit: 0 }]);
-  const removeItem = (i: number) => setItems((prev) => prev.filter((_, idx) => idx !== i));
-  const updateItem = (i: number, patch: Partial<ReceivedRow>) =>
-    setItems((prev) => prev.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
-
-  const submit = (isDraft: boolean) => {
-    onSubmit({
-      supplierId: supplierId || null,
-      deliveryDate,
-      invoiceNumber: invoice,
-      isDraft,
-      items: items
-        .filter((i) => i.name.trim() && i.qty > 0)
-        .map((i) => ({ itemName: i.name, quantity: i.qty, costPerUnit: i.costPerUnit })),
-    });
-  };
-
-  return (
-    <ModalShell title="Receive Delivery" onClose={onClose} width={640}>
-      <Field label="Supplier">
-        <select className="input" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-          <option value="">Select supplier</option>
-          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-      </Field>
-      <Field label="Delivery Date">
-        <div style={{ position: "relative" }}>
-          <Calendar size={16} strokeWidth={1.8} color="var(--color-primary)" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
-          <input className="input" type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} style={{ paddingLeft: 38 }} />
-        </div>
-      </Field>
-      <Field label="Invoice Number">
-        <input className="input" placeholder="INV-5678......." value={invoice} onChange={(e) => setInvoice(e.target.value)} />
-      </Field>
-
-      <p style={{ margin: "0 0 10px", fontSize: "0.85rem", fontWeight: 700, color: "var(--color-heading)" }}>
-        ITEMS RECEIVED (adds to Warehouse)
-      </p>
-
-      {/* Column labels -- previously the row below had only placeholder
-          text as a hint, no actual headers. */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.8fr 0.9fr auto 24px", gap: 8, padding: "0 2px 6px" }}>
-        <span style={labelStyle}>Item Name</span>
-        <span style={labelStyle}>Quantity</span>
-        <span style={labelStyle}>Cost / Unit</span>
-        <span style={labelStyle}>Total</span>
-        <span />
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-        {items.map((row, i) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "1.4fr 0.8fr 0.9fr auto 24px", gap: 8, alignItems: "center" }}>
-            <input className="input" placeholder="e.g. Fanta" value={row.name} onChange={(e) => updateItem(i, { name: e.target.value })} />
-            <input className="input" type="number" value={row.qty} onChange={(e) => updateItem(i, { qty: Number(e.target.value) || 0 })} placeholder="0" />
-            <input className="input" type="number" value={row.costPerUnit} onChange={(e) => updateItem(i, { costPerUnit: Number(e.target.value) || 0 })} placeholder="0" />
-            <span style={{ fontWeight: 600, fontSize: "0.85rem", whiteSpace: "nowrap" }}>₦{(row.qty * row.costPerUnit).toLocaleString()}</span>
-            {items.length > 1 ? (
-              <button
-                onClick={() => removeItem(i)}
-                aria-label="Remove item"
-                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 0 }}
-              >
-                <X size={16} strokeWidth={1.8} />
-              </button>
-            ) : <span />}
-          </div>
-        ))}
-      </div>
-      <button
-        onClick={addItem}
-        style={{
-          display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8,
-          border: "1px solid rgba(225,11,28,0.3)", background: "rgba(225,11,28,0.05)",
-          color: "var(--color-primary)", fontWeight: 600, fontSize: "0.85rem", cursor: "pointer",
-          fontFamily: "var(--font-sans)", marginBottom: 16,
-        }}
-      >
-        <Plus size={15} strokeWidth={2} />
-        Add Item
-      </button>
-
-      <p style={{ margin: "0 0 16px", fontSize: "1rem", fontWeight: 700, color: "var(--color-heading)" }}>
-        Total Cost: ₦{totalCost.toLocaleString()}
-      </p>
-
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-        <button onClick={() => submit(true)} disabled={!canSubmit} style={outlineBtn}>Save Draft</button>
-        <button className="btn btn-primary" style={{ padding: "9px 18px", fontSize: "0.85rem" }} disabled={!canSubmit} onClick={() => submit(false)}>
-          Confirm Receipt
-        </button>
-      </div>
-    </ModalShell>
-  );
-}
-const labelStyle: React.CSSProperties = { fontSize: "0.78rem", fontWeight: 600, color: "var(--color-text-muted)" };
-
-/* -- Transfer to Fridge modal -- */
-function TransferModal({
-  items, onClose, onSubmit,
-}: {
-  items: DrinksInventoryItem[];
-  onClose: () => void;
-  onSubmit: (payload: { itemId: string; quantity: number; reason: string }) => void;
-}) {
-  const [itemId, setItemId] = useState(items[0]?.id ?? "");
-  const item = items.find((i) => i.id === itemId) ?? items[0];
+  const isDrink = item.itemType === "drink";
+  const [destination, setDestination] = useState<"warehouse" | "fridge">("warehouse");
   const [qty, setQty] = useState(0);
-  const [reason, setReason] = useState("Restock fridge for lunch rush");
+  const [cost, setCost] = useState(0);
+  const [reason, setReason] = useState("");
 
-  if (!item) {
-    return (
-      <ModalShell title="Transfer to Fridge" onClose={onClose}>
-        <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No drinks data available.</p>
-      </ModalShell>
-    );
-  }
-
-  const newFridgeStock = item.fridgeStock + qty;
-  const newWarehouseStock = item.warehouseStock - qty;
-  const belowThreshold = item.fridgeStock < item.fridgeThreshold;
-  const exceedsWarehouse = qty > item.warehouseStock;
+  const currentForDestination = isDrink
+    ? (destination === "warehouse" ? item.warehouseQty ?? 0 : item.current)
+    : item.current;
+  const newStock = currentForDestination + qty;
+  const totalCost = qty * cost;
 
   return (
-    <ModalShell title="Transfer to Fridge" onClose={onClose}>
-      <Field label="Item">
-        <select className="input" value={itemId} onChange={(e) => { setItemId(e.target.value); setQty(0); }}>
-          {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-        </select>
-      </Field>
-      <Field label="Current Fridge Stock">
-        <input className="input" value={item.fridgeStock} readOnly />
-      </Field>
-      <Field label="Current Warehouse Stock">
-        <input className="input" value={item.warehouseStock} readOnly />
-      </Field>
-      <Field label="Fridge Threshold">
-        <input className="input" value={`${item.fridgeThreshold} units`} readOnly />
-      </Field>
+    <ModalShell title="Adjust Stock" onClose={onClose}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, background: "var(--color-bg-soft)", marginBottom: 20 }}>
+        <span style={{ fontWeight: 600, color: "var(--color-text)" }}>{item.name}</span>
+        {item.status && <StatusBadge status={item.status} />}
+      </div>
 
-      {belowThreshold && (
-        <p style={{ display: "flex", alignItems: "center", gap: 6, margin: "-6px 0 14px", fontSize: "0.85rem", color: "#a07a00" }}>
-          <AlertTriangle size={14} strokeWidth={1.8} />
-          Fridge is below threshold. Restocking recommended.
-        </p>
+      {isDrink && (
+        <Field label="Add to">
+          <div style={{ display: "flex", gap: 8 }}>
+            {(["warehouse", "fridge"] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => setDestination(d)}
+                style={{
+                  flex: 1, padding: "8px 0", borderRadius: 8, fontSize: "0.85rem", fontWeight: 600,
+                  border: `1.5px solid ${destination === d ? "var(--color-primary)" : "var(--color-border)"}`,
+                  background: destination === d ? "rgba(225,11,28,0.05)" : "#fff",
+                  color: destination === d ? "var(--color-primary)" : "var(--color-text)",
+                  cursor: "pointer", fontFamily: "var(--font-sans)", textTransform: "capitalize",
+                  transition: "background 0.15s ease, border-color 0.15s ease, color 0.15s ease",
+                }}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        </Field>
       )}
 
-      <Field label="Qty to Transfer">
+      <p style={{ margin: "0 0 6px", fontSize: "0.85rem", color: "var(--color-text)" }}>
+        Current{isDrink ? ` (${destination})` : ""}: <strong>{currentForDestination} {item.unit}</strong>
+      </p>
+      <div style={{ marginBottom: 16 }}>
         <Stepper value={qty} onChange={setQty} />
-      </Field>
+      </div>
 
-      {exceedsWarehouse && (
-        <p style={{ margin: "-6px 0 14px", fontSize: "0.8rem", color: "#E10B1C" }}>
-          Exceeds available warehouse stock.
-        </p>
-      )}
+      <p style={{ margin: "0 0 16px", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>
+        New Stock: {newStock} {item.unit}
+      </p>
 
-      <Field label="New Fridge Stock">
-        <input className="input" value={newFridgeStock} readOnly />
+      <Field label="Cost price per unit">
+        <input className="input" type="number" value={cost} onChange={(e) => setCost(Number(e.target.value) || 0)} />
       </Field>
-      <Field label="New Warehouse Stock">
-        <input className="input" value={newWarehouseStock} readOnly />
-      </Field>
+      <p style={{ margin: "-6px 0 16px", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>
+        Total cost: ₦{totalCost.toLocaleString()}
+      </p>
+
       <Field label="Reason">
-        <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder={isDrink ? "e.g. New delivery received from supplier" : "e.g. Extra batch prepared in kitchen"} />
       </Field>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
@@ -913,66 +906,56 @@ function TransferModal({
         <button
           className="btn btn-primary"
           style={{ padding: "9px 18px", fontSize: "0.85rem" }}
-          disabled={!qty || exceedsWarehouse}
-          onClick={() => onSubmit({ itemId: item.id, quantity: qty, reason })}
+          disabled={!qty || !reason.trim()}
+          onClick={() => onSubmit({ qty, cost, reason, destination: isDrink ? destination : undefined })}
         >
-          Transfer to Fridge
+          Apply Change
         </button>
       </div>
     </ModalShell>
   );
 }
 
-/* -- Adjust Stock modal -- */
-function AdjustStockModal({
-  items, onClose, onSubmit,
+/* -- Transfer Stock modal — branch to branch, both types.
+   Drinks transfer fridgeQty only (warehouse stays local per branch). -- */
+function TransferStockModal({
+  item, branches, onClose, onSubmit,
 }: {
-  items: DrinksInventoryItem[];
+  item: ModalItem;
+  branches: { id: string; name: string }[];
   onClose: () => void;
-  onSubmit: (payload: { itemId: string; quantity: number; costPerUnit: number; reason: string }) => void;
+  onSubmit: (form: { fromBranchId: string; toBranchId: string; qty: number; reason: string }) => void;
 }) {
-  const [itemId, setItemId] = useState(items[0]?.id ?? "");
-  const item = items.find((i) => i.id === itemId) ?? items[0];
+  const [fromBranchId, setFromBranchId] = useState(item.branchId || branches[0]?.id || "");
+  const [toBranchId, setToBranchId] = useState(branches[1]?.id ?? branches[0]?.id ?? "");
   const [qty, setQty] = useState(0);
-  const [cost, setCost] = useState(0);
-  const [reason, setReason] = useState("New delivery received from supplier");
-
-  if (!item) {
-    return (
-      <ModalShell title="Adjust Stock" onClose={onClose}>
-        <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>No drinks data available.</p>
-      </ModalShell>
-    );
-  }
-
-  const newStock = item.warehouseStock + qty;
-  const totalCost = qty * cost;
+  const [reason, setReason] = useState("");
 
   return (
-    <ModalShell title="Adjust Stock" onClose={onClose}>
-      <Field label="Item">
-        <select className="input" value={itemId} onChange={(e) => { setItemId(e.target.value); setQty(0); }}>
-          {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-        </select>
-      </Field>
+    <ModalShell title="Transfer Stock" onClose={onClose}>
+      <div style={{ padding: "10px 14px", borderRadius: 10, background: "var(--color-bg-soft)", marginBottom: 20, fontWeight: 600, color: "var(--color-text)" }}>
+        {item.name}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+        <Field label="From">
+          <select className="input" value={fromBranchId} onChange={(e) => setFromBranchId(e.target.value)}>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+        <Field label="To">
+          <select className="input" value={toBranchId} onChange={(e) => setToBranchId(e.target.value)}>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+      </div>
 
       <p style={{ margin: "0 0 6px", fontSize: "0.85rem", color: "var(--color-text)" }}>
-        Current: <strong>{item.warehouseStock} {item.unit}</strong>
+        Available: <strong>{item.current} {item.unit}</strong>{item.itemType === "drink" && " (fridge)"}
       </p>
-      <Field label="Qty to Adjust">
+      <Field label="Quantity to transfer">
         <Stepper value={qty} onChange={setQty} />
       </Field>
-
-      <p style={{ margin: "0 0 16px", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>
-        New Stock: {newStock} {item.unit}
-      </p>
-
-      <Field label="Cost per unit">
-        <input className="input" type="number" value={cost} onChange={(e) => setCost(Number(e.target.value) || 0)} />
-      </Field>
-      <p style={{ margin: "-6px 0 16px", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>
-        Total cost: ₦{totalCost.toLocaleString()}
-      </p>
 
       <Field label="Reason">
         <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -984,78 +967,62 @@ function AdjustStockModal({
           className="btn btn-primary"
           style={{ padding: "9px 18px", fontSize: "0.85rem" }}
           disabled={!qty || !reason.trim()}
-          onClick={() => onSubmit({ itemId: item.id, quantity: qty, costPerUnit: cost, reason })}
+          onClick={() => onSubmit({ fromBranchId, toBranchId, qty, reason })}
         >
-          Apply Change
+          Confirm Transfer
         </button>
       </div>
     </ModalShell>
   );
 }
 
-function LowFridgeAlertModal({
-  lowStockItems, outOfStockItems, onDismiss,
-}: { lowStockItems: DrinksInventoryItem[]; outOfStockItems: DrinksInventoryItem[]; onDismiss: () => void }) {
+/* -- Remove Stock Wastage modal — both types. Drinks remove fridgeQty only. -- */
+function RemoveStockModal({
+  item, onClose, onSubmit,
+}: {
+  item: ModalItem;
+  onClose: () => void;
+  onSubmit: (form: { qty: number; cost: number; reason: string }) => void;
+}) {
+  const [qty, setQty] = useState(0);
+  const [cost, setCost] = useState(0);
+  const [reason, setReason] = useState("");
+  const newStock = Math.max(0, item.current - qty);
+
   return (
-    <div
-      onClick={onDismiss}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{ width: 520, maxWidth: "92vw", background: "var(--color-primary)", borderRadius: 14, padding: 28, color: "#fff", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}
-      >
-        <p style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 0 18px", fontSize: "1.1rem", fontWeight: 700 }}>
-          <Bell size={18} strokeWidth={2} />
-          LOW FRIDGE ALERT
-        </p>
+    <ModalShell title="Remove Stock Wastage" onClose={onClose}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, background: "var(--color-bg-soft)", marginBottom: 20 }}>
+        <span style={{ fontWeight: 600, color: "var(--color-text)" }}>{item.name}</span>
+        {item.status && <StatusBadge status={item.status} />}
+      </div>
 
-        {lowStockItems.length > 0 && (
-          <>
-            <p style={{ margin: "0 0 8px", fontSize: "0.9rem" }}>
-              The following are drinks low in fridge but available in warehouse:
-            </p>
-            <ul style={{ margin: "0 0 16px", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
-              {lowStockItems.map((i) => (
-                <li key={i.id} style={{ fontSize: "0.9rem" }}>
-                  {i.name} ({i.fridgeStock} in fridge, {i.warehouseStock} in warehouse){" "}
-                  <a href="#" style={{ color: "#fff", textDecoration: "underline", fontStyle: "italic" }} onClick={(e) => e.preventDefault()}>
-                    Transfer to Fridge
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+      <p style={{ margin: "0 0 6px", fontSize: "0.85rem", color: "var(--color-text)" }}>
+        Current stock: <strong>{item.current}</strong>
+      </p>
+      <Field label="Quantity to remove">
+        <input className="input" type="number" value={qty} onChange={(e) => setQty(Number(e.target.value) || 0)} />
+      </Field>
+      <p style={{ margin: "-6px 0 16px", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>New Stock: {newStock}</p>
 
-        {outOfStockItems.length > 0 && (
-          <>
-            <p style={{ margin: "0 0 8px", fontSize: "0.9rem" }}>
-              The following are drinks OUT in both fridge and warehouse:
-            </p>
-            <ul style={{ margin: "0 0 20px", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
-              {outOfStockItems.map((i) => (
-                <li key={i.id} style={{ fontSize: "0.9rem" }}>
-                  {i.name} ({i.fridgeStock} fridge, {i.warehouseStock} warehouse){" "}
-                  <a href="#" style={{ color: "#fff", textDecoration: "underline", fontStyle: "italic" }} onClick={(e) => e.preventDefault()}>
-                    Order from Supplier
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+      <Field label="Cost price per unit">
+        <input className="input" type="number" value={cost} onChange={(e) => setCost(Number(e.target.value) || 0)} />
+      </Field>
 
+      <Field label="Reason">
+        <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Spoiled / Expired" />
+      </Field>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+        <button onClick={onClose} style={outlineBtn}>Cancel</button>
         <button
-          onClick={onDismiss}
-          style={{
-            padding: "9px 20px", borderRadius: 8, border: "1px solid #fff", background: "transparent",
-            color: "#fff", fontWeight: 600, fontSize: "0.85rem", cursor: "pointer", fontFamily: "var(--font-sans)",
-          }}
+          className="btn btn-primary"
+          style={{ padding: "9px 18px", fontSize: "0.85rem" }}
+          disabled={!qty || !reason.trim()}
+          onClick={() => onSubmit({ qty, cost, reason })}
         >
-          Dismiss All
+          Remove
         </button>
       </div>
-    </div>
+    </ModalShell>
   );
 }

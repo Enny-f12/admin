@@ -1,9 +1,8 @@
-// store/useAuthStore.ts
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { toast } from 'sonner';
 import { authService } from '@/services/auth.service';
-import { User, Branch } from '@/types/auth.types';
+import { User, Branch, isCodeSentResponse } from '@/types/auth.types';
 import {
   RegisterPayload,
   LoginPayload,
@@ -15,6 +14,12 @@ import {
   ResetPasswordPayload,
   ChangePasswordPayload,
 } from '@/types/auth.types';
+
+// 'code_sent' means: credentials were correct, a code was just emailed,
+// show the code field. 'success' means fully logged in. 'error' means
+// check `error` for the message (wrong credentials OR wrong/expired code
+// — indistinguishable on purpose, see backend doc).
+type LoginResult = 'success' | 'code_sent' | 'error';
 
 interface AuthState {
   user: User | null;
@@ -28,13 +33,14 @@ interface AuthState {
   branchesLoading: boolean;
   branchesError: boolean;
 
-  // NEW — the branchId (if any) the user picked on the login screen.
-  // Only meaningful for roles that can pick a branch at all (i.e.
-  // SUPER_ADMIN with no assignedBranchId) — the admin layout reads this
-  // to default the branch switcher to whatever was chosen at login,
-  // instead of "All Branches" or an arbitrary first branch. Persisted so
-  // it survives a refresh; cleared on logout.
   loginBranchId: string | null;
+
+  // ── 2FA state ──
+  // Set once /auth/login has confirmed credentials and emailed a code.
+  // Not persisted (see partialize below) — a page refresh mid-flow
+  // should just restart login, not silently resume a stale prompt.
+  twoFactorCodeSent: boolean;
+  twoFactorMaskedDestination: string | null;
 
   setAuth: (data: { user: User; accessToken: string; refreshToken: string }) => void;
   setTokens: (data: { accessToken: string; refreshToken: string }) => void;
@@ -42,7 +48,13 @@ interface AuthState {
   clearError: () => void;
 
   register: (payload: RegisterPayload) => Promise<boolean>;
-  login: (payload: LoginPayload) => Promise<boolean>;
+  // Call this WITHOUT twoFactorCode first (→ 'code_sent'), then again
+  // WITH twoFactorCode to finish (→ 'success'). Calling it again without
+  // a code while twoFactorCodeSent is true is how "resend" works too.
+  login: (payload: LoginPayload) => Promise<LoginResult>;
+  // Lets the UI back out of the "enter your code" step, e.g. a
+  // "use a different account" link.
+  cancelTwoFactor: () => void;
   sendOtp: (payload: SendOtpPayload) => Promise<boolean>;
   verifyOtp: (payload: VerifyOtpPayload) => Promise<boolean>;
   googleSignIn: (payload: GoogleAuthPayload) => Promise<boolean>;
@@ -52,13 +64,6 @@ interface AuthState {
 
   fetchBranches: () => Promise<void>;
 
-  // NEW — forgot/reset/change password. Same isLoading/error/toast shape
-  // as the other auth actions above, for consistency. forgotPassword +
-  // resetPassword back the public /forgot-password page (code-based).
-  // changePassword is separate — it's the authenticated, current-password
-  // based flow used by the profile page's "change password" form. All
-  // three hit endpoints that don't exist on the backend yet (see
-  // auth.service.ts / auth.types.ts for the proposed contracts).
   forgotPassword: (payload: ForgotPasswordPayload) => Promise<boolean>;
   resetPassword: (payload: ResetPasswordPayload) => Promise<boolean>;
   changePassword: (payload: ChangePasswordPayload) => Promise<boolean>;
@@ -85,6 +90,9 @@ export const useAuthStore = create<AuthState>()(
 
       loginBranchId: null,
 
+      twoFactorCodeSent: false,
+      twoFactorMaskedDestination: null,
+
       setAuth: ({ user, accessToken, refreshToken }) =>
         set({ user, accessToken, refreshToken, isAuthenticated: true }),
 
@@ -98,6 +106,8 @@ export const useAuthStore = create<AuthState>()(
           refreshToken: null,
           isAuthenticated: false,
           loginBranchId: null,
+          twoFactorCodeSent: false,
+          twoFactorMaskedDestination: null,
         }),
 
       clearError: () => set({ error: null }),
@@ -117,25 +127,44 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      // CHANGED — now also captures whichever branchId was passed in the
-      // login payload (if any) into loginBranchId, so the admin layout
-      // can show that branch first instead of defaulting to "All
-      // Branches" or the first branch in the list.
       login: async (payload) => {
         set({ isLoading: true, error: null });
         try {
           const res = await authService.login(payload);
+
+          if (isCodeSentResponse(res)) {
+            set({
+              isLoading: false,
+              twoFactorCodeSent: true,
+              twoFactorMaskedDestination: res.maskedDestination ?? null,
+            });
+            toast.success(res.message ?? 'Code sent — check your email.');
+            return 'code_sent';
+          }
+
           get().setAuth(res);
-          set({ isLoading: false, loginBranchId: payload.branchId ?? null });
+          set({
+            isLoading: false,
+            loginBranchId: payload.branchId ?? null,
+            twoFactorCodeSent: false,
+            twoFactorMaskedDestination: null,
+          });
           toast.success('Welcome back!');
-          return true;
+          return 'success';
         } catch (error) {
           const message = extractErrorMessage(error, 'Login failed.');
           set({ isLoading: false, error: message });
           toast.error(message);
-          return false;
+          return 'error';
         }
       },
+
+      cancelTwoFactor: () =>
+        set({
+          twoFactorCodeSent: false,
+          twoFactorMaskedDestination: null,
+          error: null,
+        }),
 
       sendOtp: async (payload) => {
         set({ isLoading: true, error: null });
@@ -248,9 +277,6 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      // Public/code-based flow only — from the /forgot-password page,
-      // after forgotPassword() above. See changePassword() below for the
-      // authenticated profile-page flow.
       resetPassword: async (payload) => {
         set({ isLoading: true, error: null });
         try {
@@ -266,7 +292,6 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      // Authenticated flow — profile page's "change password" form.
       changePassword: async (payload) => {
         set({ isLoading: true, error: null });
         try {
@@ -290,6 +315,8 @@ export const useAuthStore = create<AuthState>()(
         refreshToken: state.refreshToken,
         isAuthenticated: state.isAuthenticated,
         loginBranchId: state.loginBranchId,
+        // twoFactorCodeSent / twoFactorMaskedDestination intentionally
+        // NOT persisted — see the comment above.
       }),
     },
   ),

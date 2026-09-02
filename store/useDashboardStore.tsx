@@ -12,18 +12,20 @@ import {
   AuditLogEntry,
   AdminOrder,
   AdminOrdersFilters,
+  BranchPerformance,
+  DashboardRange,
 } from '@/types/dashboard';
 
 function extractErrorMessage(error: unknown, fallback: string) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const anyErr = error as any;
   return anyErr?.response?.data?.message ?? anyErr?.message ?? fallback;
 }
 
-// GET /admin/inventory/alerts (and /admin/audit-logs) 400 if `branchId` is
-// sent but isn't a real UUID — confirmed via live "branchId must be a
-// UUID" response. Only forward it if it actually looks like one, so an
-// unresolved/undefined branch id degrades to "no filter" (the previous,
-// working behavior) instead of a 400.
+// GET /admin/inventory/alerts (and others) 400 if `branchId` is sent but
+// isn't a real UUID — only forward it if it actually looks like one, so
+// an unresolved/undefined branch id degrades to "no filter" instead of
+// a 400.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function asBranchId(branchId?: string | null): string | undefined {
   return branchId && UUID_RE.test(branchId) ? branchId : undefined;
@@ -40,27 +42,32 @@ interface DashboardState {
   salesTrendsLoading: boolean;
   salesTrendsError: boolean;
 
-  // Popular items
-  popularItems: PopularItem[] | null;
-  popularItemsLoading: boolean;
-  popularItemsError: boolean;
+  // Top items
+  topItems: PopularItem[] | null;
+  topItemsLoading: boolean;
+  topItemsError: boolean;
 
   // Order distribution
   distribution: OrderDistribution[] | null;
   distributionLoading: boolean;
   distributionError: boolean;
 
+  // Branch performance
+  branchPerformance: BranchPerformance | null;
+  branchPerformanceLoading: boolean;
+  branchPerformanceError: boolean;
+
   // Customers
   customers: DashboardCustomersResponse | null;
   customersLoading: boolean;
   customersError: boolean;
 
-  // Low stock (confirmed live)
+  // Low stock
   lowStock: LowStockAlert[] | null;
   lowStockLoading: boolean;
   lowStockError: boolean;
 
-  // Audit logs (confirmed live — service unwraps { items, total } to AuditLogEntry[])
+  // Audit logs
   auditLogs: AuditLogEntry[] | null;
   auditLogsLoading: boolean;
   auditLogsError: boolean;
@@ -71,9 +78,10 @@ interface DashboardState {
   ordersError: boolean;
 
   fetchSummary: (vendorId?: string, branchId?: string) => Promise<void>;
-  fetchSalesTrends: (vendorId?: string, days?: number) => Promise<void>;
-  fetchPopularItems: (vendorId?: string, limit?: number) => Promise<void>;
-  fetchDistribution: (vendorId?: string) => Promise<void>;
+  fetchSalesTrends: (branchId?: string, days?: 7 | 14 | 30) => Promise<void>;
+  fetchTopItems: (branchId?: string, limit?: number) => Promise<void>;
+  fetchDistribution: (branchId?: string, range?: DashboardRange) => Promise<void>;
+  fetchBranchPerformance: (range?: DashboardRange, vendorId?: string) => Promise<void>;
   fetchCustomers: (vendorId?: string, page?: number, limit?: number) => Promise<void>;
   fetchLowStockAlerts: (branchId?: string) => Promise<void>;
   fetchRecentAuditLogs: (limit?: number, branchId?: string) => Promise<void>;
@@ -92,13 +100,17 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   salesTrendsLoading: false,
   salesTrendsError: false,
 
-  popularItems: null,
-  popularItemsLoading: false,
-  popularItemsError: false,
+  topItems: null,
+  topItemsLoading: false,
+  topItemsError: false,
 
   distribution: null,
   distributionLoading: false,
   distributionError: false,
+
+  branchPerformance: null,
+  branchPerformanceLoading: false,
+  branchPerformanceError: false,
 
   customers: null,
   customersLoading: false,
@@ -127,36 +139,47 @@ export const useDashboardStore = create<DashboardState>((set) => ({
     }
   },
 
-  fetchSalesTrends: async (vendorId, days = 7) => {
+  fetchSalesTrends: async (branchId, days = 7) => {
     set({ salesTrendsLoading: true, salesTrendsError: false });
     try {
-      const salesTrends = await dashboardService.getSalesTrends(vendorId, days);
+      const salesTrends = await dashboardService.getSalesTrends(asBranchId(branchId), days);
       set({ salesTrends, salesTrendsLoading: false });
     } catch (error) {
       set({ salesTrendsLoading: false, salesTrendsError: true });
-      toast.error(extractErrorMessage(error, 'Could not load sales trends'));
+      toast.error(extractErrorMessage(error, 'Could not load sales trend'));
     }
   },
 
-  fetchPopularItems: async (vendorId, limit = 5) => {
-    set({ popularItemsLoading: true, popularItemsError: false });
+  fetchTopItems: async (branchId, limit = 5) => {
+    set({ topItemsLoading: true, topItemsError: false });
     try {
-      const popularItems = await dashboardService.getPopularItems(vendorId, limit);
-      set({ popularItems, popularItemsLoading: false });
+      const topItems = await dashboardService.getTopItems(asBranchId(branchId), limit);
+      set({ topItems, topItemsLoading: false });
     } catch (error) {
-      set({ popularItemsLoading: false, popularItemsError: true });
-      toast.error(extractErrorMessage(error, 'Could not load popular items'));
+      set({ topItemsLoading: false, topItemsError: true });
+      toast.error(extractErrorMessage(error, 'Could not load top items'));
     }
   },
 
-  fetchDistribution: async (vendorId) => {
+  fetchDistribution: async (branchId, range = 'month') => {
     set({ distributionLoading: true, distributionError: false });
     try {
-      const distribution = await dashboardService.getDistribution(vendorId);
+      const distribution = await dashboardService.getDistribution(asBranchId(branchId), range);
       set({ distribution, distributionLoading: false });
     } catch (error) {
       set({ distributionLoading: false, distributionError: true });
       toast.error(extractErrorMessage(error, 'Could not load order distribution'));
+    }
+  },
+
+  fetchBranchPerformance: async (range = 'month', vendorId) => {
+    set({ branchPerformanceLoading: true, branchPerformanceError: false });
+    try {
+      const branchPerformance = await dashboardService.getBranchPerformance(range, vendorId);
+      set({ branchPerformance, branchPerformanceLoading: false });
+    } catch (error) {
+      set({ branchPerformanceLoading: false, branchPerformanceError: true });
+      toast.error(extractErrorMessage(error, 'Could not load branch performance'));
     }
   },
 
@@ -171,8 +194,6 @@ export const useDashboardStore = create<DashboardState>((set) => ({
     }
   },
 
-  // CONFIRMED LIVE — errors now surface via toast like the other cards,
-  // matching the rest of the dashboard now that the endpoint exists.
   fetchLowStockAlerts: async (branchId) => {
     set({ lowStockLoading: true, lowStockError: false });
     try {
@@ -184,8 +205,6 @@ export const useDashboardStore = create<DashboardState>((set) => ({
     }
   },
 
-  // CONFIRMED LIVE — service unwraps { items, total } before this resolves,
-  // so `auditLogs` here is always AuditLogEntry[] | null, never the wrapper.
   fetchRecentAuditLogs: async (limit = 10, branchId) => {
     set({ auditLogsLoading: true, auditLogsError: false });
     try {
@@ -208,15 +227,6 @@ export const useDashboardStore = create<DashboardState>((set) => ({
     }
   },
 
-  // `limit` is no longer passed to fetchAdminOrders — GET /admin/orders
-  // rejects it outright (400, "property limit should not exist"). The
-  // dashboard preview fetches the list and caps display to 5 rows
-  // client-side — see page.tsx.
-  //
-  // CONFIRMED — GET /admin/orders does filter by `branchId` correctly:
-  // a request with branchId set returns only orders whose `branchId`/
-  // `branch.id` match it. (Earlier note here claiming it didn't filter
-  // was wrong — retracted.)
   fetchAll: (vendorId, branchId) => {
     const state = useDashboardStore.getState();
     const validBranchId = asBranchId(branchId);
@@ -224,5 +234,9 @@ export const useDashboardStore = create<DashboardState>((set) => ({
     state.fetchLowStockAlerts(validBranchId);
     state.fetchRecentAuditLogs(5, validBranchId);
     state.fetchAdminOrders({ branchId: validBranchId });
+    state.fetchSalesTrends(validBranchId, 7);
+    state.fetchTopItems(validBranchId, 5);
+    state.fetchDistribution(validBranchId, 'month');
+    state.fetchBranchPerformance('month', vendorId);
   },
 }));
