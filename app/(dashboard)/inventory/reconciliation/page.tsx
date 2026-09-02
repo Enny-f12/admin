@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import {
   Calendar,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Search,
   AlertTriangle,
   Check,
@@ -14,7 +16,7 @@ import { ReconciliationItem } from "@/types/reconciliation.types";
 import { useBranch } from "../../layout";
 
 const CATEGORIES = ["All Categories", "Pastry", "Swallow", "Soup", "Intercontinental", "Protein", "Drinks"];
-const PAGE_SIZE = 6;
+const PAGE_SIZE = 10;
 
 export default function ReconciliationPage() {
   const {
@@ -72,6 +74,7 @@ export default function ReconciliationPage() {
   }, [countDate, conductedBy, search, category, page, branch.id, hasUsableBranch]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
   const hasVariance = (items ?? []).some((i) => i.variance !== 0);
 
   if (!hasUsableBranch) {
@@ -161,10 +164,16 @@ export default function ReconciliationPage() {
               }}
             >
               {category}
-              <ChevronDown size={15} strokeWidth={1.8} color="var(--color-text-muted)" />
+              <ChevronDown
+                size={15}
+                strokeWidth={1.8}
+                color="var(--color-text-muted)"
+                style={{ transition: "transform 0.2s ease", transform: categoryOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+              />
             </button>
             {categoryOpen && (
               <div
+                className="fade-in-down"
                 style={{
                   position: "absolute", top: "calc(100% + 6px)", left: 0, minWidth: 190,
                   background: "#fff", border: "1px solid var(--color-border)", borderRadius: 10,
@@ -179,6 +188,7 @@ export default function ReconciliationPage() {
                       display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 14px",
                       background: c === category ? "var(--color-bg-soft)" : "#fff", border: "none", cursor: "pointer",
                       fontSize: "0.85rem", fontFamily: "var(--font-sans)", color: "var(--color-text)", textAlign: "left",
+                      transition: "background 0.15s ease",
                     }}
                   >
                     {c === category && <Check size={13} strokeWidth={2} />}
@@ -243,7 +253,10 @@ export default function ReconciliationPage() {
                             padding: "7px 16px", borderRadius: 8, border: "1px solid var(--color-border)",
                             background: "#fff", cursor: "pointer", fontSize: "0.82rem", fontWeight: 600,
                             color: "var(--color-text)", fontFamily: "var(--font-sans)",
+                            transition: "background 0.15s ease, transform 0.15s ease",
                           }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-bg-soft)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.transform = "translateY(0)"; }}
                         >
                           Adjust
                         </button>
@@ -264,25 +277,52 @@ export default function ReconciliationPage() {
           </table>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 14, padding: "14px 20px", fontSize: "0.85rem" }}>
-          <button onClick={() => setPage((p) => Math.max(1, p - 1))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-primary)", fontWeight: 600 }}>
+        {/*
+          Compact pager — was rendering a button per page. Now it's
+          Previous / current page / Next, same pattern as the
+          Inventory and Stock Inventory pages, with a "Page X of Y"
+          label so position is still clear.
+        */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 14,
+          padding: "14px 20px", fontSize: "0.85rem", borderTop: "1px solid var(--color-border)",
+        }}>
+          <span style={{ color: "var(--color-text-muted)", fontSize: "0.8rem" }}>
+            Page {currentPage} of {totalPages}
+          </span>
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage <= 1}
+            className="pager-link"
+            style={{
+              display: "flex", alignItems: "center", gap: 4, background: "none", border: "none",
+              cursor: currentPage <= 1 ? "not-allowed" : "pointer", fontWeight: 600, fontFamily: "var(--font-sans)",
+              color: currentPage <= 1 ? "var(--color-text-muted)" : "var(--color-primary)",
+            }}
+          >
+            <ChevronLeft size={15} strokeWidth={2} />
             Previous
           </button>
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPage(p)}
-              style={{
-                width: 28, height: 28, borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 600,
-                background: p === page ? "var(--color-secondary)" : "transparent",
-                color: p === page ? "#7a5500" : "var(--color-text)",
-              }}
-            >
-              {p}
-            </button>
-          ))}
-          <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-primary)", fontWeight: 600 }}>
+          <span
+            style={{
+              width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+              fontWeight: 700, background: "var(--color-secondary)", color: "#7a5500", flexShrink: 0,
+            }}
+          >
+            {currentPage}
+          </span>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage >= totalPages}
+            className="pager-link"
+            style={{
+              display: "flex", alignItems: "center", gap: 4, background: "none", border: "none",
+              cursor: currentPage >= totalPages ? "not-allowed" : "pointer", fontWeight: 600, fontFamily: "var(--font-sans)",
+              color: currentPage >= totalPages ? "var(--color-text-muted)" : "var(--color-primary)",
+            }}
+          >
             Next
+            <ChevronRight size={15} strokeWidth={2} />
           </button>
         </div>
       </div>
@@ -315,6 +355,28 @@ export default function ReconciliationPage() {
           }}
         />
       )}
+
+      <style jsx global>{`
+        @keyframes fadeInDown {
+          from { opacity: 0; transform: translateY(-6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in-down { animation: fadeInDown 0.16s cubic-bezier(0.16, 1, 0.3, 1); }
+
+        @keyframes backdropIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes modalIn {
+          from { opacity: 0; transform: translateY(10px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .modal-backdrop { animation: backdropIn 0.18s ease-out; }
+        .modal-shell { animation: modalIn 0.22s cubic-bezier(0.16, 1, 0.3, 1); }
+
+        .pager-link { transition: opacity 0.15s ease; }
+        .pager-link:not(:disabled):hover { opacity: 0.75; }
+      `}</style>
     </div>
   );
 }
@@ -336,6 +398,7 @@ function AdjustModal({
   return (
     <div
       onClick={onClose}
+      className="modal-backdrop"
       style={{
         position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
         display: "flex", alignItems: "flex-start", justifyContent: "center",
@@ -344,6 +407,7 @@ function AdjustModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="modal-shell"
         style={{
           width: 460, maxWidth: "92vw", maxHeight: "88vh", background: "#fff", borderRadius: 14,
           boxShadow: "0 20px 60px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column", overflow: "hidden",
@@ -353,7 +417,16 @@ function AdjustModal({
           <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "var(--color-heading)", paddingRight: 16 }}>
             Reconcile system records with physical count for {item.name}.
           </h3>
-          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", flexShrink: 0 }}>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)",
+              display: "flex", flexShrink: 0, padding: 4, borderRadius: 6, transition: "background 0.15s ease, color 0.15s ease",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--color-bg-soft)"; e.currentTarget.style.color = "var(--color-text)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--color-text-muted)"; }}
+          >
             <X size={18} />
           </button>
         </div>
@@ -405,4 +478,5 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const outlineBtn: React.CSSProperties = {
   padding: "10px 20px", borderRadius: 8, border: "1px solid var(--color-border)", background: "#fff",
   cursor: "pointer", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-text)", fontFamily: "var(--font-sans)",
+  transition: "background 0.15s ease",
 };

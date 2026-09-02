@@ -4,6 +4,7 @@ import { kitchenService } from '@/services/kitchen.service';
 import { KitchenOrder, CompletedKitchenOrder, KitchenDisplaySettings, UpdateKitchenSettingsPayload } from '@/types/kitchen.types';
 
 function extractErrorMessage(error: unknown, fallback: string) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const anyErr = error as any;
   return anyErr?.response?.data?.message ?? anyErr?.message ?? fallback;
 }

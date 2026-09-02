@@ -10,9 +10,11 @@ import {
   CreateMenuItemPayload,
   UpdateMenuItemPayload,
   CreateCategoryPayload,
+  UpdateCategoryPayload,
 } from '@/types/menu';
 
 function extractErrorMessage(error: unknown, fallback: string) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const anyErr = error as any;
   return anyErr?.response?.data?.message ?? anyErr?.message ?? fallback;
 }
@@ -31,13 +33,18 @@ interface MenuState {
   isDeleting: boolean;
   isTogglingAvailability: boolean;
   isCreatingCategory: boolean;
+  isUpdatingCategory: boolean;
+  isDeletingCategory: boolean;
+  isUploadingCategoryImage: boolean;
 
-  // keeps items in sync with whatever filter was last applied,
-  // so mutations know how to refetch correctly
   lastFilters: GetItemsFilters;
 
   fetchCategories: (filters?: GetCategoriesFilters) => Promise<void>;
   addCategory: (payload: CreateCategoryPayload) => Promise<MenuCategory | null>;
+  updateCategory: (id: string, payload: UpdateCategoryPayload) => Promise<boolean>;
+  deleteCategory: (id: string) => Promise<boolean>;
+  uploadCategoryImage: (id: string, file: File) => Promise<boolean>;
+  deleteCategoryImage: (id: string) => Promise<boolean>;
   fetchItems: (filters?: GetItemsFilters) => Promise<void>;
   createItem: (payload: CreateMenuItemPayload, files: File[]) => Promise<boolean>;
   updateItem: (id: string, payload: UpdateMenuItemPayload) => Promise<boolean>;
@@ -61,6 +68,9 @@ export const useMenuStore = create<MenuState>((set, get) => ({
   isDeleting: false,
   isTogglingAvailability: false,
   isCreatingCategory: false,
+  isUpdatingCategory: false,
+  isDeletingCategory: false,
+  isUploadingCategoryImage: false,
 
   lastFilters: {},
 
@@ -75,9 +85,6 @@ export const useMenuStore = create<MenuState>((set, get) => ({
     }
   },
 
-  // Inline quick-add from the Add/Edit Dish modal. Appends the new category
-  // to the in-memory list and auto-selects it rather than refetching —
-  // one POST response is enough, no need to round-trip fetchCategories.
   addCategory: async (payload) => {
     set({ isCreatingCategory: true });
     try {
@@ -95,6 +102,71 @@ export const useMenuStore = create<MenuState>((set, get) => ({
     }
   },
 
+  updateCategory: async (id, payload) => {
+    set({ isUpdatingCategory: true });
+    try {
+      const updated = await menuService.updateCategory(id, payload);
+      set((state) => ({
+        isUpdatingCategory: false,
+        categories: state.categories?.map((c) => (c.id === id ? updated : c)) ?? null,
+      }));
+      toast.success('Category updated');
+      return true;
+    } catch (error) {
+      set({ isUpdatingCategory: false });
+      toast.error(extractErrorMessage(error, 'Could not update category'));
+      return false;
+    }
+  },
+
+  deleteCategory: async (id) => {
+    set({ isDeletingCategory: true });
+    try {
+      await menuService.deleteCategory(id);
+      set((state) => ({
+        isDeletingCategory: false,
+        categories: state.categories?.filter((c) => c.id !== id) ?? null,
+      }));
+      toast.success('Category removed');
+      return true;
+    } catch (error) {
+      set({ isDeletingCategory: false });
+      toast.error(extractErrorMessage(error, 'Could not remove category'));
+      return false;
+    }
+  },
+
+  // Uploads/replaces a category's single image. Patches the category
+  // in place from the response, same pattern as updateCategory above.
+  uploadCategoryImage: async (id, file) => {
+    set({ isUploadingCategoryImage: true });
+    try {
+      const updated = await menuService.uploadCategoryImage(id, file);
+      set((state) => ({
+        isUploadingCategoryImage: false,
+        categories: state.categories?.map((c) => (c.id === id ? updated : c)) ?? null,
+      }));
+      return true;
+    } catch (error) {
+      set({ isUploadingCategoryImage: false });
+      toast.error(extractErrorMessage(error, 'Could not upload category image'));
+      return false;
+    }
+  },
+
+  deleteCategoryImage: async (id) => {
+    try {
+      const updated = await menuService.deleteCategoryImage(id);
+      set((state) => ({
+        categories: state.categories?.map((c) => (c.id === id ? updated : c)) ?? null,
+      }));
+      return true;
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Could not remove category image'));
+      return false;
+    }
+  },
+
   fetchItems: async (filters = {}) => {
     set({ itemsLoading: true, itemsError: false, lastFilters: filters });
     try {
@@ -106,10 +178,6 @@ export const useMenuStore = create<MenuState>((set, get) => ({
     }
   },
 
-  // Two real API calls under the hood: create (JSON) then, if files were
-  // provided, a follow-up image upload. If the item is created but the
-  // image upload fails, we still treat it as a success (the dish exists)
-  // but surface a distinct message rather than a generic failure toast.
   createItem: async (payload, files) => {
     set({ isCreating: true });
     try {
@@ -182,8 +250,6 @@ export const useMenuStore = create<MenuState>((set, get) => ({
     }
   },
 
-  // Used for adding images to an item that already exists (edit flow) —
-  // same endpoint createItem's follow-up call uses.
   updateItemImage: async (id, files) => {
     try {
       await menuService.uploadItemImages(id, files);
@@ -195,10 +261,6 @@ export const useMenuStore = create<MenuState>((set, get) => ({
     }
   },
 
-  // Endpoint is unconfirmed (see menu.service.ts) — if this 404s, that's
-  // the backend gap, not a frontend bug. Kept as a normal store action so
-  // the failure surfaces as a toast like everything else, rather than
-  // silently no-op-ing.
   deleteItemImage: async (itemId, imageId) => {
     try {
       await menuService.deleteItemImage(itemId, imageId);

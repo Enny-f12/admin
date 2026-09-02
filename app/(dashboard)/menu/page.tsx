@@ -3,6 +3,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
   Plus,
@@ -21,6 +22,7 @@ import { useBranch } from "../layout";
 import { useAuthStore } from "@/store/useAuthStore";
 import { useMenuStore } from "@/store/useMenuStore";
 import { MenuItem, MenuItemImage } from "@/types/menu";
+import ImageCropper from "@/components/menu/ImageCropper";
 
 function slugify(name: string) {
   return name
@@ -36,8 +38,9 @@ const EMPTY_FORM = { name: "", description: "", price: "", categoryId: "", dieta
 // yet, so we're paginating the already-fetched list, not the request.
 const PAGE_SIZE = 10;
 
-// Hard cap on individual image uploads for the dish form.
+// Dish images are cropped to 4:3 before upload, capped at 1MB per file.
 const MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024; // 1MB
+const DISH_ASPECT = 4 / 3;
 
 export default function MenuPage() {
   const branch = useBranch();
@@ -55,12 +58,17 @@ export default function MenuPage() {
   const [editItem, setEditItem] = useState<MenuItem | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [dragOver, setDragOver] = useState(false);
-  // Files picked in this modal session, not yet uploaded.
+  // Files picked in this modal session, already cropped, not yet uploaded.
   const [newFiles, setNewFiles] = useState<File[]>([]);
   const [newPreviews, setNewPreviews] = useState<string[]>([]);
   // Images already saved on the item (edit flow only).
   const [existingImages, setExistingImages] = useState<MenuItemImage[]>([]);
   const [removingImageId, setRemovingImageId] = useState<string | null>(null);
+  // Crop flow: files picked but not yet cropped, one at a time. cropSrc is
+  // the object URL currently shown in the cropper; the rest wait in queue.
+  const [, setCropQueue] = useState<File[]>([]);
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [cropFileMeta, setCropFileMeta] = useState<{ name: string; type: string } | null>(null);
   // Inline "quick-add category" state, shown inside the Add/Edit Dish modal
   // so the user doesn't have to leave the flow to create a missing category.
   const [showCategoryForm, setShowCategoryForm] = useState(false);
@@ -237,9 +245,17 @@ export default function MenuPage() {
     }
   };
 
-  // Enforces the 1MB-per-image cap. Oversized files are skipped with a
-  // toast rather than silently dropped, so the user knows why their
-  // selection came up short.
+  // Opens the cropper for a single picked file, using its own object URL.
+  const openCropFor = (file: File) => {
+    const src = URL.createObjectURL(file);
+    setCropSrc(src);
+    setCropFileMeta({ name: file.name, type: file.type || "image/jpeg" });
+  };
+
+  // Enforces the 1MB-per-image cap up front, then routes accepted files
+  // through the crop queue one at a time rather than adding them straight
+  // to newFiles — every dish image gets cropped to 4:3 before it's staged
+  // for upload.
   const handleFiles = (files: FileList | File[]) => {
     const list = Array.from(files);
     if (list.length === 0) return;
@@ -265,8 +281,43 @@ export default function MenuPage() {
 
     if (accepted.length === 0) return;
 
-    setNewFiles((prev) => [...prev, ...accepted]);
-    setNewPreviews((prev) => [...prev, ...accepted.map((f) => URL.createObjectURL(f))]);
+    setCropQueue(accepted.slice(1));
+    openCropFor(accepted[0]);
+  };
+
+  // Advances to the next file in the crop queue, if any — shared by both
+  // "confirm crop" and "cancel crop" so the queue always drains.
+  const advanceCropQueue = () => {
+    setCropQueue((queue) => {
+      if (queue.length > 0) {
+        const [next, ...rest] = queue;
+        openCropFor(next);
+        return rest;
+      }
+      return [];
+    });
+  };
+
+  const handleCropComplete = (blob: Blob) => {
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    const croppedFile = new File([blob], cropFileMeta?.name ?? "dish.jpg", {
+      type: cropFileMeta?.type ?? "image/jpeg",
+    });
+    const previewUrl = URL.createObjectURL(croppedFile);
+    setNewFiles((prev) => [...prev, croppedFile]);
+    setNewPreviews((prev) => [...prev, previewUrl]);
+    setCropSrc(null);
+    setCropFileMeta(null);
+    advanceCropQueue();
+  };
+
+  const handleCropCancel = () => {
+    // Skip this file but keep going through the rest of the queue, rather
+    // than dropping every remaining pick because one was cancelled.
+    if (cropSrc) URL.revokeObjectURL(cropSrc);
+    setCropSrc(null);
+    setCropFileMeta(null);
+    advanceCropQueue();
   };
 
   const removeNewImage = (index: number) => {
@@ -308,10 +359,24 @@ export default function MenuPage() {
               Add, edit, and manage menu items
             </p>
           </div>
-          <button className="btn btn-primary" onClick={openAdd} style={{ gap: 6 }}>
-            <Plus size={15} strokeWidth={2.2} />
-            Add Dish
-          </button>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Link
+              href="/menu/categories"
+              className="btn-secondary-link"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 14px",
+                borderRadius: 8, border: "1px solid var(--color-border)", background: "var(--color-bg-card)",
+                color: "var(--color-text)", fontSize: "0.85rem", fontWeight: 500, textDecoration: "none",
+                transition: "background 0.15s ease, border-color 0.15s ease",
+              }}
+            >
+              Categories
+            </Link>
+            <button className="btn btn-primary" onClick={openAdd} style={{ gap: 6 }}>
+              <Plus size={15} strokeWidth={2.2} />
+              Add Dish
+            </button>
+          </div>
         </div>
 
         {/* Filter bar */}
@@ -403,13 +468,25 @@ export default function MenuPage() {
                 </tr>
               </thead>
               <tbody>
-                {(itemsLoading || categoriesLoading) && (
-                  <tr>
-                    <td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
-                      Loading…
-                    </td>
-                  </tr>
-                )}
+                {(itemsLoading || categoriesLoading) &&
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <tr key={`sk-${i}`}>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                          <div className="skeleton" style={{ width: 64, height: 48, borderRadius: 10 }} />
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            <div className="skeleton" style={{ width: 140, height: 12, borderRadius: 4 }} />
+                            <div className="skeleton" style={{ width: 90, height: 10, borderRadius: 4 }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td><div className="skeleton" style={{ width: 70, height: 12, borderRadius: 4 }} /></td>
+                      <td><div className="skeleton" style={{ width: 50, height: 12, borderRadius: 4 }} /></td>
+                      <td><div className="skeleton" style={{ width: 60, height: 12, borderRadius: 4 }} /></td>
+                      <td><div className="skeleton" style={{ width: 60, height: 18, borderRadius: 10 }} /></td>
+                      <td><div className="skeleton" style={{ width: 40, height: 12, borderRadius: 4 }} /></td>
+                    </tr>
+                  ))}
                 {!itemsLoading && itemsError && (
                   <tr>
                     <td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--color-text-muted)" }}>
@@ -430,13 +507,13 @@ export default function MenuPage() {
                     <tr key={dish.id}>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                          <div style={{ width: 56, height: 56, borderRadius: 10, overflow: "hidden", flexShrink: 0, border: "1px solid var(--color-border)", background: "var(--color-bg-soft)" }}>
+                          <div style={{ width: 64, height: 48, borderRadius: 10, overflow: "hidden", flexShrink: 0, border: "1px solid var(--color-border)", background: "var(--color-bg-soft)" }}>
                             {dish.images?.[0]?.url ? (
                               <Image
                                 src={dish.images[0].url}
                                 alt={dish.name}
-                                width={56}
-                                height={56}
+                                width={64}
+                                height={48}
                                 style={{ objectFit: "cover", width: "100%", height: "100%" }}
                               />
                             ) : null}
@@ -539,12 +616,13 @@ export default function MenuPage() {
       {/* ── Modal ── */}
       {modalOpen && (
         <div
+          className="overlay-in"
           style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
           onClick={(e) => e.target === e.currentTarget && setModalOpen(false)}
         >
           <div
+            className="modal-in"
             style={{ background: "var(--color-bg-card)", borderRadius: 16, width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto", padding: 28, display: "flex", flexDirection: "column", gap: 20 }}
-            className="no-scrollbar"
           >
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
               <div>
@@ -697,18 +775,18 @@ export default function MenuPage() {
                   Dish Images
                 </label>
                 <span style={{ fontSize: "0.72rem", color: "var(--color-text-muted)" }}>
-                  Max 1MB per image
+                  4:3 · Max 1MB per image
                 </span>
               </div>
 
               {(existingImages.length > 0 || newPreviews.length > 0) && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                   {existingImages.map((img) => (
-                    <div key={img.id} style={{ position: "relative", width: 72, height: 72 }}>
+                    <div key={img.id} style={{ position: "relative", width: 96, height: 72 }}>
                       <Image
                         src={img.url}
                         alt="Dish"
-                        width={72}
+                        width={96}
                         height={72}
                         style={{ borderRadius: 8, objectFit: "cover", width: "100%", height: "100%", border: "1px solid var(--color-border)" }}
                       />
@@ -734,11 +812,11 @@ export default function MenuPage() {
                     </div>
                   ))}
                   {newPreviews.map((src, i) => (
-                    <div key={src} style={{ position: "relative", width: 72, height: 72 }}>
+                    <div key={src} style={{ position: "relative", width: 96, height: 72 }}>
                       <Image
                         src={src}
                         alt="New upload preview"
-                        width={72}
+                        width={96}
                         height={72}
                         style={{ borderRadius: 8, objectFit: "cover", width: "100%", height: "100%", border: "1px solid var(--color-primary)" }}
                       />
@@ -781,7 +859,7 @@ export default function MenuPage() {
               >
                 <UploadCloud size={22} strokeWidth={1.6} color="var(--color-text-muted)" />
                 <p style={{ margin: 0, fontSize: "0.82rem", fontWeight: 400, color: "var(--color-text-muted)" }}>
-                  Click or drag to add image(s)
+                  Click or drag to add image(s) — crop image to 4:3
                 </p>
               </div>
               <input
@@ -817,11 +895,36 @@ export default function MenuPage() {
         </div>
       )}
 
+      {/* Crop step — shown for each picked file, one at a time, before it's staged */}
+      {cropSrc && (
+        <ImageCropper
+          imageSrc={cropSrc}
+          aspect={DISH_ASPECT}
+          title="Crop dish photo (4:3)"
+          onCancel={handleCropCancel}
+          onComplete={handleCropComplete}
+        />
+      )}
+
       <style jsx global>{`
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
+
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .skeleton {
+          background: linear-gradient(90deg, var(--color-bg-soft) 25%, var(--color-border) 50%, var(--color-bg-soft) 75%);
+          background-size: 200% 100%;
+          animation: shimmer 1.4s ease-in-out infinite;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes scaleIn { from { opacity: 0; transform: scale(0.96) translateY(4px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+        .overlay-in { animation: fadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1); }
+        .modal-in { animation: scaleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1); }
+
+        .btn-secondary-link:hover { background: var(--color-bg-soft); }
       `}</style>
     </>
   );

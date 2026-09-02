@@ -51,7 +51,7 @@ export const settingsService = {
   updateNotificationSettings: (payload: UpdateNotificationSettingsPayload) =>
     apiClient.put<NotificationSettings>('/admin/settings/notifications', payload).then((r) => r.data),
 
-  // ── Branches — GET already live, POST/PATCH requested — doc #7 ────
+  // ── Branches — live on backend, schema confirmed via Swagger ──────
   getBranches: () => apiClient.get<Branch[]>('/admin/branches').then((r) => r.data),
 
   createBranch: (payload: CreateBranchPayload) =>

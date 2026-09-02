@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { KeyRound, Mail, ArrowLeft, CheckCircle2 } from "lucide-react";
+import { KeyRound, Mail, ArrowLeft, CheckCircle2, Eye, EyeOff } from "lucide-react";
 import { useAuthStore } from "@/store/useAuthStore";
 
 const inputStyle: React.CSSProperties = {
@@ -38,20 +38,35 @@ const primaryBtn: React.CSSProperties = {
   cursor: "pointer",
 };
 
+// Shared eye-toggle button, positioned inside a relative wrapper around
+// a password input — same pattern the login page already uses.
+const eyeToggleStyle: React.CSSProperties = {
+  position: "absolute",
+  right: 14,
+  top: "50%",
+  transform: "translateY(-50%)",
+  background: "none",
+  border: "none",
+  cursor: "pointer",
+  color: "#9CA3AF",
+  display: "flex",
+  padding: 0,
+};
+
 type Step = "request" | "confirm" | "done";
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
   const { isLoading, forgotPassword, resetPassword } = useAuthStore();
 
-  // step/identifier are page-specific UI state, not global auth state —
-  // kept local rather than in useAuthStore.
   const [step, setStep] = useState<Step>("request");
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordMismatch, setPasswordMismatch] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const handleRequest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,6 +93,8 @@ export default function ForgotPasswordPage() {
     setNewPassword("");
     setConfirmPassword("");
     setPasswordMismatch(false);
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
   };
 
   return (
@@ -198,22 +215,42 @@ export default function ForgotPasswordPage() {
               />
 
               <label style={labelStyle}>New password</label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="At least 8 characters"
-                style={{ ...inputStyle, marginBottom: 16 }}
-              />
+              <div style={{ position: "relative", marginBottom: 16 }}>
+                <input
+                  type={showNewPassword ? "text" : "password"}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  style={{ ...inputStyle, paddingRight: 42 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword((v) => !v)}
+                  aria-label="Toggle new password visibility"
+                  style={eyeToggleStyle}
+                >
+                  {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
 
               <label style={labelStyle}>Confirm new password</label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => { setConfirmPassword(e.target.value); setPasswordMismatch(false); }}
-                placeholder="Re-enter password"
-                style={{ ...inputStyle, marginBottom: passwordMismatch ? 8 : 20 }}
-              />
+              <div style={{ position: "relative", marginBottom: passwordMismatch ? 8 : 20 }}>
+                <input
+                  type={showConfirmPassword ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(e) => { setConfirmPassword(e.target.value); setPasswordMismatch(false); }}
+                  placeholder="Re-enter password"
+                  style={{ ...inputStyle, paddingRight: 42 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((v) => !v)}
+                  aria-label="Toggle confirm password visibility"
+                  style={eyeToggleStyle}
+                >
+                  {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
               {passwordMismatch && (
                 <p style={{ margin: "0 0 12px", fontSize: 12.5, color: "#DC2626" }}>Passwords don&apos;t match.</p>
               )}

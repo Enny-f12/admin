@@ -8,10 +8,12 @@ import {
   NotificationSettings,
   Branch,
   CreateBranchPayload,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   UpdateBranchPayload,
 } from '@/types/settings.types';
 
 function extractErrorMessage(error: unknown, fallback: string) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const anyErr = error as any;
   return anyErr?.response?.data?.message ?? anyErr?.message ?? fallback;
 }
@@ -43,7 +45,7 @@ interface SettingsState {
 
   fetchBranches: () => Promise<void>;
   createBranch: (payload: CreateBranchPayload) => Promise<boolean>;
-  updateBranchField: (id: string, key: keyof Branch, value: string) => void;
+  updateBranchField: (id: string, key: keyof Branch, value: string | number | boolean) => void;
   saveBranches: () => Promise<void>;
 }
 
@@ -194,12 +196,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   // Local-only edit — persisted via saveBranches below, matching the
   // mock's "edit inline, one Save Changes button for all rows" pattern.
+  // `value` covers string fields, numeric fields (latitude/longitude),
+  // and boolean toggles (pickupEnabled/isActive) all going through
+  // this same setter.
   updateBranchField: (id, key, value) => {
-    set((state) => ({
-      branches: state.branches
-        ? state.branches.map((b) => (b.id === id ? { ...b, [key]: value } : b))
-        : state.branches,
-    }));
+    set((state) => {
+      if (!state.branches) return state;
+      return {
+        branches: state.branches.map((b) => {
+          if (b.id !== id) return b;
+          if (key === 'latitude' || key === 'longitude') {
+            return { ...b, [key]: typeof value === 'number' ? value : Number(value) || 0 };
+          }
+          return { ...b, [key]: value };
+        }),
+      };
+    });
   },
 
   saveBranches: async () => {
@@ -212,8 +224,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           settingsService.updateBranch(b.id, {
             name: b.name,
             location: b.location,
+            addressLine1: b.addressLine1,
+            addressLine2: b.addressLine2,
+            city: b.city,
+            state: b.state,
+            country: b.country,
+            postalCode: b.postalCode,
+            latitude: b.latitude,
+            longitude: b.longitude,
             phone: b.phone,
             email: b.email,
+            pickupEnabled: b.pickupEnabled,
+            isActive: b.isActive,
           }),
         ),
       );

@@ -89,9 +89,12 @@ export interface CreateCategoryPayload {
   name: string;
   slug: string;
   description?: string;
-  imageUrl?: string;
   sortOrder?: number;
   isActive?: boolean;
+  // imageUrl removed — category images are now uploaded as a real file
+  // via uploadCategoryImage() after creation, same two-step pattern as
+  // menu items (create the record, then attach the image). No more
+  // pasted links or client-side base64 data URLs in this payload.
 }
 
 export interface UpdateCategoryPayload {
@@ -99,7 +102,7 @@ export interface UpdateCategoryPayload {
   name?: string;
   slug?: string;
   description?: string;
-  imageUrl?: string;
   sortOrder?: number;
   isActive?: boolean;
+  // imageUrl removed — see CreateCategoryPayload note above.
 }
