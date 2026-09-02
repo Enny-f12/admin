@@ -32,17 +32,13 @@ export interface MorningCountSummary {
 }
 
 export interface MorningCountSheet {
+  outletId: string;
   id: string;
-  // FIX — the live response has `branchId`, not `outletId`.
+  
   branchId: string;
   date: string;
   categories: MorningCountCategory[];
-  // FIX — these four are declared as required here, but the actual
-  // /morning-count/sheet response omits them entirely (verified: the
-  // payload is just { id, branchId, date, categories }). Marking them
-  // optional so the compiler forces every read site to handle "not
-  // present," instead of quietly typing a field that never arrives —
-  // which is exactly how the `summary` crash got through unnoticed.
+  OutletId?: string; 
   outletName?: string;
   counterStaffId?: string;
   counterStaffName?: string;
