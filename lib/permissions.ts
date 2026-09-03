@@ -129,6 +129,8 @@ const ROLE_RESTRICTED_ROUTES: Partial<Record<Route, string[]>> = {
 // permission box for them in the staff modal.
 //
 // - Cashier is blocked from Walk-in/Phone, Stock Inventory, and UOM.
+// - Manager is blocked from Walk-in/Phone, Payments, Accounting, and
+//   Analytics.
 // - Cashier, Kitchen Staff, Order Taker, Delivery Coordinator, and
 //   Accountant are blocked from Menu and Customers. (Accountant's entry
 //   here is now redundant given ROLE_ONLY_ROUTES below, which locks them
@@ -140,9 +142,12 @@ const ROLE_RESTRICTED_ROUTES: Partial<Record<Route, string[]>> = {
 // carrying the matching key.
 // ─────────────────────────────────────────────────────────────
 const ROLE_BLOCKED_ROUTES: Partial<Record<Route, string[]>> = {
-  [ROUTES.walkIn]: ["CASHIER"],
+  [ROUTES.walkIn]: ["CASHIER", "MANAGER"],
   [ROUTES.stockInventory]: ["CASHIER"],
   [ROUTES.uom]: ["CASHIER"],
+  [ROUTES.payments]: ["MANAGER"],
+  [ROUTES.accounting]: ["MANAGER"],
+  [ROUTES.analytics]: ["MANAGER"],
   [ROUTES.menu]: [
     "CASHIER",
     "KITCHEN_STAFF",
