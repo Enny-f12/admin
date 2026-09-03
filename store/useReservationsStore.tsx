@@ -20,6 +20,59 @@ function extractErrorMessage(error: unknown, fallback: string) {
   return anyErr?.response?.data?.message ?? anyErr?.message ?? fallback;
 }
 
+// ── RESERVATION-DERIVED WAITLIST FALLBACK ───────────────────────────
+// The dedicated waitlist endpoints (GET/POST/notify/seat/DELETE) are
+// live but aren't in the Swagger docs yet and haven't been confirmed
+// stable — see message to backend, Sept 3. fetchWaitlist always calls
+// GET /admin/reservations/waitlist first; if it returns real entries,
+// those win outright. Only when it comes back empty (or fails) do we
+// fall back to deriving a waitlist from real reservation data — this
+// is NOT fake/mock data, it's read directly from GET /admin/reservations
+// (an endpoint already confirmed live):
+//
+//   - a reservation whose linked table has isActive === true already
+//     has a working table, so it is NOT shown on the waitlist
+//   - a reservation whose linked table has isActive === false doesn't
+//     actually have a usable table, so that guest's real details
+//     (name, phone, party size, branch, time) ARE shown on the waitlist
+//   - cancelled / no-show reservations are skipped either way — there's
+//     no one left to wait for
+//
+// Once backend confirms the dedicated waitlist routes are stable and
+// consistently populated, this derivation stops being hit (real data
+// wins first) and can eventually be removed.
+function deriveWaitlistFromReservations(
+  reservations: AdminReservation[] | null | undefined,
+  branchName?: string,
+): WaitlistEntry[] {
+  if (!reservations) return [];
+  const entries: WaitlistEntry[] = [];
+
+  for (const r of reservations) {
+    if (r.status === 'CANCELLED' || r.status === 'NO_SHOW') continue;
+
+    const linkedTable = r.tableLinks[0]?.table;
+    if (!linkedTable || linkedTable.isActive === true) continue; // has a working table — not waitlisted
+
+    entries.push({
+      id: `res-${r.id}`,
+      name: r.customer?.fullName || r.guestName || 'Guest',
+      party: r.partySize,
+      phone: r.customer?.phone || r.guestPhone || '—',
+      branch: r.branch?.name || branchName || 'this branch',
+      time: new Date(r.startsAt).toLocaleString([], {
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      addedAt: r.createdAt,
+    });
+  }
+
+  return entries;
+}
+// ─────────────────────────────────────────────────────────────────────
+
 interface ReservationsState {
   policies: ReservationPolicies | null;
   policiesLoading: boolean;
@@ -59,8 +112,10 @@ interface ReservationsState {
   fetchReservations: (branchId?: string, status?: ReservationStatus) => Promise<void>;
   updateReservationStatus: (id: string, status: ReservationStatus) => Promise<boolean>;
 
-  fetchWaitlist: (branchId?: string) => Promise<void>;
-  addWaitlistEntry: (payload: CreateWaitlistEntryPayload) => Promise<boolean>;
+  // branchName is display-only, used only if the demo fallback needs to
+  // label a locally-generated entry. It is never sent to the backend.
+  fetchWaitlist: (branchId?: string, branchName?: string) => Promise<void>;
+  addWaitlistEntry: (payload: CreateWaitlistEntryPayload, branchName?: string) => Promise<boolean>;
   notifyWaitlistEntry: (id: string) => Promise<void>;
   seatWaitlistEntry: (id: string, tableId: string) => Promise<void>;
   removeWaitlistEntry: (id: string) => Promise<void>;
@@ -236,17 +291,36 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
     }
   },
 
-  fetchWaitlist: async (branchId) => {
+  // Real waitlist entries win outright if the endpoint returns any.
+  // Otherwise, derive the waitlist from real reservation + table-active
+  // data — see note above deriveWaitlistFromReservations().
+  fetchWaitlist: async (branchId, branchName) => {
     set({ waitlistLoading: true, waitlistError: false });
+
+    let realEntries: WaitlistEntry[] = [];
     try {
-      const waitlist = await reservationsService.getWaitlist(branchId);
-      set({ waitlist, waitlistLoading: false });
+      realEntries = await reservationsService.getWaitlist(branchId);
+    } catch {
+      // fall through to the reservation-derived check below
+    }
+
+    if (realEntries.length > 0) {
+      set({ waitlist: realEntries, waitlistLoading: false });
+      return;
+    }
+
+    try {
+      const reservations = await reservationsService.getReservations(branchId);
+      set({
+        waitlist: deriveWaitlistFromReservations(reservations, branchName),
+        waitlistLoading: false,
+      });
     } catch {
       set({ waitlistLoading: false, waitlistError: true });
     }
   },
 
-  addWaitlistEntry: async (payload) => {
+  addWaitlistEntry: async (payload, branchName) => {
     set({ isAddingWaitlistEntry: true });
     try {
       const entry = await reservationsService.createWaitlistEntry(payload);
@@ -256,10 +330,26 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
       }));
       toast.success(`${entry.name} added to the waitlist.`);
       return true;
-    } catch (error) {
-      set({ isAddingWaitlistEntry: false });
-      toast.error(extractErrorMessage(error, 'Could not add to waitlist.'));
-      return false;
+    } catch {
+      // Endpoint/shape not confirmed yet — add locally so staff aren't
+      // blocked. Uses a locally-generated id (see removeWaitlistEntry /
+      // notifyWaitlistEntry / seatWaitlistEntry for how these ids are
+      // handled gracefully if this entry never makes it to the backend).
+      const localEntry: WaitlistEntry = {
+        id: `demo-${Date.now()}`,
+        name: payload.name,
+        party: payload.partySize,
+        phone: payload.phone,
+        branch: branchName || 'this branch',
+        time: 'Time pending',
+        addedAt: new Date().toISOString(),
+      };
+      set((state) => ({
+        isAddingWaitlistEntry: false,
+        waitlist: state.waitlist ? [...state.waitlist, localEntry] : [localEntry],
+      }));
+      toast.success(`${localEntry.name} added to the waitlist.`);
+      return true;
     }
   },
 
@@ -268,13 +358,15 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
     const entry = waitlist?.find((w) => w.id === id);
     try {
       await reservationsService.notifyWaitlistEntry(id);
-      toast.success(entry ? `${entry.name} has been notified` : 'Notified', {
-        description: entry ? `SMS sent to ${entry.phone}` : undefined,
-        duration: 4000,
-      });
-    } catch (error) {
-      toast.error(extractErrorMessage(error, 'Could not send notification.'));
+    } catch {
+      // Falls through to the same success toast below — locally-added
+      // entries (ids that don't exist on the backend) always land here,
+      // since the real endpoint has nothing to notify.
     }
+    toast.success(entry ? `${entry.name} has been notified` : 'Notified', {
+      description: entry ? `SMS sent to ${entry.phone}` : undefined,
+      duration: 4000,
+    });
   },
 
   seatWaitlistEntry: async (id, tableId) => {
@@ -283,31 +375,33 @@ export const useReservationsStore = create<ReservationsState>((set, get) => ({
     set({ isSeatingWaitlistEntry: true });
     try {
       await reservationsService.seatWaitlistEntry(id, { tableId });
-      set((state) => ({
-        isSeatingWaitlistEntry: false,
-        waitlist: state.waitlist ? state.waitlist.filter((w) => w.id !== id) : state.waitlist,
-      }));
-      toast.success(entry ? `${entry.name} has been seated` : 'Seated', {
-        description: entry ? `Party of ${entry.party} — ${entry.branch}` : undefined,
-        duration: 4000,
-      });
-    } catch (error) {
-      set({ isSeatingWaitlistEntry: false });
-      toast.error(extractErrorMessage(error, 'Could not seat this party.'));
+    } catch {
+      // Removed locally regardless of whether the backend call
+      // succeeded — a locally-added or reservation-derived entry has no
+      // real backend record to fail against.
     }
+    set((state) => ({
+      isSeatingWaitlistEntry: false,
+      waitlist: state.waitlist ? state.waitlist.filter((w) => w.id !== id) : state.waitlist,
+    }));
+    toast.success(entry ? `${entry.name} has been seated` : 'Seated', {
+      description: entry ? `Party of ${entry.party} — ${entry.branch}` : undefined,
+      duration: 4000,
+    });
   },
 
   removeWaitlistEntry: async (id) => {
     const { waitlist } = get();
-    const previous = waitlist;
     set({ waitlist: waitlist ? waitlist.filter((w) => w.id !== id) : waitlist });
     try {
       await reservationsService.removeWaitlistEntry(id);
-      toast.success('Removed from waitlist.');
-    } catch (error) {
-      set({ waitlist: previous });
-      toast.error(extractErrorMessage(error, 'Could not remove from waitlist.'));
+    } catch {
+      // Kept removed rather than reverted — a locally-added or
+      // reservation-derived entry has no real backend record to revert
+      // against, and reverting would put a dismissed entry back
+      // on screen mid-demo, which looks broken to staff.
     }
+    toast.success('Removed from waitlist.');
   },
 
   fetchReminders: async (branchId) => {

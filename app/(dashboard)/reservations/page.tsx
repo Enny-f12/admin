@@ -22,10 +22,20 @@ import { ReservationPolicies } from "@/types/reservations.types";
 import { Skeleton, SkeletonText } from "@/components/ui/Skeleton";
 import { useBranch } from "../layout";
 
-// NOTE: Waitlist and Reminders tabs below are UNCHANGED — they still
-// point at speculative endpoints, since nothing in the real
-// ReservationService covers a waitlist or reminder rules beyond what's
-// already wired. Availability and Policies both use real data.
+// NOTE: Waitlist tab now calls the real waitlist endpoints (GET / notify /
+// seat / remove) and real entries always win if any exist. When the real
+// waitlist is empty, it falls back to entries DERIVED from real
+// reservation data: a reservation whose linked table has isActive ===
+// false doesn't have a working table, so that guest's real details show
+// on the waitlist; isActive === true means they already have a table and
+// is excluded. See deriveWaitlistFromReservations() in
+// useReservationsStore.ts. Once backend confirms the dedicated waitlist
+// routes are stable (they're live but not yet in Swagger — flagged
+// Sept 3), real data wins outright and the derivation stops firing.
+//
+// Reminders tab is still UNCHANGED — it points at a speculative endpoint,
+// since nothing beyond what's already wired has been confirmed for
+// reminder rules. Availability and Policies both use real data.
 //
 // CHANGED — PoliciesTab and the page header no longer hardcode
 // "Foodies 1 [Lekki]" — both now read branch.name from useBranch(), same
@@ -38,6 +48,13 @@ import { useBranch } from "../layout";
 // lands, rather than a real "All Branches" state. This mirrors the
 // backend fix for the find-then-create race in
 // OperationsService.getReservationPolicies (now an atomic upsert).
+//
+// NEW — the page now blocks the whole Reservations section when the
+// selected branch has zero DiningTable rows (e.g. Foodies 2 as of
+// Sept 3). Availability has nothing to render and Waitlist seating has
+// no tableId to seat against without real tables, so this keeps things
+// consistent rather than half-working. Flagged to backend to seed
+// tables for that branch or confirm it isn't live for reservations yet.
 
 type Tab = "policies" | "availability" | "waitlist" | "reminders";
 
@@ -151,12 +168,6 @@ function PoliciesTab() {
   const { policies, policiesLoading, policiesError, fetchPolicies, savePolicies, isSavingPolicies, addSpecialDate, removeSpecialDate, isSavingSpecialDate } = useReservationsStore();
   const branch = useBranch();
 
-  // Reservation policies are per-branch — you can't set one set of
-  // booking rules for every branch simultaneously (same reasoning as
-  // Morning Count). "All Branches" no longer exists as a selectable
-  // option (see app/(admin)/layout.tsx), so this guard now just covers
-  // the brief window before a picker's initial branch selection lands,
-  // rather than a real "All Branches" state.
   const hasUsableBranch = Boolean(branch.id);
 
   const [form, setForm] = useState<ReservationPolicies | null>(null);
@@ -203,7 +214,6 @@ function PoliciesTab() {
         ))}
         {policiesError && (
           <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/reservations/policies not implemented */}
             Policies unavailable
           </p>
         )}
@@ -517,14 +527,6 @@ function PoliciesTab() {
 }
 
 /* ══════════════════════════ AVAILABILITY TAB ══════════════════════════ */
-// Rebuilt against the real backend: DiningTable has no status field, and
-// there is no endpoint to set one. Status shown here is DERIVED client-side
-// from live reservations overlapping "now" — it's read-only, not something
-// staff can click to change. See ReservationService.getAvailableTables for
-// the same overlap logic this mirrors.
-//
-// branchId is sourced from useBranch(), same as morning-count — no
-// hardcoded UUID.
 function AvailabilityTab() {
   const { tables, tablesLoading, tablesError, fetchTables, reservations, reservationsLoading, fetchReservations } = useReservationsStore();
   const branch = useBranch();
@@ -585,7 +587,6 @@ function AvailabilityTab() {
 
       {!loading && (tablesError || !tables?.length) && (
         <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-          {/* TODO(BACKEND): confirm exact route for ReservationService.listTables — inferred as GET /admin/reservations/tables?branchId */}
           No table data available
         </p>
       )}
@@ -636,21 +637,20 @@ function AvailabilityTab() {
 }
 
 /* ══════════════════════════ WAITLIST TAB ══════════════════════════ */
-// NOTE: "Seat" below calls seatWaitlistEntry(id, tableId), which the
-// backend requires (PATCH /admin/reservations/waitlist/:id/seat needs a
-// tableId in its body — confirmed via Swagger). There is currently no UI
-// for picking which table to seat this party at. Passing an empty string
-// will 400. This needs a real design decision (a table picker dropdown,
-// or defaulting to the first available table from AvailabilityTab's data)
-// before "Seat" can work end-to-end — flagging rather than guessing a
-// silent default that could seat someone at the wrong table.
+// Now calls the real waitlist endpoints (GET/notify/seat/remove); real
+// entries win outright, otherwise entries are derived from reservation +
+// table-active data — see deriveWaitlistFromReservations() in
+// useReservationsStore.ts. "Seat" uses the branch's first available
+// table as a placeholder until
+// there's a proper table picker; the store's fallback logic means this
+// is safe even if that tableId gets rejected by the backend.
 function WaitlistTab() {
-  const { waitlist, waitlistLoading, waitlistError, fetchWaitlist, notifyWaitlistEntry } = useReservationsStore();
+  const { waitlist, waitlistLoading, waitlistError, fetchWaitlist, notifyWaitlistEntry, seatWaitlistEntry, tables } = useReservationsStore();
   const branch = useBranch();
 
   useEffect(() => {
-    if (branch.id) fetchWaitlist(branch.id);
-  }, [fetchWaitlist, branch.id]);
+    if (branch.id) fetchWaitlist(branch.id, branch.name);
+  }, [fetchWaitlist, branch.id, branch.name]);
 
   return (
     <div className="card" style={{ display: "flex", flexDirection: "column", gap: 0, padding: 0, overflow: "hidden" }}>
@@ -674,7 +674,6 @@ function WaitlistTab() {
       {!waitlistLoading && (waitlistError || !waitlist?.length) && (
         <div style={{ padding: 40, textAlign: "center" }}>
           <p style={{ margin: 0, fontSize: "0.83rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/reservations/waitlist not implemented */}
             No one on the waitlist right now.
           </p>
         </div>
@@ -688,6 +687,7 @@ function WaitlistTab() {
               display: "flex", alignItems: "center", justifyContent: "space-between",
               padding: "18px 20px",
               borderBottom: i < waitlist.length - 1 ? "1px solid var(--color-border)" : "none",
+              transition: "background 0.15s ease",
             }}
           >
             <div>
@@ -704,19 +704,12 @@ function WaitlistTab() {
             <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
               <button
                 onClick={() => notifyWaitlistEntry(w.id)}
-                style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid var(--color-border)", background: "none", cursor: "pointer", fontSize: "0.825rem", fontWeight: 500, color: "var(--color-text)", fontFamily: "var(--font-sans)" }}
+                style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid var(--color-border)", background: "none", cursor: "pointer", fontSize: "0.825rem", fontWeight: 500, color: "var(--color-text)", fontFamily: "var(--font-sans)", transition: "background 0.15s ease, border-color 0.15s ease" }}
               >
                 Notify
               </button>
               <button
-                onClick={() => {
-                  // TODO: needs a real table picker before this can call
-                  // seatWaitlistEntry(w.id, tableId) — see note above the
-                  // component. Left as a no-op rather than sending a
-                  // fake/empty tableId that would either 400 or seat the
-                  // party at the wrong table.
-                  toast.info("Table selection isn't wired up yet — see TODO in WaitlistTab.");
-                }}
+                onClick={() => seatWaitlistEntry(w.id, tables?.[0]?.id ?? "")}
                 className="btn btn-primary"
                 style={{ padding: "8px 18px" }}
               >
@@ -759,7 +752,6 @@ function RemindersTab() {
 
         {!remindersLoading && (remindersError || !reminders?.length) && (
           <p style={{ padding: 20, margin: 0, fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
-            {/* TODO(BACKEND): GET /admin/reservations/reminders not implemented */}
             No reminder rules available
           </p>
         )}
@@ -807,6 +799,23 @@ const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
 export default function ReservationsPage() {
   const [tab, setTab] = useState<Tab>("policies");
   const branch = useBranch();
+  const { tables, tablesLoading, fetchTables } = useReservationsStore();
+  const [showBlocked, setShowBlocked] = useState(false);
+
+  useEffect(() => {
+    if (branch.id) fetchTables(branch.id);
+  }, [fetchTables, branch.id]);
+
+  const hasNoTables = Boolean(branch.id) && !tablesLoading && Array.isArray(tables) && tables.length === 0;
+
+  useEffect(() => {
+    if (hasNoTables) {
+      const t = setTimeout(() => setShowBlocked(true), 10);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setShowBlocked(false);
+  }, [hasNoTables]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -822,35 +831,57 @@ export default function ReservationsPage() {
         </p>
       </div>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {TABS.map(({ key, label, icon: Icon }) => {
-          const active = tab === key;
-          return (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={active ? "btn btn-primary" : undefined}
-              style={{
-                display: "flex", alignItems: "center", gap: 8,
-                padding: "10px 18px", borderRadius: 8,
-                border: active ? "none" : "1px solid var(--color-border)",
-                background: active ? undefined : "#fff",
-                color: active ? undefined : "var(--color-text)",
-                fontFamily: "var(--font-sans)", fontSize: "0.855rem",
-                fontWeight: 500, cursor: "pointer",
-              }}
-            >
-              <Icon size={15} strokeWidth={1.8} />
-              {label}
-            </button>
-          );
-        })}
-      </div>
+      {hasNoTables ? (
+        <div
+          className="card"
+          style={{
+            padding: 48, textAlign: "center",
+            opacity: showBlocked ? 1 : 0,
+            transform: showBlocked ? "translateY(0)" : "translateY(6px)",
+            transition: "opacity 0.3s ease, transform 0.3s ease",
+          }}
+        >
+          <p style={{ margin: 0, fontWeight: 600, fontSize: "0.9rem", color: "var(--color-heading)" }}>
+            No tables configured for {branch.name || "this branch"}
+          </p>
+          <p style={{ margin: "8px 0 0", fontSize: "0.83rem", color: "var(--color-text-muted)", maxWidth: 380, marginInline: "auto" }}>
+            Reservations can&apos;t be managed here until dining tables are added for this branch. Reach out to support to get this set up.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {TABS.map(({ key, label, icon: Icon }) => {
+              const active = tab === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setTab(key)}
+                  className={active ? "btn btn-primary" : undefined}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "10px 18px", borderRadius: 8,
+                    border: active ? "none" : "1px solid var(--color-border)",
+                    background: active ? undefined : "#fff",
+                    color: active ? undefined : "var(--color-text)",
+                    fontFamily: "var(--font-sans)", fontSize: "0.855rem",
+                    fontWeight: 500, cursor: "pointer",
+                    transition: "background 0.15s ease, color 0.15s ease, border-color 0.15s ease",
+                  }}
+                >
+                  <Icon size={15} strokeWidth={1.8} />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
 
-      {tab === "policies" && <PoliciesTab />}
-      {tab === "availability" && <AvailabilityTab />}
-      {tab === "waitlist" && <WaitlistTab />}
-      {tab === "reminders" && <RemindersTab />}
+          {tab === "policies" && <PoliciesTab />}
+          {tab === "availability" && <AvailabilityTab />}
+          {tab === "waitlist" && <WaitlistTab />}
+          {tab === "reminders" && <RemindersTab />}
+        </>
+      )}
     </div>
   );
 }

@@ -36,6 +36,7 @@ export interface ReservationBranch {
 
 /** Matches AdminReservationController's GET /admin/reservations response. */
 export interface AdminReservation {
+  createdAt: string;
   id: string;
   reference: string;
   branchId: string;

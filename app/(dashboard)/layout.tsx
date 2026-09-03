@@ -482,7 +482,13 @@ export default function DashboardLayout({
           </button>
         </div>
 
-        {/* Nav items — filtered by permission grants */}
+        {/* Nav items — filtered by permission grants. While `user` is
+            still loading, render skeleton rows matching the exact shape
+            (row count, padding, icon/label sizing) of the real nav
+            instead of nothing — this keeps the sidebar's height and
+            layout steady across a refresh, then swaps skeleton rows for
+            real Links in-place once permissions resolve, rather than
+            popping from empty to full and shifting the page. */}
         <nav
           style={{
             flex: 1,
@@ -495,78 +501,114 @@ export default function DashboardLayout({
           }}
           className="no-scrollbar"
         >
-          {visibleSections.map((section) => (
-            <div key={section.title} style={{ marginBottom: 8 }}>
-              {!collapsed && (
-                <p
-                  style={{
-                    fontSize: "0.68rem",
-                    fontWeight: 600,
-                    letterSpacing: "0.06em",
-                    color: SB.sectionText,
-                    margin: "12px 12px 6px",
-                  }}
-                >
-                  {section.title}
-                </p>
-              )}
-              {collapsed && (
-                <div
-                  style={{
-                    height: 1,
-                    background: SB.divider,
-                    margin: "8px 8px",
-                  }}
-                />
-              )}
-              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {section.items.map(({ label, href, icon: Icon }) => {
-                  const active = pathname === href;
-                  return (
-                    <Link
-                      key={href}
-                      href={href}
-                      title={collapsed ? label : undefined}
+          {!user
+            ? NAV_SECTIONS.map((section) => (
+                <div key={section.title} style={{ marginBottom: 8 }}>
+                  {!collapsed && (
+                    <p style={{ margin: "12px 12px 6px" }}>
+                      <Skeleton width={64} height={10} radius={4} />
+                    </p>
+                  )}
+                  {collapsed && (
+                    <div
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                        padding: collapsed ? "10px 0" : "9px 12px",
-                        justifyContent: collapsed ? "center" : "flex-start",
-                        borderRadius: 8,
-                        textDecoration: "none",
-                        fontWeight: active ? 600 : 400,
-                        fontSize: "0.875rem",
-                        color: active ? SB.activeText : SB.text,
-                        background: active ? SB.activeBg : "transparent",
-                        transition: "background 0.15s, color 0.15s",
-                        whiteSpace: "nowrap",
+                        height: 1,
+                        background: SB.divider,
+                        margin: "8px 8px",
                       }}
-                      onMouseEnter={(e) => {
-                        if (!active) {
-                          (e.currentTarget as HTMLAnchorElement).style.background =
-                            SB.hoverBg;
-                          (e.currentTarget as HTMLAnchorElement).style.color =
-                            SB.textHover;
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!active) {
-                          (e.currentTarget as HTMLAnchorElement).style.background =
-                            "transparent";
-                          (e.currentTarget as HTMLAnchorElement).style.color =
-                            SB.text;
-                        }
+                    />
+                  )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    {section.items.map(({ href }) => (
+                      <div
+                        key={href}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: collapsed ? "10px 0" : "9px 12px",
+                          justifyContent: collapsed ? "center" : "flex-start",
+                        }}
+                      >
+                        <Skeleton width={18} height={18} radius={4} />
+                        {!collapsed && <Skeleton width={100} height={12} />}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            : visibleSections.map((section) => (
+                <div key={section.title} style={{ marginBottom: 8 }}>
+                  {!collapsed && (
+                    <p
+                      style={{
+                        fontSize: "0.68rem",
+                        fontWeight: 600,
+                        letterSpacing: "0.06em",
+                        color: SB.sectionText,
+                        margin: "12px 12px 6px",
                       }}
                     >
-                      <Icon size={18} strokeWidth={1.8} style={{ flexShrink: 0 }} />
-                      {!collapsed && <span>{label}</span>}
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+                      {section.title}
+                    </p>
+                  )}
+                  {collapsed && (
+                    <div
+                      style={{
+                        height: 1,
+                        background: SB.divider,
+                        margin: "8px 8px",
+                      }}
+                    />
+                  )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    {section.items.map(({ label, href, icon: Icon }) => {
+                      const active = pathname === href;
+                      return (
+                        <Link
+                          key={href}
+                          href={href}
+                          title={collapsed ? label : undefined}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: collapsed ? "10px 0" : "9px 12px",
+                            justifyContent: collapsed ? "center" : "flex-start",
+                            borderRadius: 8,
+                            textDecoration: "none",
+                            fontWeight: active ? 600 : 400,
+                            fontSize: "0.875rem",
+                            color: active ? SB.activeText : SB.text,
+                            background: active ? SB.activeBg : "transparent",
+                            transition: "background 0.15s, color 0.15s",
+                            whiteSpace: "nowrap",
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!active) {
+                              (e.currentTarget as HTMLAnchorElement).style.background =
+                                SB.hoverBg;
+                              (e.currentTarget as HTMLAnchorElement).style.color =
+                                SB.textHover;
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!active) {
+                              (e.currentTarget as HTMLAnchorElement).style.background =
+                                "transparent";
+                              (e.currentTarget as HTMLAnchorElement).style.color =
+                                SB.text;
+                            }
+                          }}
+                        >
+                          <Icon size={18} strokeWidth={1.8} style={{ flexShrink: 0 }} />
+                          {!collapsed && <span>{label}</span>}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
         </nav>
 
         {/* Bottom: logout + user */}

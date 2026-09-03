@@ -27,6 +27,7 @@ export const ROUTES = {
   dashboard: "/dashboard",
   morningCount: "/inventory/morning-count",
   stockInventory: "/inventory/stock",
+  uom: "/inventory/stock/uom",
   drinksFridge: "/inventory/drinks-fridge",
   suppliers: "/inventory/suppliers",
   foodInventory: "/inventory/food",
@@ -71,11 +72,16 @@ const UNMAPPED = "__no_backend_permission_key__";
 // nothing will ever satisfy except the SUPER_ADMIN bypass below.
 // Flagging for backend: either add reviews:view / audit:view keys, or
 // tell us which existing key should gate these.
+//
+// UOM reuses inventory:view (same key as Stock Inventory) since it's
+// presented as a sub-view of Stock Inventory. Swap this if backend mints
+// a dedicated uom:view key later.
 // ─────────────────────────────────────────────────────────────
 export const ROUTE_PERMISSIONS: Record<Route, string[]> = {
   [ROUTES.dashboard]: [],
   [ROUTES.morningCount]: ["inventory:stock_count", "inventory:add_stock"],
   [ROUTES.stockInventory]: ["inventory:view"],
+  [ROUTES.uom]: ["inventory:view"],
   [ROUTES.drinksFridge]: ["inventory:manage_drinks"],
   [ROUTES.suppliers]: ["inventory:manage_suppliers"],
   [ROUTES.foodInventory]: ["inventory:manage_food"],
@@ -114,12 +120,72 @@ const ROLE_RESTRICTED_ROUTES: Partial<Record<Route, string[]>> = {
   [ROUTES.dashboard]: ["SUPER_ADMIN", "MANAGER"],
 };
 
+// ─────────────────────────────────────────────────────────────
+// ROLE_BLOCKED_ROUTES — roles explicitly denied from a route regardless
+// of any permission grants they might otherwise carry. Checked before
+// ROUTE_PERMISSIONS (and after the SUPER_ADMIN bypass, ROLE_ONLY_ROUTES,
+// and ROLE_RESTRICTED_ROUTES above). Use this when a role should never
+// see a route even if someone accidentally checks the matching
+// permission box for them in the staff modal.
+//
+// - Cashier is blocked from Walk-in/Phone, Stock Inventory, and UOM.
+// - Manager is blocked from Walk-in/Phone, Payments, Accounting, and
+//   Analytics.
+// - Cashier, Kitchen Staff, Order Taker, Delivery Coordinator, and
+//   Accountant are blocked from Menu and Customers. (Accountant's entry
+//   here is now redundant given ROLE_ONLY_ROUTES below, which locks them
+//   out of everything except Accounting anyway — left in place since it
+//   doesn't hurt and documents intent if ROLE_ONLY_ROUTES for ACCOUNTANT
+//   is ever relaxed.)
+// All per product decision — operationally out of scope for these
+// roles even though nothing stops their `permissions` array from
+// carrying the matching key.
+// ─────────────────────────────────────────────────────────────
+const ROLE_BLOCKED_ROUTES: Partial<Record<Route, string[]>> = {
+  [ROUTES.walkIn]: ["CASHIER", "MANAGER"],
+  [ROUTES.stockInventory]: ["CASHIER"],
+  [ROUTES.uom]: ["CASHIER"],
+  [ROUTES.payments]: ["MANAGER"],
+  [ROUTES.accounting]: ["MANAGER"],
+  [ROUTES.analytics]: ["MANAGER"],
+  [ROUTES.menu]: [
+    "CASHIER",
+    "KITCHEN_STAFF",
+    "ORDER_TAKER",
+    "DELIVERY_COORDINATOR",
+    "ACCOUNTANT",
+  ],
+  [ROUTES.customers]: [
+    "CASHIER",
+    "KITCHEN_STAFF",
+    "ORDER_TAKER",
+    "DELIVERY_COORDINATOR",
+    "ACCOUNTANT",
+  ],
+};
+
+// ─────────────────────────────────────────────────────────────
+// ROLE_ONLY_ROUTES — when a role appears here, it can ONLY reach the
+// listed routes, full stop. This overrides ROLE_BLOCKED_ROUTES,
+// ROLE_RESTRICTED_ROUTES, and ROUTE_PERMISSIONS entirely for that role —
+// checked right after the SUPER_ADMIN bypass in hasAccess(). Use this
+// for roles that should be locked to a single area of the app
+// regardless of whatever permission grants happen to be checked on
+// their staff record.
+//
+// Accountant is locked to Accounting only, per product decision.
+// ─────────────────────────────────────────────────────────────
+const ROLE_ONLY_ROUTES: Partial<Record<Role, Route[]>> = {
+  ACCOUNTANT: [ROUTES.accounting],
+};
+
 const ALL_ROUTES = Object.values(ROUTES) as Route[];
 
 /**
  * The shape route-gating actually needs from a staff member: their two
  * granted-permission arrays plus their role (role drives the
- * SUPER_ADMIN full-access bypass and any ROLE_RESTRICTED_ROUTES checks;
+ * SUPER_ADMIN full-access bypass, ROLE_ONLY_ROUTES lockdown,
+ * ROLE_RESTRICTED_ROUTES checks, and ROLE_BLOCKED_ROUTES checks;
  * everything else is gated purely on live permission grants, which is
  * what makes this dynamic — editing someone's checkboxes in the staff
  * modal changes their nav immediately, no redeploy needed).
@@ -132,6 +198,12 @@ export interface AccessSubject {
 
 export function hasAccess(subject: AccessSubject, route: Route): boolean {
   if (subject.role === "SUPER_ADMIN") return true;
+
+  const onlyRoutes = ROLE_ONLY_ROUTES[subject.role as Role];
+  if (onlyRoutes) return onlyRoutes.includes(route);
+
+  const roleBlocklist = ROLE_BLOCKED_ROUTES[route];
+  if (roleBlocklist?.includes(subject.role)) return false;
 
   const roleAllowlist = ROLE_RESTRICTED_ROUTES[route];
   if (roleAllowlist) return roleAllowlist.includes(subject.role);

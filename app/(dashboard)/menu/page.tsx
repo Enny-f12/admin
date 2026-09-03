@@ -74,6 +74,15 @@ export default function MenuPage() {
   const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryDesc, setNewCategoryDesc] = useState("");
+  // Covers the whole Save/Add flow, including the image-upload step that
+  // runs before updateItem is called on edit -- isCreating/isUpdating from
+  // the store only flip on for their own request, so relying on those alone
+  // left the button looking idle while the image upload was in flight.
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  // Per-row delete tracking -- the store's isDeleting flag is shared across
+  // every row, so every delete button would show as loading at once. This
+  // narrows the spinner to the specific row actually being deleted.
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ── Live data ──
@@ -163,11 +172,12 @@ export default function MenuPage() {
   };
 
   const handleDelete = async (item: MenuItem) => {
-    // NOTE: isDeleting is a single shared flag across all rows — every
-    // delete button on the page disables while any delete is in flight.
-    // Fine at current table sizes; switch to a `deletingId` field on the
-    // store if you need per-row granularity later.
-    await deleteItem(item.id);
+    setDeletingId(item.id);
+    try {
+      await deleteItem(item.id);
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const handleSubmit = async () => {
@@ -181,41 +191,46 @@ export default function MenuPage() {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    if (editItem) {
-      // updateItem's schema has no image field — new images go through the
-      // images endpoint separately. Doing it before the metadata update
-      // means we haven't committed text changes if the image upload fails.
-      if (newFiles.length > 0) {
-        const imageOk = await updateItemImage(editItem.id, newFiles);
-        if (!imageOk) return;
-      }
-      const success = await updateItem(editItem.id, {
-        name: form.name,
-        description: form.description || undefined,
-        basePrice: Number(form.price),
-        categoryId: form.categoryId,
-        dietaryTags,
-      });
-      if (success) setModalOpen(false);
-    } else {
-      if (!vendorId) {
-        toast.error("No vendor found on this account — try logging in again");
-        return;
-      }
-      const success = await createItem(
-        {
-          vendorId,
-          categoryId: form.categoryId,
+    setIsSubmitting(true);
+    try {
+      if (editItem) {
+        // updateItem's schema has no image field — new images go through the
+        // images endpoint separately. Doing it before the metadata update
+        // means we haven't committed text changes if the image upload fails.
+        if (newFiles.length > 0) {
+          const imageOk = await updateItemImage(editItem.id, newFiles);
+          if (!imageOk) return;
+        }
+        const success = await updateItem(editItem.id, {
           name: form.name,
-          slug: slugify(form.name),
           description: form.description || undefined,
           basePrice: Number(form.price),
+          categoryId: form.categoryId,
           dietaryTags,
-          isAvailable: true,
-        },
-        newFiles
-      );
-      if (success) setModalOpen(false);
+        });
+        if (success) setModalOpen(false);
+      } else {
+        if (!vendorId) {
+          toast.error("No vendor found on this account — try logging in again");
+          return;
+        }
+        const success = await createItem(
+          {
+            vendorId,
+            categoryId: form.categoryId,
+            name: form.name,
+            slug: slugify(form.name),
+            description: form.description || undefined,
+            basePrice: Number(form.price),
+            dietaryTags,
+            isAvailable: true,
+          },
+          newFiles
+        );
+        if (success) setModalOpen(false);
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -340,7 +355,7 @@ export default function MenuPage() {
     }
   };
 
-  const isSaving = isCreating || isUpdating;
+  const isSaving = isSubmitting || isCreating || isUpdating;
 
   return (
     <>
@@ -503,7 +518,9 @@ export default function MenuPage() {
                 )}
                 {!itemsLoading &&
                   !itemsError &&
-                  paginated.map((dish) => (
+                  paginated.map((dish) => {
+                    const isRowDeleting = deletingId === dish.id;
+                    return (
                     <tr key={dish.id}>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -549,7 +566,12 @@ export default function MenuPage() {
                           <button
                             aria-label={`Edit ${dish.name}`}
                             onClick={() => openEdit(dish)}
-                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6 }}
+                            disabled={isRowDeleting}
+                            style={{
+                              background: "none", border: "none", cursor: isRowDeleting ? "default" : "pointer",
+                              color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6,
+                              opacity: isRowDeleting ? 0.4 : 1, transition: "opacity 0.15s ease",
+                            }}
                           >
                             <SquarePen size={15} strokeWidth={1.8} />
                           </button>
@@ -557,14 +579,24 @@ export default function MenuPage() {
                             aria-label={`Delete ${dish.name}`}
                             onClick={() => handleDelete(dish)}
                             disabled={isDeleting}
-                            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6 }}
+                            style={{
+                              background: "none", border: "none",
+                              cursor: isDeleting ? "default" : "pointer",
+                              color: "var(--color-text-muted)", display: "flex", padding: 4, borderRadius: 6,
+                              opacity: isDeleting && !isRowDeleting ? 0.4 : 1, transition: "opacity 0.15s ease",
+                            }}
                           >
-                            <Trash2 size={15} strokeWidth={1.8} />
+                            {isRowDeleting ? (
+                              <Loader2 size={15} strokeWidth={1.8} style={{ animation: "spin 0.7s linear infinite" }} />
+                            ) : (
+                              <Trash2 size={15} strokeWidth={1.8} />
+                            )}
                           </button>
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
               </tbody>
             </table>
           </div>
