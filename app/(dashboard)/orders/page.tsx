@@ -167,6 +167,15 @@ export default function OrdersPage() {
   const { orders, ordersLoading: isLoading, ordersError: isError, fetchOrders } = useOrderStore();
 
   useEffect(() => {
+    // Guard against firing before `branch` has resolved a real id (e.g.
+    // while branches are still being fetched on mount). Without this,
+    // an early call goes out as `orders?branchId=` (empty/undefined),
+    // which the backend rejects with a 400 -- visible in the network
+    // trace as a failed request immediately followed by a working one
+    // once branch.id becomes available. This effect re-runs automatically
+    // once branch.id changes, since it's already a dependency below.
+    if (!branch.id) return;
+
     fetchOrders({
       ...(statusFilter !== "All Status" ? { status: statusFilter } : {}),
       branchId: branch.id,

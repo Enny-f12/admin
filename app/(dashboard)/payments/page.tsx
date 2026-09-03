@@ -5,19 +5,17 @@ import {
   CalendarDays,
   DollarSign,
   CreditCard,
-  FileText,
   AlertTriangle,
   Package,
-  Plus,
   X,
   Check,
 } from "lucide-react";
 import { useBranch } from "../layout";
 import { usePaymentsAdminStore } from "@/store/usePaymentStore";
-import { PaymentMethod, ManualSaleLineItem } from "@/types/payment-admin.types";
+import { PaymentMethod } from "@/types/payment-admin.types";
 import { SkeletonText } from "@/components/ui/Skeleton";
 
-type Tab = "payments" | "pos" | "manual";
+type Tab = "payments" | "pos" /* | "manual" */;
 
 function formatMoney(value: string | number | null | undefined) {
   if (value === null || value === undefined) return "–";
@@ -57,12 +55,16 @@ export default function PaymentsPage() {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
         <TabButton active={tab === "payments"} onClick={() => setTab("payments")} icon={<DollarSign size={16} strokeWidth={1.8} />} label="Payments" />
         <TabButton active={tab === "pos"} onClick={() => setTab("pos")} icon={<CreditCard size={16} strokeWidth={1.8} />} label="POS Integration" />
+        {/* Manual Sale Entry tab temporarily disabled
         <TabButton active={tab === "manual"} onClick={() => setTab("manual")} icon={<FileText size={16} strokeWidth={1.8} />} label="Manual Sale Entry" />
+        */}
       </div>
 
       {tab === "payments" && <RecordPaymentsView branchId={branch.id} />}
       {tab === "pos" && <POSIntegrationView branchId={branch.id} />}
+      {/* Manual Sale Entry view temporarily disabled
       {tab === "manual" && <ManualSaleEntryView branchId={branch.id} />}
+      */}
     </div>
   );
 }
@@ -411,6 +413,7 @@ function POSIntegrationView({ branchId }: { branchId: string }) {
 }
 
 /* ══════════════════════════ Manual Sale Entry ══════════════════════════ */
+/*
 function ManualSaleEntryView({ branchId }: { branchId: string }) {
   const { createManualSale, isCreatingSale, lastSaleId, emailReceipt, isEmailingReceipt } = usePaymentsAdminStore();
 
@@ -588,3 +591,4 @@ function ManualSaleEntryView({ branchId }: { branchId: string }) {
     </>
   );
 }
+*/

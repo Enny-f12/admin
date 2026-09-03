@@ -195,8 +195,9 @@ function CreateOrderView({ branchId }: { branchId: string }) {
 
   const [orderType, setOrderType] = useState<OrderType>("DINE_IN");
   const [orderTypeOpen, setOrderTypeOpen] = useState(false);
-  const [paymentChoice, setPaymentChoice] = useState<"" | "PENDING" | "PAID_CASH" | "PAID_TRANSFER">("");
-  const [paymentOpen, setPaymentOpen] = useState(false);
+  // Payment status is fixed to Pending for manual/walk-in orders — no
+  // dropdown, nothing for the operator to pick. Cash/transfer
+  // reconciliation happens elsewhere in the flow.
   const [notes, setNotes] = useState("");
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -209,7 +210,7 @@ function CreateOrderView({ branchId }: { branchId: string }) {
   const subtotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const tax = Math.round(subtotal * 0.075);
   const total = subtotal + tax;
-  const canCreate = !!customer && cart.length > 0 && !!paymentChoice;
+  const canCreate = !!customer && cart.length > 0;
 
   // Increments an item's quantity in the cart (adds it at qty 1 if it
   // isn't there yet). No longer closes the Add Item modal -- the
@@ -245,25 +246,18 @@ function CreateOrderView({ branchId }: { branchId: string }) {
   const removeItem = (id: string) => setCart((prev) => prev.filter((c) => c.id !== id));
 
   const reset = () => {
-    setCustomer(null); setCart([]); setOrderType("DINE_IN"); setPaymentChoice(""); setNotes("");
-  };
-
-  const paymentPayload = (): { paymentStatus: "PENDING" | "PAID"; paymentMethod: "CASH" | "BANK_TRANSFER" | null } => {
-    if (paymentChoice === "PAID_CASH") return { paymentStatus: "PAID", paymentMethod: "CASH" };
-    if (paymentChoice === "PAID_TRANSFER") return { paymentStatus: "PAID", paymentMethod: "BANK_TRANSFER" };
-    return { paymentStatus: "PENDING", paymentMethod: null };
+    setCustomer(null); setCart([]); setOrderType("DINE_IN"); setNotes("");
   };
 
   const submit = async (isDraft: boolean) => {
     if (!canCreate || !customer) return;
-    const { paymentStatus, paymentMethod } = paymentPayload();
     const result = await createOrder({
       customerId: customer.id,
       newCustomer: null,
       items: cart.map((c) => ({ menuItemId: c.id, quantity: c.qty })),
       orderType,
-      paymentStatus,
-      paymentMethod,
+      paymentStatus: "PENDING",
+      paymentMethod: null,
       notes: notes || null,
       isDraft,
     }, branchId);
@@ -432,15 +426,21 @@ function CreateOrderView({ branchId }: { branchId: string }) {
                 />
               </Field>
               <Field label="Payment Status">
-                <Dropdown
-                  value={paymentChoice}
-                  options={["PENDING", "PAID_CASH", "PAID_TRANSFER"]}
-                  open={paymentOpen}
-                  setOpen={setPaymentOpen}
-                  onChange={(v) => setPaymentChoice(v as typeof paymentChoice)}
-                  placeholder="Select...."
-                  labelFor={(v) => (v === "PENDING" ? "Pending" : v === "PAID_CASH" ? "Paid (Cash)" : "Paid (Transfer)")}
-                />
+                <div
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8, width: "100%",
+                    padding: "10px 14px", borderRadius: 8, border: "1px solid var(--color-border)",
+                    background: "var(--color-bg-soft)", fontSize: "0.85rem", fontWeight: 600,
+                    color: "var(--color-text-muted)",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 7, height: 7, borderRadius: "50%", background: "#a07a00", flexShrink: 0,
+                    }}
+                  />
+                  Pending
+                </div>
               </Field>
             </div>
             <Field label="Notes (Optional)">
@@ -980,7 +980,13 @@ function AddItemModal({
         })}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18, paddingTop: 16, borderTop: "1px solid var(--color-border)" }}>
+      <div
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginTop: 18, paddingTop: 16, paddingBottom: 4, borderTop: "1px solid var(--color-border)",
+          position: "sticky", bottom: -24, background: "#fff", zIndex: 5,
+        }}
+      >
         <span style={{ fontSize: "0.85rem", color: "var(--color-text-muted)" }}>
           {cartCount > 0 ? `${cartCount} ${cartCount === 1 ? "item" : "items"} selected` : "No items selected yet"}
         </span>
